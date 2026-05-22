@@ -1,0 +1,20 @@
+# SelahOS - Private files (never commit these)
+selahbridge-license.py
+selahbridge-keygen
+*/selahbridge-license.py
+*/selahbridge-keygen
+*.secret
+/airootfs/etc/selahbridge/
+
+# Build artifacts
+selahos-build/
+selahos-iso-output/
+*.iso
+*.tar.gz
+*.img
+*.img.gz
+
+# System
+.DS_Store
+__pycache__/
+*.pyc
