@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Recovery
+Comment=Diagnose and recover failed installations
+Exec=konsole -e sudo selah-recover
+Icon=system-run
+Terminal=false
+Categories=System;

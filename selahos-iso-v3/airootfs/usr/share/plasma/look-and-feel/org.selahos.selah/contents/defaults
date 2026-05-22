@@ -1,0 +1,23 @@
+[kdeglobals]
+ColorScheme=Selah
+widgetStyle=kvantum
+
+[kdeglobals][KDE]
+LookAndFeelPackage=org.selahos.selah
+
+[plasmarc]
+Theme=selah
+
+[kscreenlockerrc]
+Greeter\Theme=org.kde.breeze.desktop
+
+[ksplashrc]
+Theme=None
+Engine=none
+
+[kwinrc][org.kde.kdecoration2]
+library=org.kde.breeze
+theme=Breeze Dark
+
+[Wallpaper]
+Image=

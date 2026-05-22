@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# selahos-installer launcher
+# Ensures root and display environment are correct before launching
+
+if [ "$EUID" -ne 0 ]; then
+    # Re-launch with pkexec (graphical sudo)
+    if command -v pkexec >/dev/null 2>&1; then
+        exec pkexec env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" \
+            XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+            WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
+            /usr/local/bin/selahos-installer
+    else
+        exec sudo -E /usr/local/bin/selahos-installer
+    fi
+fi
+
+exec /usr/local/bin/selahos-installer

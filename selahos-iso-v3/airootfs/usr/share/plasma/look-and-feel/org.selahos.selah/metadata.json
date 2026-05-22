@@ -1,0 +1,17 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "dane@selahos.com",
+                "Name": "Selah Technologies LLC"
+            }
+        ],
+        "Description": "Selah — calm, dark, warm. The SelahOS default theme.",
+        "Id": "org.selahos.selah",
+        "License": "GPL-2.0-or-later",
+        "Name": "Selah",
+        "Version": "1.0",
+        "Website": "https://selahos.com"
+    },
+    "KPackageStructure": "Plasma/LookAndFeel"
+}

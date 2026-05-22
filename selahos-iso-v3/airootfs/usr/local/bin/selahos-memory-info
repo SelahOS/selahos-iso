@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# selahos-memory-info — quick memory and zram status report
+# Copyright (C) 2026 Selah Technologies LLC
+
+GOLD='\033[38;2;214;168;90m'
+TEAL='\033[38;2;142;195;184m'
+PARCH='\033[38;2;241;232;216m'
+RESET='\033[0m'
+
+echo -e "${GOLD}SelahOS Memory Status${RESET}"
+echo ""
+echo -e "${PARCH}Physical memory:${RESET}"
+free -h
+echo ""
+echo -e "${PARCH}Swap and zram:${RESET}"
+swapon --show
+echo ""
+echo -e "${PARCH}Tuning:${RESET}"
+echo "  swappiness:        $(sysctl -n vm.swappiness)"
+echo "  vfs_cache_pressure: $(sysctl -n vm.vfs_cache_pressure)"
+echo "  dirty_ratio:        $(sysctl -n vm.dirty_ratio)"
+echo ""
+echo -e "${TEAL}Tip: 'sudo selah-update' checks for system updates.${RESET}"

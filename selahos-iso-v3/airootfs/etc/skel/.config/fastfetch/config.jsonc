@@ -1,0 +1,106 @@
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "source": "~/.config/fastfetch/selah-logo.txt",
+        "type": "file",
+        "color": {
+            "1": "yellow"
+        },
+        "padding": {
+            "top": 1,
+            "left": 2
+        }
+    },
+    "display": {
+        "separator": "  ",
+        "color": "yellow"
+    },
+    "modules": [
+        {
+            "type": "custom",
+            "format": "SelahOS™ v1.0-beta  — Pause. Reflect. Create."
+        },
+        "separator",
+        {
+            "type": "os",
+            "key": "OS",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "kernel",
+            "key": "Kernel",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "chassis",
+            "key": "Machine",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "uptime",
+            "key": "Uptime",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "packages",
+            "key": "Packages",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "shell",
+            "key": "Shell",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "de",
+            "key": "Desktop",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "wm",
+            "key": "Window Manager",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "terminal",
+            "key": "Terminal",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "cpu",
+            "key": "CPU",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "gpu",
+            "key": "GPU",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "memory",
+            "key": "Memory",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "disk",
+            "key": "Disk",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "localip",
+            "key": "Network",
+            "keyColor": "yellow"
+        },
+        "separator",
+        {
+            "type": "custom",
+            "format": "SelahBridge™  Creative compatibility layer active",
+            "keyColor": "yellow"
+        },
+        {
+            "type": "custom",
+            "format": "Muse  Creative collaborator — coming soon",
+            "keyColor": "yellow"
+        }
+    ]
+}

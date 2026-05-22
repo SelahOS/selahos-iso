@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# ============================================================
+# selahos-welcome — Live Boot Welcome Dialog
+#
+# Shown when SelahOS boots from USB without being installed.
+# Offers three paths: Try, Install, Read documentation.
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+set -e
+
+# Only show on live ISO (not on installed system)
+if ! grep -q "archisobasedir" /proc/cmdline 2>/dev/null; then
+    exit 0
+fi
+
+# Wait for desktop to settle
+sleep 4
+
+# Show the welcome dialog
+CHOICE=$(kdialog \
+    --title "Welcome to SelahOS v1.0-beta" \
+    --radiolist "What would you like to do?" \
+    "try"     "Try SelahOS — explore the desktop"  on \
+    "install" "Install SelahOS to this computer"   off \
+    "docs"    "Read SelahOS documentation"         off 2>/dev/null) || exit 0
+
+case "$CHOICE" in
+    try)
+        kdialog \
+            --title "Exploring SelahOS" \
+            --passivepopup "Welcome. Open Konsole, browse the apps menu, and try anything. When you're ready to install, double-click 'Install SelahOS' on the desktop." 12
+        ;;
+    install)
+        exec /usr/local/bin/selahos-calamares-launcher
+        ;;
+    docs)
+        xdg-open "/usr/share/selahos/docs/firstrun-notice.html" &
+        ;;
+esac

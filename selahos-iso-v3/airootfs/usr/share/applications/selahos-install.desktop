@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Install SelahOS
+GenericName=SelahOS Installer
+Comment=Install SelahOS to your computer
+Exec=/usr/local/bin/selahos-installer-launcher
+Icon=system-software-install
+Terminal=false
+StartupNotify=true
+Categories=Qt;System;
+Keywords=installer;install;selahos;

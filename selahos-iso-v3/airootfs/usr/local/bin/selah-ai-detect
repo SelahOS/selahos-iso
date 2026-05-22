@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-ai-detect — SelahOS AI Companion Hardware Detection
+#
+# Detects system hardware and recommends appropriate
+# AI companion tier (Lite / Local / Studio).
+#
+# Usage:
+#   selah-ai-detect           — print recommendation
+#   selah-ai-detect --json    — output as JSON
+#   selah-ai-detect --tier    — print tier name only
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+set -e
+
+GOLD='\033[38;2;214;168;90m'
+TEAL='\033[38;2;142;195;184m'
+PARCH='\033[38;2;241;232;216m'
+RESET='\033[0m'
+
+CONFIG="/opt/selah/ai/config/tiers.conf"
+[ -f "$CONFIG" ] && source "$CONFIG"
+
+# Detect RAM
+RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+RAM_GB=$(( RAM_KB / 1024 / 1024 ))
+
+# Detect GPU
+GPU_NAME=$(lspci 2>/dev/null | grep -i "vga\|3d\|display" | head -1 | sed 's/.*: //' || echo "unknown")
+
+# Detect VRAM (best effort)
+VRAM_MB=0
+if command -v nvidia-smi >/dev/null 2>&1; then
+    VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 || echo "0")
+elif [ -d /sys/class/drm ]; then
+    VRAM_MB=$(cat /sys/class/drm/card*/device/mem_info_vram_total 2>/dev/null | head -1 || echo "0")
+    VRAM_MB=$(( VRAM_MB / 1024 / 1024 ))
+fi
+VRAM_GB=$(( VRAM_MB / 1024 ))
+
+# Detect storage
+STORAGE_AVAIL_GB=$(df -BG /opt/selah 2>/dev/null | awk 'NR==2 {gsub("G","",$4); print $4}' || echo "0")
+
+# Recommend tier
+TIER="none"
+TIER_MODEL="none"
+TIER_REASON="Insufficient resources for local AI"
+
+if [ "$RAM_GB" -ge "${AI_STUDIO_MIN_RAM_GB:-16}" ] && [ "$VRAM_GB" -ge "${AI_STUDIO_MIN_VRAM_GB:-4}" ]; then
+    TIER="studio"
+    TIER_MODEL="${AI_STUDIO_MODEL:-mistral:7b}"
+    TIER_REASON="High-RAM system with GPU — GPU-accelerated AI available"
+elif [ "$RAM_GB" -ge "${AI_LOCAL_MIN_RAM_GB:-8}" ]; then
+    TIER="local"
+    TIER_MODEL="${AI_LOCAL_MODEL:-mistral:7b}"
+    TIER_REASON="Standard creator hardware — full local AI available"
+elif [ "$RAM_GB" -ge "${AI_LITE_MIN_RAM_GB:-4}" ]; then
+    TIER="lite"
+    TIER_MODEL="${AI_LITE_MODEL:-tinyllama:1.1b}"
+    TIER_REASON="Limited RAM — lightweight AI model recommended"
+fi
+
+# Handle output format
+case "${1:-}" in
+    --json)
+        cat <<EOF
+{
+  "ram_gb": $RAM_GB,
+  "vram_gb": $VRAM_GB,
+  "gpu": "$GPU_NAME",
+  "storage_avail_gb": $STORAGE_AVAIL_GB,
+  "recommended_tier": "$TIER",
+  "recommended_model": "$TIER_MODEL",
+  "reason": "$TIER_REASON"
+}
+EOF
+        ;;
+    --tier)
+        echo "$TIER"
+        ;;
+    *)
+        echo ""
+        echo -e "${GOLD}SelahOS AI Companion Hardware Check${RESET}"
+        echo ""
+        echo -e "${PARCH}System:${RESET}"
+        echo "  RAM:     ${RAM_GB} GB"
+        echo "  GPU:     $GPU_NAME"
+        echo "  VRAM:    ${VRAM_GB} GB"
+        echo "  Storage: ${STORAGE_AVAIL_GB} GB available"
+        echo ""
+        if [ "$TIER" = "none" ]; then
+            echo -e "${GOLD}⚠ AI Companion not recommended for this hardware${RESET}"
+            echo "  Minimum: 4 GB RAM required"
+        else
+            echo -e "${TEAL}Recommended tier: $TIER${RESET}"
+            echo "  Model:  $TIER_MODEL"
+            echo "  Reason: $TIER_REASON"
+            echo ""
+            echo "  Install with: selah-ai-setup --tier $TIER"
+        fi
+        echo ""
+        ;;
+esac

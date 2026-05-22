@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Welcome to SelahOS — First Run Notice</title>
+<style>
+body {
+    font-family: 'Inter', sans-serif;
+    background: #0B0F1A;
+    color: #F1E8D8;
+    line-height: 1.6;
+    padding: 30px;
+    max-width: 800px;
+    margin: 0 auto;
+}
+h1 { color: #D6A85A; font-family: 'Manrope', sans-serif; font-weight: 300; font-size: 28px; }
+h2 { color: #D6A85A; font-family: 'Manrope', sans-serif; font-weight: 400; margin-top: 30px; border-bottom: 1px solid #D6A85A; padding-bottom: 6px; }
+h3 { color: #E6C27A; margin-top: 20px; }
+.tagline { color: #D6A85A; font-style: italic; margin-bottom: 30px; font-size: 16px; }
+.works { color: #8EC3B8; }
+.warn { color: #E6C27A; }
+.limit { color: #B97A6F; }
+table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+th { background: #1A2030; color: #D6A85A; padding: 8px; text-align: left; font-weight: 500; }
+td { border-bottom: 1px solid #2A3042; padding: 8px; vertical-align: top; }
+code { background: #1A2030; color: #E6C27A; padding: 2px 6px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; }
+.workaround { background: #1A2030; padding: 12px; border-left: 3px solid #D6A85A; margin: 10px 0; }
+ul { padding-left: 20px; }
+li { margin-bottom: 6px; }
+.footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #D6A85A; color: #9A8D7B; font-size: 13px; }
+a { color: #D6A85A; }
+</style>
+</head>
+<body>
+
+<h1>Welcome to SelahOS v1.0-beta</h1>
+<div class="tagline">Pause. Reflect. Create.</div>
+
+<p>You're running an early beta of SelahOS — a creator-first Linux operating system from
+<strong>Selah Technologies LLC</strong>. Thank you for being one of our first testers.
+This notice documents what works today, what doesn't, and how to work around current limitations.</p>
+
+<p><strong>This dialog appears once.</strong> After you click "Yes" at the end, it won't appear again.
+You can revisit this content anytime at <code>/usr/share/selahos/docs/firstrun-notice.html</code>
+or via the SelahOS documentation menu.</p>
+
+<h2>What Works Today</h2>
+
+<h3 class="works">✓ Audio Production (SelahBridge — Wine-based)</h3>
+<table>
+<tr><th>Software</th><th>Status</th><th>Notes</th></tr>
+<tr><td>Akai MPC 2 (Windows)</td><td class="works">Full</td><td>Pads, keys, sample loading, sequencing, save/reload</td></tr>
+<tr><td>FL Studio (Windows)</td><td class="works">Full</td><td>Pads + keys via MPK Mini 4</td></tr>
+<tr><td>Reaper (Windows)</td><td class="works">Full</td><td>Multi-track, virtual instruments, MIDI</td></tr>
+<tr><td>Reaper (Linux native)</td><td class="works">Full</td><td>Recommended for low-latency work</td></tr>
+<tr><td>AIR Velvet, Mini Grand, Hybrid</td><td class="works">Full</td><td>Standalones with MPK Mini 4 control</td></tr>
+<tr><td>iLok License Manager</td><td class="works">Full</td><td>Cloud activation, license enumeration</td></tr>
+<tr><td>inMusic Software Center</td><td class="warn">⚠ Workaround</td><td>Use the .lnk shortcut, not the .exe directly</td></tr>
+</table>
+
+<h3 class="works">✓ Native Linux Creator Tools</h3>
+<ul>
+<li><strong>Ardour</strong> — full-featured DAW</li>
+<li><strong>Audacity</strong> — audio editor</li>
+<li><strong>OBS Studio</strong> — recording and streaming</li>
+<li><strong>GIMP, Krita, Inkscape</strong> — image and design</li>
+<li><strong>Kdenlive, Shotcut</strong> — video editing</li>
+<li><strong>Blender</strong> — 3D and animation</li>
+<li><strong>Strawberry</strong> — music library</li>
+<li><strong>VS Code</strong> — code editor</li>
+</ul>
+
+<h3 class="works">✓ Hardware Compatibility</h3>
+<table>
+<tr><th>Hardware</th><th>Status</th><th>Notes</th></tr>
+<tr><td>Akai MPK Mini 4</td><td class="works">Full</td><td>Pads + keys verified across all DAWs</td></tr>
+<tr><td>Akai MPC Studio 2</td><td class="warn">⚠ Partial</td><td>Pads function as MIDI controller. Firmware updater not supported in Wine.</td></tr>
+<tr><td>USB MIDI controllers (class-compliant)</td><td class="works">Full</td><td>Works system-wide and in Wine apps</td></tr>
+<tr><td>USB audio interfaces (class-compliant)</td><td class="works">Full</td><td>Including ZealSound USB microphone</td></tr>
+<tr><td>Thunderbolt 3 docks (CalDigit, etc.)</td><td class="works">Full</td><td>Run <code>boltctl</code> to authorize on first connect</td></tr>
+<tr><td>FireWire devices</td><td class="works">Full</td><td>Drivers installed by default</td></tr>
+</table>
+
+<h3 class="works">✓ Apple Hardware Support (2017 MacBook Pro tested)</h3>
+<ul>
+<li>Smart fan curves via <code>mbpfan</code> — automatic, no configuration needed</li>
+<li><code>--removable</code> GRUB flag automatically applied — survives NVRAM resets</li>
+<li>rEFInd as primary bootloader — better Mac firmware compatibility than GRUB alone</li>
+<li>Power management tuned for Mac thermals</li>
+</ul>
+
+<h2>Known Limitations and Workarounds</h2>
+
+<h3 class="limit">⚠ Ableton Live 12 Lite (Windows)</h3>
+<p><strong>Status:</strong> Crashes on launch with <code>onnxruntime_abl.dll</code> not found error.</p>
+<p><strong>Why:</strong> Ableton's AI runtime (ONNX) is not currently functional in Wine.</p>
+<div class="workaround">
+<strong>Workaround:</strong> Reinstall Ableton 12 Lite from your original installer. The DLL must be present even if disabled.
+Alternatively, use <strong>Reaper</strong> or <strong>FL Studio</strong> (both fully working) for V1 Beta.
+We're tracking a proper fix for V1.1.
+</div>
+
+<h3 class="limit">⚠ Electron-based AI Desktop Apps</h3>
+<p><strong>Affected:</strong> ChatGPT Desktop (Windows), Claude Desktop (Windows), and similar Electron apps using newer Node.js.</p>
+<p><strong>Status:</strong> Fail to launch with <code>EBADF</code> stderr error.</p>
+<div class="workaround">
+<strong>Workaround:</strong> Use the web versions in Firefox at <a href="https://chat.openai.com">chat.openai.com</a>
+and <a href="https://claude.ai">claude.ai</a>. Web versions provide full functionality.
+</div>
+
+<h3 class="limit">⚠ Apple Internal WiFi (Broadcom BCM4350)</h3>
+<p><strong>Status:</strong> Internal WiFi on 2017 MacBook Pro and similar Macs does not function with linux-zen kernel.</p>
+<div class="workaround">
+<strong>Workaround:</strong> Use a class-compliant USB WiFi adapter ($15-25). Examples:
+TP-Link Archer T2U Plus, Alfa AWUS036ACS, or any USB WiFi marketed as "Linux compatible."
+This is a kernel limitation, not a SelahOS bug.
+</div>
+
+<h3 class="limit">⚠ Apple Internal Audio Codec (CS8409)</h3>
+<p><strong>Status:</strong> Internal speakers and microphone on certain Mac models not functional.</p>
+<div class="workaround">
+<strong>Workaround:</strong> Use a USB audio interface or USB microphone.
+Headphone jack works on most affected models.
+Native driver work tracked for V1.1.
+</div>
+
+<h3 class="limit">⚠ Apple FaceTime HD Camera</h3>
+<p><strong>Status:</strong> Internal camera not detected on most Mac models out of the box.</p>
+<div class="workaround">
+<strong>Workaround:</strong> Use a USB webcam, or install the community <code>facetimehd</code>
+firmware (advanced — may not work on all kernels). Tracked for V1.1.
+</div>
+
+<h2>System Care</h2>
+
+<h3>Memory and Performance</h3>
+<p>SelahOS includes automatic memory tuning optimized for creator workloads:</p>
+<ul>
+<li><strong>zram</strong> compressed swap (configured automatically based on your RAM)</li>
+<li><strong>Lower swappiness</strong> (10 vs Arch default 60) to keep your work in RAM</li>
+<li><strong>Aggressive cache</strong> for project file scanning</li>
+</ul>
+<p>To check current memory state, run <code>selahos-memory-info</code> in Konsole.</p>
+
+<h3>Recovery</h3>
+<p>If your install ever fails to boot (especially after a Mac NVRAM reset):</p>
+<ol>
+<li>Boot from your SelahOS USB stick</li>
+<li>Open Konsole</li>
+<li>Run: <code>sudo selah-rescue</code></li>
+<li>Reboot — your install is restored</li>
+</ol>
+
+<h3>Updates</h3>
+<p>Updates arrive automatically via <code>selah-update</code>. Check the system tray for notifications.
+For manual update: open Konsole and run <code>sudo pacman -Syu</code>.</p>
+
+<h2>Where to Get Help</h2>
+
+<ul>
+<li><strong>Documentation:</strong> <a href="https://docs.selahos.io">docs.selahos.io</a></li>
+<li><strong>Compatibility Registry:</strong> <a href="https://selahos.io/compatibility">selahos.io/compatibility</a></li>
+<li><strong>Bug reports:</strong> <a href="https://github.com/SelahTechnologies/selahos/issues">github.com/SelahTechnologies/selahos/issues</a></li>
+<li><strong>Community:</strong> Coming with V1.0 GA</li>
+</ul>
+
+<h2>The SelahOS Promise</h2>
+
+<p>SelahOS exists because creators deserve technology that serves them, not the other way around.
+We promise:</p>
+<ul>
+<li>Honest disclosure of what works and what doesn't</li>
+<li>No telemetry, no ads, no upsells</li>
+<li>Hardware-adaptive design for older and newer machines alike</li>
+<li>A creator-first platform that prioritizes your work over our metrics</li>
+</ul>
+
+<p>Thank you for being part of the SelahOS Beta. Your feedback shapes V1.0 GA and beyond.</p>
+
+<div class="footer">
+SelahOS™ v1.0-beta — Pause. Reflect. Create.<br>
+Copyright © 2026 Selah Technologies LLC<br>
+SelahOS™, SelahBridge™, and Muse™ are trademarks of Selah Technologies LLC.
+</div>
+
+</body>
+</html>

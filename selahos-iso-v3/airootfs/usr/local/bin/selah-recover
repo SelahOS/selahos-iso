@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-recover — SelahOS Installation Recovery Tool
+# Reads the install log, diagnoses what failed, and either
+# fixes it automatically or gives the user exact commands.
+#
+# Usage:
+#   sudo bash selah-recover.sh
+#   sudo bash selah-recover.sh /tmp/selahos-install.log
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+
+LOG="${1:-/tmp/selahos-install.log}"
+GOLD='\033[0;33m'
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
+NC='\033[0m'
+
+echo ""
+echo -e "${GOLD}  SelahOS Recovery Tool${NC}"
+echo -e "${DIM}  Analyzing installation log...${NC}"
+echo ""
+
+# ── Check log exists ──────────────────────────────────────────
+if [ ! -f "$LOG" ]; then
+    echo -e "${RED}  No install log found at $LOG${NC}"
+    echo -e "${DIM}  Run the installer first, then run this tool.${NC}"
+    exit 1
+fi
+
+# ── Parse the log ─────────────────────────────────────────────
+DISK=$(grep "^Disk:" "$LOG" 2>/dev/null | head -1 | awk '{print $2}')
+USER=$(grep "^User:" "$LOG" 2>/dev/null | head -1 | awk '{print $2}')
+HOST=$(grep "^Host:" "$LOG" 2>/dev/null | head -1 | awk '{print $2}')
+RETURN_CODE=$(grep "^Return code:" "$LOG" 2>/dev/null | tail -1 | awk '{print $3}')
+
+echo -e "  ${DIM}Disk:${NC} ${DISK:-unknown}"
+echo -e "  ${DIM}User:${NC} ${USER:-unknown}"
+echo -e "  ${DIM}Host:${NC} ${HOST:-unknown}"
+echo -e "  ${DIM}Last return code:${NC} ${RETURN_CODE:-unknown}"
+echo ""
+
+# ── Detect what completed ─────────────────────────────────────
+PARTITIONED=false
+FORMATTED=false
+MOUNTED=false
+PACSTRAP_DONE=false
+FSTAB_DONE=false
+LOCALE_DONE=false
+USER_DONE=false
+SERVICES_DONE=false
+GRUB_DONE=false
+UNMOUNTED=false
+
+grep -q "GPT data structures destroyed" "$LOG" && PARTITIONED=true
+grep -q "Creating filesystem" "$LOG"            && FORMATTED=true
+grep -q "EFI partition:" "$LOG"                 && FORMATTED=true
+grep -q "Installing packages to /mnt"           "$LOG" && PACSTRAP_DONE=true
+grep -q "Generating fstab\|genfstab"            "$LOG" && FSTAB_DONE=true
+grep -q "en_US.UTF-8... done\|locale-gen"       "$LOG" && LOCALE_DONE=true
+grep -q "chpasswd\|password changed"            "$LOG" && USER_DONE=true
+grep -q "systemctl enable\|NetworkManager"      "$LOG" && SERVICES_DONE=true
+grep -q "grub-install\|grub-mkconfig"           "$LOG" && GRUB_DONE=true
+grep -q "Installation complete\|Unmounting"     "$LOG" && UNMOUNTED=true
+
+# ── Detect specific error ──────────────────────────────────────
+ERROR_TYPE=""
+ERROR_MSG=$(grep -i "error\|failed\|fatal" "$LOG" 2>/dev/null | tail -5)
+
+grep -q "realtime.*does not exist\|group.*realtime" "$LOG" && ERROR_TYPE="realtime_group"
+grep -q "no servers configured\|mirrorlist"          "$LOG" && ERROR_TYPE="mirror"
+grep -q "keyring.*writable\|required key missing"    "$LOG" && ERROR_TYPE="keyring"
+grep -q "not enough.*disk\|too full\|no space"       "$LOG" && ERROR_TYPE="disk_space"
+grep -q "Failed to mount\|Can't lookup blockdev"     "$LOG" && ERROR_TYPE="mount_fail"
+grep -q "Failed to install packages"                 "$LOG" && ERROR_TYPE="pacstrap_fail"
+
+# ── Show diagnosis ────────────────────────────────────────────
+echo -e "  ${GOLD}=== Installation Progress ===${NC}"
+echo -e "  $([ "$PARTITIONED" = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") Disk partitioned ($DISK)"
+echo -e "  $([ "$FORMATTED"   = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") Filesystem formatted"
+echo -e "  $([ "$PACSTRAP_DONE" = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") Base packages installed (pacstrap)"
+echo -e "  $([ "$FSTAB_DONE"  = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") fstab generated"
+echo -e "  $([ "$LOCALE_DONE" = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") Locale configured"
+echo -e "  $([ "$USER_DONE"   = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") User account created"
+echo -e "  $([ "$SERVICES_DONE" = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") Services enabled"
+echo -e "  $([ "$GRUB_DONE"   = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") Bootloader installed"
+echo -e "  $([ "$UNMOUNTED"   = true ] && echo "${GREEN}✓${NC}" || echo "${RED}✗${NC}") Clean unmount / reboot"
+echo ""
+
+# ── Check if disk is still mounted ────────────────────────────
+DISK_MOUNTED=false
+mount | grep -q "/mnt " && DISK_MOUNTED=true
+
+if [ "$DISK_MOUNTED" = true ]; then
+    echo -e "  ${GREEN}✓ /mnt is still mounted — can resume installation${NC}"
+else
+    echo -e "  ${CYAN}  /mnt is not mounted — checking if we can remount...${NC}"
+    # Try to figure out partitions
+    if [ -n "$DISK" ]; then
+        if echo "$DISK" | grep -q "nvme"; then
+            ROOT_PART="${DISK}p2"
+            EFI_PART="${DISK}p1"
+        else
+            ROOT_PART="${DISK}2"
+            EFI_PART="${DISK}1"
+        fi
+
+        if [ -b "$ROOT_PART" ] && [ "$FORMATTED" = true ]; then
+            echo -e "  ${GOLD}  Remounting $ROOT_PART to /mnt...${NC}"
+            mount "$ROOT_PART" /mnt 2>/dev/null && \
+            mount "$EFI_PART" /mnt/boot 2>/dev/null && \
+            DISK_MOUNTED=true && \
+            echo -e "  ${GREEN}✓ Remounted successfully${NC}" || \
+            echo -e "  ${RED}  Could not remount — may need to run full installer again${NC}"
+        fi
+    fi
+fi
+
+echo ""
+
+# ── Generate targeted fix ─────────────────────────────────────
+echo -e "  ${GOLD}=== Recovery Actions ===${NC}"
+echo ""
+
+case "$ERROR_TYPE" in
+
+    realtime_group)
+        echo -e "  ${CYAN}Issue: realtime group doesn't exist on new install${NC}"
+        echo -e "  ${DIM}This is a known Beta 1.0 issue — easily fixed.${NC}"
+        echo ""
+
+        if [ "$PACSTRAP_DONE" = true ] && [ "$DISK_MOUNTED" = true ]; then
+            echo -e "  ${GREEN}All packages installed. Completing setup now...${NC}"
+            echo ""
+
+            # Create realtime group first, then create user
+            arch-chroot /mnt groupadd -r realtime 2>/dev/null || true
+            arch-chroot /mnt groupadd -r bluetooth 2>/dev/null || true
+
+            if [ -n "$USER" ] && [ "$USER" != "unknown" ]; then
+                echo -e "  Creating user ${USER}..."
+                arch-chroot /mnt useradd -m \
+                    -G wheel,audio,video,storage,network,input \
+                    -s /bin/bash "$USER" 2>/dev/null || \
+                arch-chroot /mnt usermod -aG wheel,audio,video,storage,network,input "$USER"
+
+                arch-chroot /mnt usermod -aG realtime "$USER" 2>/dev/null || true
+
+                echo -e "  ${DIM}Enter password for $USER:${NC}"
+                arch-chroot /mnt passwd "$USER"
+                arch-chroot /mnt bash -c "echo 'root:$(openssl rand -base64 12)' | chpasswd" 2>/dev/null || true
+                echo -e "  ${GREEN}✓ User created${NC}"
+            fi
+
+            # Enable services
+            arch-chroot /mnt systemctl enable NetworkManager 2>/dev/null || true
+            arch-chroot /mnt systemctl enable sddm 2>/dev/null || true
+            echo -e "  ${GREEN}✓ Services enabled${NC}"
+
+            # GRUB
+            if [ "$GRUB_DONE" = false ]; then
+                echo -e "  Installing GRUB..."
+                # Detect if Apple hardware
+                IS_APPLE=false
+                grep -qi "apple\|macbook" /sys/class/dmi/id/sys_vendor 2>/dev/null && IS_APPLE=true
+
+                if [ "$IS_APPLE" = true ]; then
+                    arch-chroot /mnt grub-install \
+                        --target=x86_64-efi \
+                        --efi-directory=/boot \
+                        --bootloader-id=SelahOS \
+                        --removable --recheck
+                else
+                    arch-chroot /mnt grub-install \
+                        --target=x86_64-efi \
+                        --efi-directory=/boot \
+                        --bootloader-id=SelahOS \
+                        --recheck
+                fi
+
+                arch-chroot /mnt sed -i \
+                    's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/' \
+                    /etc/default/grub
+                arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+                echo -e "  ${GREEN}✓ GRUB installed${NC}"
+            fi
+
+            # SelahOS branding
+            cat > /mnt/etc/os-release << 'OSREL'
+NAME="SelahOS"
+PRETTY_NAME="SelahOS v1.0-beta"
+ID=selahos
+ID_LIKE=arch
+BUILD_ID=rolling
+HOME_URL="https://selahos.io"
+VENDOR_NAME="Selah Technologies LLC"
+OSREL
+
+            # Sudo access
+            sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' \
+                /mnt/etc/sudoers 2>/dev/null || true
+
+            echo ""
+            echo -e "  ${GREEN}✓ Installation completed successfully${NC}"
+            echo ""
+            echo -e "  ${GOLD}Next steps:${NC}"
+            echo -e "  ${DIM}1. sudo umount -R /mnt${NC}"
+            echo -e "  ${DIM}2. sudo reboot${NC}"
+            echo -e "  ${DIM}3. Remove USB when machine restarts${NC}"
+        else
+            echo -e "  ${RED}  Packages not fully installed or /mnt not available.${NC}"
+            echo -e "  ${DIM}  Run the full installer again.${NC}"
+        fi
+        ;;
+
+    mirror)
+        echo -e "  ${CYAN}Issue: No mirrors configured${NC}"
+        echo ""
+        echo -e "  Run these commands:"
+        echo ""
+        echo -e "  ${CYAN}echo 'Server = https://geo.mirror.pkgbuild.com/\$repo/os/\$arch' | sudo tee /etc/pacman.d/mirrorlist${NC}"
+        echo -e "  ${CYAN}sudo pacman -Sy${NC}"
+        echo -e "  ${CYAN}sudo python3 /usr/local/bin/selahos-installer${NC}"
+        ;;
+
+    keyring)
+        echo -e "  ${CYAN}Issue: Pacman keyring not initialized${NC}"
+        echo ""
+        echo -e "  Run these commands:"
+        echo ""
+        echo -e "  ${CYAN}sudo pacman-key --init${NC}"
+        echo -e "  ${CYAN}sudo pacman-key --populate archlinux${NC}"
+        echo -e "  ${CYAN}sudo python3 /usr/local/bin/selahos-installer${NC}"
+        ;;
+
+    disk_space)
+        echo -e "  ${CYAN}Issue: Not enough disk space in live environment${NC}"
+        echo ""
+        echo -e "  The live overlay ran out of space. Use terminal installer:"
+        echo ""
+        echo -e "  ${CYAN}sudo archinstall${NC}"
+        ;;
+
+    mount_fail)
+        echo -e "  ${CYAN}Issue: Could not mount disk partitions${NC}"
+        echo ""
+        echo -e "  Check your disk and try manually:"
+        echo -e "  ${CYAN}lsblk${NC}"
+        echo -e "  Then select the correct disk in the installer."
+        ;;
+
+    *)
+        if [ "$UNMOUNTED" = true ]; then
+            echo -e "  ${GREEN}✓ Installation appears complete!${NC}"
+            echo -e "  ${DIM}  Reboot and remove the USB drive.${NC}"
+        elif [ "$PACSTRAP_DONE" = true ] && [ "$DISK_MOUNTED" = true ]; then
+            echo -e "  ${CYAN}Packages installed but setup incomplete.${NC}"
+            echo -e "  ${DIM}  The recovery tool will attempt to finish setup.${NC}"
+            echo ""
+            echo -e "  ${DIM}Last error:${NC}"
+            echo "$ERROR_MSG" | while read -r line; do
+                echo -e "  ${RED}  $line${NC}"
+            done
+        else
+            echo -e "  ${CYAN}Could not determine exact failure point.${NC}"
+            echo ""
+            echo -e "  ${DIM}Last error from log:${NC}"
+            echo "$ERROR_MSG" | while read -r line; do
+                echo -e "  ${RED}  $line${NC}"
+            done
+            echo ""
+            echo -e "  ${DIM}Try running the installer again:${NC}"
+            echo -e "  ${CYAN}sudo python3 /usr/local/bin/selahos-installer${NC}"
+            echo ""
+            echo -e "  ${DIM}Or use the terminal installer directly:${NC}"
+            echo -e "  ${CYAN}sudo archinstall${NC}"
+        fi
+        ;;
+esac
+
+echo ""
+echo -e "  ${DIM}Full log: $LOG${NC}"
+echo -e "  ${DIM}Support: beta@selahos.io${NC}"
+echo ""
+echo -e "  ${GOLD}Pause. Reflect. Create.${NC}"
+echo ""

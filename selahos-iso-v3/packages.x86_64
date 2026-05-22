@@ -1,0 +1,395 @@
+# ============================================================
+# SelahOS v1.0-beta — Package Manifest
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+# This list is read by archiso. Comments are ignored.
+# Organized by purpose for human readability.
+# ============================================================
+
+# === Base system ===
+base
+base-devel
+linux-zen
+linux-zen-headers
+linux-firmware
+archlinux-keyring
+linux-lts
+linux-lts-headers
+mkinitcpio
+mkinitcpio-archiso
+mkinitcpio-nfs-utils
+intel-ucode
+amd-ucode
+
+# === Bootloader ===
+grub
+efibootmgr
+edk2-shell
+refind
+syslinux
+memtest86+
+memtest86+-efi
+
+# === Filesystems ===
+btrfs-progs
+dosfstools
+e2fsprogs
+exfatprogs
+f2fs-tools
+mtools
+nfs-utils
+ntfs-3g
+xfsprogs
+arch-install-scripts
+parted
+gptfdisk
+
+# === Boot splash + login ===
+plymouth
+sddm
+sddm-kcm
+
+# === KDE Plasma 6 ===
+plasma-desktop
+plasma-workspace
+plasma-pa
+plasma-nm
+plasma-systemmonitor
+plasma-firewall
+plasma-disks
+plasma-browser-integration
+plasma-thunderbolt
+plasma-vault
+kwin
+# kwin-effects-forceblur — AUR, removed for build compatibility
+breeze
+breeze-gtk
+kvantum
+kde-cli-tools
+kde-gtk-config
+kdeplasma-addons
+kscreen
+kwallet-pam
+kinfocenter
+xdg-desktop-portal-kde
+power-profiles-daemon
+bluedevil
+bluez
+bluez-utils
+
+# === KDE applications ===
+ark
+dolphin
+dolphin-plugins
+ffmpegthumbs
+gwenview
+kate
+kcalc
+kcharselect
+kcolorchooser
+kdeconnect
+kfind
+konsole
+kwalletmanager
+okular
+partitionmanager
+spectacle
+filelight
+kdialog
+
+# === Audio (PipeWire + JACK + ALSA) ===
+pipewire
+pipewire-alsa
+pipewire-audio
+pipewire-jack
+pipewire-pulse
+wireplumber
+jack-example-tools
+alsa-utils
+alsa-plugins
+alsa-firmware
+sof-firmware
+gst-plugin-pipewire
+realtime-privileges
+
+# === Graphics (DXVK + Vulkan) ===
+mesa
+vulkan-intel
+vulkan-radeon
+vulkan-icd-loader
+vulkan-tools
+xf86-video-amdgpu
+xf86-video-intel
+xf86-video-vesa
+nvidia-utils
+
+# === Wine + SelahBridge ===
+wine-staging
+winetricks
+wine-mono
+wine-gecko
+dxvk-async-git
+wineasio
+broadcom-wl-dkms
+kvantum-qt5
+lib32-alsa-plugins
+lib32-pipewire-jack
+lib32-vulkan-intel
+lib32-vulkan-icd-loader
+giflib
+lib32-giflib
+libpng
+lib32-libpng
+libldap
+lib32-libldap
+gnutls
+lib32-gnutls
+mpg123
+lib32-mpg123
+openal
+lib32-openal
+v4l-utils
+lib32-v4l-utils
+libpulse
+lib32-libpulse
+alsa-lib
+lib32-alsa-lib
+libxcomposite
+lib32-libxcomposite
+libxinerama
+lib32-libxinerama
+ncurses
+lib32-ncurses
+opencl-icd-loader
+lib32-opencl-icd-loader
+libxslt
+lib32-libxslt
+libva
+lib32-libva
+gtk3
+lib32-gtk3
+gst-plugins-base-libs
+
+# === Steam ===
+steam
+
+# === Network ===
+networkmanager
+networkmanager-openvpn
+networkmanager-vpnc
+network-manager-applet
+modemmanager
+mobile-broadband-provider-info
+usb_modeswitch
+wpa_supplicant
+iwd
+openssh
+openvpn
+
+# === Tailscale ===
+tailscale
+
+# === Hardware support ===
+# brcmfmac-firmware — included in linux-firmware
+archlinux-keyring
+upower
+udev
+udisks2
+hwinfo
+lshw
+dmidecode
+inxi
+lm_sensors
+acpid
+inetutils
+
+# === Thunderbolt (per Dane request: auto-installed for Mac/TB hardware) ===
+bolt
+
+# === FireWire (per Dane request: auto-installed for legacy creator hardware) ===
+libavc1394
+libiec61883
+libraw1394
+
+# === Mac hardware (mbpfan installed via custom AUR build hook below) ===
+# mbpfan-git is built and installed by /usr/local/bin/selahos-postinstall
+# because it requires AUR access not available in archiso
+
+# === Audio device support ===
+alsa-tools
+fluidsynth
+soundfont-fluid
+qjackctl
+pavucontrol-qt
+helvum
+
+# === Native Linux creator apps ===
+ardour
+audacity
+hydrogen
+lmms
+mixxx
+musescore
+strawberry
+# clementine — dropped from Arch repos, strawberry used instead
+obs-studio
+gimp
+krita
+inkscape
+blender
+kdenlive
+shotcut
+audacious
+
+# === Productivity ===
+firefox
+thunderbird
+libreoffice-fresh
+keepassxc
+xiphos
+
+# === Developer tools ===
+git
+github-cli
+code
+nodejs
+npm
+python
+python-pip
+python-pipx
+go
+rust
+gcc
+clang
+cmake
+gdb
+make
+docker
+docker-compose
+wget
+curl
+htop
+btop
+fastfetch
+tmux
+neovim
+vim
+
+# === System utilities ===
+sudo
+polkit
+dbus
+ntp
+cronie
+fwupd
+util-linux
+which
+unzip
+zip
+p7zip
+unrar
+tar
+gzip
+xz
+zstd
+rsync
+smartmontools
+lsof
+strace
+nmap
+tcpdump
+mtr
+traceroute
+pacman-contrib
+reflector
+
+# === Calamares installer ===
+# NOTE: Calamares libyaml-cpp ABI mismatch known issue.
+# Per Omolara's memo (May 6, 2026): if Arch repo Calamares broken,
+# selahos-postinstall script falls back to building from source via AUR.
+qt6-svg
+qt6-tools
+qt6-translations
+boost-libs
+yaml-cpp
+
+solid
+
+# === Fonts ===
+inter-font
+ttf-jetbrains-mono
+# otf-fraunces — AUR only, removed for build compatibility
+ttf-dejavu
+ttf-liberation
+noto-fonts
+noto-fonts-cjk
+noto-fonts-emoji
+ttf-roboto
+
+# === Additional creator-friendly defaults ===
+flatpak
+xdg-user-dirs
+xdg-utils
+file-roller
+imagemagick
+ghostscript
+
+# === Documentation ===
+man-db
+man-pages
+texinfo
+less
+
+# === Required for archiso live environment ===
+archinstall
+b43-fwcutter
+clonezilla
+darkhttpd
+ddrescue
+dhclient
+dhcpcd
+diffutils
+edk2-shell
+ethtool
+fatresize
+foot-terminfo
+fsarchiver
+openbsd-netcat
+gpart
+gpm
+hdparm
+iputils
+irssi
+iw
+lftp
+livecd-sounds
+nano
+ndisc6
+nss-mdns
+nvme-cli
+open-iscsi
+openconnect
+openpgp-card-tools
+partclone
+ppp
+pptpclient
+rp-pppoe
+sdparm
+sequoia-sq
+sg3_utils
+squashfs-tools
+syslinux
+terminus-font
+testdisk
+udftools
+usbmuxd
+usbutils
+vpnc
+wireguard-tools
+wireless-regdb
+wireless_tools
+wvdial
+xl2tpd
+zram-generator
+zsh
+python-pyqt6

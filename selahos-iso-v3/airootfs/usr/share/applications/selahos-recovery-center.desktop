@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Recovery Center
+GenericName=System Recovery
+Comment=Repair SelahBridge, audio, theme, and get reinstall guidance
+Exec=pkexec python3 /usr/local/bin/selahos-recovery-center
+Icon=system-run
+Terminal=false
+StartupNotify=true
+Categories=System;Settings;
+Keywords=recovery;repair;selahbridge;wine;audio;theme;install;

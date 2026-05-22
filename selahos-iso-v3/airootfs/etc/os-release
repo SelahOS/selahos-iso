@@ -1,0 +1,17 @@
+NAME="SelahOS"
+PRETTY_NAME="SelahOS v1.0-beta"
+ID=selahos
+ID_LIKE=arch
+BUILD_ID=rolling
+VERSION="1.0.0-beta"
+VERSION_ID="1.0.0-beta"
+VERSION_CODENAME="Pause"
+ANSI_COLOR="38;2;214;168;90"
+HOME_URL="https://selahos.io"
+DOCUMENTATION_URL="https://docs.selahos.io"
+SUPPORT_URL="https://selahos.io/support"
+BUG_REPORT_URL="https://github.com/SelahTechnologies/selahos/issues"
+PRIVACY_POLICY_URL="https://selahtechnologies.io/privacy"
+LOGO=selahos
+VENDOR_NAME="Selah Technologies LLC"
+VENDOR_URL="https://selahtechnologies.io"

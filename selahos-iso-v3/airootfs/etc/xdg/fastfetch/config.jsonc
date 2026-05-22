@@ -1,0 +1,88 @@
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "type": "file",
+    "source": "/usr/share/selahos/fastfetch/selahos-logo.txt",
+    "color": {
+      "1": "blue"
+    }
+  },
+  "display": {
+    "separator": "  ",
+    "color": "blue"
+  },
+  "modules": [
+    {
+      "type": "custom",
+      "format": "SelahOS™ v1.0-beta — Pause. Reflect. Create."
+    },
+    "separator",
+    {
+      "type": "os",
+      "key": "OS"
+    },
+    {
+      "type": "kernel",
+      "key": "Kernel"
+    },
+    {
+      "type": "host",
+      "key": "Machine"
+    },
+    {
+      "type": "uptime",
+      "key": "Uptime"
+    },
+    {
+      "type": "packages",
+      "key": "Packages"
+    },
+    {
+      "type": "shell",
+      "key": "Shell"
+    },
+    {
+      "type": "de",
+      "key": "Desktop"
+    },
+    {
+      "type": "wm",
+      "key": "Window Manager"
+    },
+    {
+      "type": "terminal",
+      "key": "Terminal"
+    },
+    {
+      "type": "cpu",
+      "key": "CPU"
+    },
+    {
+      "type": "gpu",
+      "key": "GPU"
+    },
+    {
+      "type": "memory",
+      "key": "Memory"
+    },
+    {
+      "type": "disk",
+      "key": "Disk"
+    },
+    {
+      "type": "localip",
+      "key": "Network"
+    },
+    "separator",
+    {
+      "type": "custom",
+      "key": "SelahBridge™",
+      "format": "Creative compatibility layer active"
+    },
+    {
+      "type": "custom",
+      "key": "AI Companion",
+      "format": "Preview infrastructure — coming soon"
+    }
+  ]
+}

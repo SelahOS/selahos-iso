@@ -1,0 +1,16 @@
+# mkinitcpio preset for SelahOS live ISO — linux-zen kernel
+# Uses the archiso preset type which skips autodetect (-S autodetect)
+# and uses the archiso-specific hooks from /etc/mkinitcpio.conf
+#
+# This is what makes the live environment work:
+# - archiso hook: finds the squashfs on the USB device
+# - archiso_loop_mnt: mounts squashfs as root
+# - memdisk: copies squashfs to RAM if archisocopytomem is set
+
+ALL_kver="/boot/vmlinuz-linux-zen"
+ALL_config="/etc/mkinitcpio.conf"
+
+PRESETS=('archiso')
+
+archiso_image="/boot/initramfs-linux-zen.img"
+archiso_options="-S autodetect"

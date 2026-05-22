@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ============================================================
+# selahos-hardware-detect
+#
+# Runs at first boot. Detects Thunderbolt and FireWire hardware
+# and shows a passive notification confirming driver state.
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+set -e
+
+MARKER="$HOME/.config/selahos/hardware-detected"
+[ -f "$MARKER" ] && exit 0
+
+mkdir -p "$(dirname "$MARKER")"
+
+DETECTED=()
+
+# Thunderbolt
+if [ -d /sys/bus/thunderbolt ] && [ -n "$(ls /sys/bus/thunderbolt/devices/ 2>/dev/null)" ]; then
+    if command -v boltctl >/dev/null 2>&1; then
+        TB_DEVICES=$(boltctl 2>/dev/null | grep -c "─" || echo "0")
+        if [ "$TB_DEVICES" -gt 0 ]; then
+            DETECTED+=("Thunderbolt: $TB_DEVICES device(s) — bolt service active")
+        fi
+    fi
+fi
+
+# FireWire
+if lsmod | grep -q firewire_core 2>/dev/null; then
+    if [ -n "$(ls /dev/fw* 2>/dev/null)" ]; then
+        FW_COUNT=$(ls /dev/fw* 2>/dev/null | wc -l)
+        DETECTED+=("FireWire: $FW_COUNT controller(s) detected — drivers loaded")
+    fi
+fi
+
+# Apple-specific
+if [ -f /sys/class/dmi/id/sys_vendor ] && grep -qi "apple" /sys/class/dmi/id/sys_vendor; then
+    if systemctl is-active --quiet mbpfan 2>/dev/null; then
+        DETECTED+=("Apple hardware: mbpfan active — smart fan curves enabled")
+    fi
+fi
+
+# Show notification if anything detected
+if [ ${#DETECTED[@]} -gt 0 ] && command -v notify-send >/dev/null 2>&1; then
+    MSG=$(printf '%s\n' "${DETECTED[@]}")
+    notify-send \
+        "SelahOS Hardware Detection" \
+        "$MSG" \
+        -i preferences-system \
+        -t 10000 || true
+fi
+
+# Mark complete (so we don't notify on every login)
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$MARKER"

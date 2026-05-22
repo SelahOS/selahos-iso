@@ -1,0 +1,15 @@
+[Colors]
+ButtonBackground=19,25,38
+ButtonText=237,228,212
+ButtonHover=30,40,64
+ButtonFocus=214,168,90
+Background=11,15,26
+Text=237,228,212
+Highlight=214,168,90
+HighlightedText=11,15,26
+Link=142,195,184
+VisitedLink=154,141,123
+NegativeText=184,84,80
+PositiveText=142,195,184
+NeutralText=214,168,90
+DisabledText=90,83,71

@@ -1,0 +1,10 @@
+[General]
+ColorScheme=Selah
+widgetStyle=kvantum
+
+[KDE]
+LookAndFeelPackage=org.selahos.selah
+SingleClick=false
+
+[Icons]
+Theme=breeze-dark

@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SelahOS Docs</title>
+<style>
+  :root {
+    --bg:     #0B0F1A;
+    --bg2:    #111827;
+    --bg3:    #1A2030;
+    --gold:   #D6A85A;
+    --parch:  #EDE4D4;
+    --muted:  #9A8D7B;
+    --teal:   #8EC3B8;
+    --red:    #B97A6F;
+    --border: #2A3042;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--parch);
+    font-family: 'Noto Sans', 'Segoe UI', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  nav {
+    position: fixed;
+    top: 0; left: 0;
+    width: 260px;
+    height: 100vh;
+    background: var(--bg3);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 32px 0 40px;
+    display: flex;
+    flex-direction: column;
+  }
+  .nav-brand {
+    padding: 0 28px 28px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .nav-brand .wordmark {
+    font-size: 22px;
+    font-weight: 300;
+    color: var(--gold);
+    letter-spacing: 0.04em;
+  }
+  .nav-brand .tagline {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .nav-section {
+    padding: 6px 28px 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 16px;
+  }
+  nav a {
+    display: block;
+    padding: 7px 28px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 14px;
+    border-left: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  nav a:hover { color: var(--parch); border-left-color: var(--border); }
+  nav a.active { color: var(--gold); border-left-color: var(--gold); }
+
+  /* ── Main ── */
+  main {
+    margin-left: 260px;
+    flex: 1;
+    max-width: 900px;
+    padding: 60px 64px 100px;
+  }
+
+  /* ── Headings ── */
+  h1 {
+    font-size: 36px;
+    font-weight: 300;
+    color: var(--gold);
+    margin-bottom: 12px;
+    line-height: 1.2;
+  }
+  h2 {
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--gold);
+    margin: 52px 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--parch);
+    margin: 28px 0 10px;
+  }
+  h4 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--teal);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 20px 0 8px;
+  }
+
+  p { margin-bottom: 16px; color: var(--parch); }
+  .lead { font-size: 18px; color: var(--muted); margin-bottom: 32px; }
+
+  /* ── Code ── */
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    background: var(--bg2);
+    color: var(--teal);
+    padding: 2px 7px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 16px 0 24px;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 13px;
+    color: var(--parch);
+    line-height: 1.6;
+  }
+
+  /* ── Callouts ── */
+  .callout {
+    border-left: 3px solid var(--gold);
+    background: var(--bg2);
+    border-radius: 0 6px 6px 0;
+    padding: 14px 20px;
+    margin: 20px 0;
+    font-size: 14px;
+  }
+  .callout.warn { border-left-color: var(--red); }
+  .callout.tip  { border-left-color: var(--teal); }
+  .callout strong { color: var(--gold); }
+  .callout.warn strong { color: var(--red); }
+  .callout.tip  strong { color: var(--teal); }
+
+  /* ── Tables ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    font-size: 14px;
+  }
+  th {
+    background: var(--bg3);
+    color: var(--gold);
+    font-weight: 600;
+    text-align: left;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--parch);
+  }
+  tr:hover td { background: var(--bg3); }
+
+  /* ── Lists ── */
+  ul, ol { padding-left: 24px; margin-bottom: 16px; }
+  li { margin-bottom: 6px; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+  .badge-gold { background: rgba(214,168,90,.15); color: var(--gold); border: 1px solid rgba(214,168,90,.3); }
+  .badge-teal { background: rgba(142,195,184,.12); color: var(--teal); border: 1px solid rgba(142,195,184,.3); }
+  .badge-red  { background: rgba(185,122,111,.12); color: var(--red);  border: 1px solid rgba(185,122,111,.3); }
+
+  /* ── Section anchors ── */
+  section { padding-top: 8px; }
+
+  /* ── Footer ── */
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  footer a { color: var(--teal); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-brand">
+    <div class="wordmark">SelahOS</div>
+    <div class="tagline">Pause. Reflect. Create.</div>
+  </div>
+
+  <div class="nav-section">Getting Started</div>
+  <a href="#overview">Overview</a>
+  <a href="#requirements">System Requirements</a>
+  <a href="#boot">Live Boot</a>
+  <a href="#install">Installation</a>
+
+  <div class="nav-section">SelahBridge</div>
+  <a href="#selahbridge">What Is SelahBridge?</a>
+  <a href="#sb-install">Installing SelahBridge</a>
+  <a href="#sb-manager">SelahBridge Manager</a>
+  <a href="#sb-audio">Audio Setup</a>
+  <a href="#sb-apps">Running Windows Apps</a>
+
+  <div class="nav-section">System</div>
+  <a href="#recovery">Recovery Tools</a>
+  <a href="#update">Updating SelahOS</a>
+  <a href="#faq">FAQ</a>
+</nav>
+
+<main>
+
+  <!-- ── OVERVIEW ── -->
+  <section id="overview">
+    <h1>SelahOS Documentation</h1>
+    <p class="lead">SelahOS is a creator-first Arch Linux distribution built for musicians,
+    producers, and digital artists who demand low-latency audio and a polished desktop
+    without the complexity of a vanilla Arch install.</p>
+
+    <table>
+      <tr><th>Component</th><th>Choice</th></tr>
+      <tr><td>Base</td><td>Arch Linux</td></tr>
+      <tr><td>Kernel</td><td>linux-zen (low-latency optimized)</td></tr>
+      <tr><td>Desktop</td><td>KDE Plasma 6</td></tr>
+      <tr><td>Audio</td><td>PipeWire + WirePlumber (JACK-compatible)</td></tr>
+      <tr><td>Windows compatibility</td><td>SelahBridge (Wine Staging + DXVK + WineASIO)</td></tr>
+      <tr><td>Theme</td><td>Selah (dark gold — Kvantum + Plasma)</td></tr>
+    </table>
+  </section>
+
+  <!-- ── REQUIREMENTS ── -->
+  <section id="requirements">
+    <h2>System Requirements</h2>
+
+    <h3>Minimum</h3>
+    <table>
+      <tr><th>Component</th><th>Minimum</th><th>Recommended</th></tr>
+      <tr><td>CPU</td><td>x86_64, 2 cores</td><td>4+ cores, Intel/AMD 2018+</td></tr>
+      <tr><td>RAM</td><td>4 GB</td><td>16 GB</td></tr>
+      <tr><td>Storage</td><td>20 GB</td><td>60 GB SSD</td></tr>
+      <tr><td>GPU</td><td>Any with KMS</td><td>Vulkan-capable (for DXVK)</td></tr>
+      <tr><td>Audio</td><td>Any ALSA device</td><td>USB/PCIe audio interface</td></tr>
+      <tr><td>Boot</td><td>UEFI or BIOS</td><td>UEFI</td></tr>
+    </table>
+
+    <div class="callout warn">
+      <strong>Note:</strong> SelahBridge requires Vulkan support for DXVK. Intel HD 4000+,
+      AMD GCN 1.0+, and NVIDIA Kepler+ are supported.
+    </div>
+  </section>
+
+  <!-- ── LIVE BOOT ── -->
+  <section id="boot">
+    <h2>Live Boot</h2>
+
+    <h3>Writing the ISO</h3>
+    <p>Always use <code>dd</code> to write the ISO. Do <strong>not</strong> use Ventoy.</p>
+    <pre><code>sudo dd if=selahos-v1.0-beta-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync</code></pre>
+    <p>Replace <code>/dev/sdX</code> with your USB drive (check with <code>lsblk</code>).</p>
+
+    <h3>Boot Menu</h3>
+    <p>At the GRUB boot menu, select <strong>SelahOS Live</strong>. The system will boot
+    directly to the KDE desktop as <code>liveuser</code> with no password required.</p>
+
+    <div class="callout tip">
+      <strong>MacBook users:</strong> Hold <kbd>Option</kbd> at startup to select the USB drive.
+      GRUB is installed with <code>--removable</code> support for MacBook NVRAM compatibility.
+    </div>
+
+    <h3>Trying Before Installing</h3>
+    <p>The live environment is fully functional — you can browse the internet, test audio,
+    and explore SelahBridge before committing to an install. All changes are lost on reboot
+    unless you run the installer.</p>
+  </section>
+
+  <!-- ── INSTALLATION ── -->
+  <section id="install">
+    <h2>Installation</h2>
+
+    <p>Launch the installer from the desktop shortcut or application menu:
+    <strong>System → Install SelahOS</strong>.</p>
+
+    <h3>Steps</h3>
+    <ol>
+      <li>Select your target drive from the dropdown.</li>
+      <li>Choose your timezone and locale.</li>
+      <li>Set your username and password.</li>
+      <li>Review the partition layout (auto-partitioned by default).</li>
+      <li>Click <strong>Install</strong>.</li>
+    </ol>
+
+    <div class="callout warn">
+      <strong>Warning:</strong> Installation will erase the selected drive. Back up your data first.
+    </div>
+
+    <h3>Post-Install First Boot</h3>
+    <p>After installation completes and you reboot, SelahOS will apply your theme, configure
+    PipeWire, and run first-boot detection. This takes about 30 seconds and happens automatically.</p>
+  </section>
+
+  <!-- ── SELAHBRIDGE ── -->
+  <section id="selahbridge">
+    <h2>What Is SelahBridge?</h2>
+    <p>SelahBridge is SelahOS's Windows application compatibility layer, built on
+    <strong>Wine Staging</strong>, <strong>DXVK</strong>, and <strong>WineASIO</strong>.
+    It lets you run Windows DAWs, plugins, and creative tools without a Windows installation.</p>
+
+    <table>
+      <tr><th>Component</th><th>Purpose</th></tr>
+      <tr><td>Wine Staging</td><td>Windows application runtime</td></tr>
+      <tr><td>DXVK</td><td>DirectX 9/10/11 → Vulkan translation</td></tr>
+      <tr><td>WineASIO</td><td>Windows ASIO audio → PipeWire JACK bridge</td></tr>
+      <tr><td>winetricks</td><td>Runtime helpers (Visual C++, .NET, etc.)</td></tr>
+      <tr><td>Firefox (Windows)</td><td>Browser for app authorization (iLok, inMusic, etc.)</td></tr>
+    </table>
+  </section>
+
+  <!-- ── SB INSTALL ── -->
+  <section id="sb-install">
+    <h2>Installing SelahBridge</h2>
+
+    <p>Open <strong>Application Menu → SelahBridge → Setup</strong>, or run:</p>
+    <pre><code>pkexec /usr/local/bin/selahbridge-setup</code></pre>
+
+    <p>The setup wizard will:</p>
+    <ol>
+      <li>Enable the multilib repository</li>
+      <li>Add Chaotic-AUR (provides DXVK Async and WineASIO)</li>
+      <li>Install Wine Staging, DXVK, WineASIO, and 32-bit libraries</li>
+      <li>Configure PipeWire JACK with optimized buffer settings</li>
+      <li>Add your user to the <code>audio</code> and <code>realtime</code> groups</li>
+      <li>Initialize the Wine prefix (Windows 10 mode, 96 DPI)</li>
+      <li>Register WineASIO</li>
+    </ol>
+
+    <div class="callout">
+      <strong>Internet required.</strong> Installation downloads approximately 800 MB and
+      takes 5–15 minutes depending on your connection and hardware.
+    </div>
+
+    <p>After setup completes, <strong>log out and back in</strong> to activate the
+    <code>realtime</code> group membership required for low-latency audio.</p>
+  </section>
+
+  <!-- ── SB MANAGER ── -->
+  <section id="sb-manager">
+    <h2>SelahBridge Manager</h2>
+    <p>
+      <span class="badge badge-gold">v1.0.1</span>&nbsp;
+      The Manager is a full control panel for SelahBridge — no winecfg, no regedit needed.
+    </p>
+
+    <p>Launch from <strong>Application Menu → SelahBridge → Manager</strong>, or:</p>
+    <pre><code>pkexec /usr/local/bin/selahbridge-manager</code></pre>
+
+    <h3>Tab: Installed Apps</h3>
+    <p>Scans <code>~/.wine/drive_c/Program Files/</code> and
+    <code>Program Files (x86)/</code> and lists all detected Windows applications.
+    Each app has <strong>Launch</strong> and <strong>Remove</strong> buttons.
+    Use <strong>+ Add App</strong> to browse for any <code>.exe</code> and launch it directly.</p>
+
+    <h3>Tab: Wine Settings</h3>
+    <p>Configure Windows version (10, 11, 7, or XP), display DPI (72–192), audio driver
+    (WineASIO / PulseAudio / ALSA), and default browser — all applied via
+    <code>wine reg add</code> with a single click. Use <strong>Initialize Prefix</strong>
+    to create or reset <code>~/.wine</code>.</p>
+
+    <h3>Tab: Audio</h3>
+    <p>Adjust the PipeWire/JACK buffer size (64–1024 samples), re-register WineASIO,
+    and restart PipeWire — all without opening a terminal. The current active audio
+    sink is shown at the top of the tab.</p>
+
+    <h3>Tab: Snapshots</h3>
+    <p>Create a <code>tar.gz</code> backup of your entire Wine prefix
+    (<code>~/.wine</code>) to <code>~/selahbridge-snapshots/</code>.
+    Restore any snapshot with one click — the current prefix is automatically
+    backed up to <code>~/.wine.bak</code> before restore.</p>
+
+    <h3>Tab: Uninstall</h3>
+    <p>Selectively remove SelahBridge components (Wine, DXVK, WineASIO, libraries)
+    with checkboxes, with an optional Wine prefix wipe. All operations logged in-window.</p>
+  </section>
+
+  <!-- ── SB AUDIO ── -->
+  <section id="sb-audio">
+    <h2>Audio Setup</h2>
+
+    <h3>WineASIO and JACK</h3>
+    <p>SelahBridge routes Windows ASIO audio through PipeWire's JACK interface.
+    This gives you the same low-latency path that native Linux DAWs use.</p>
+
+    <h4>Recommended buffer sizes</h4>
+    <table>
+      <tr><th>Buffer</th><th>Latency (48 kHz)</th><th>Use Case</th></tr>
+      <tr><td>64 samples</td><td>~1.3 ms</td><td>Live monitoring (needs fast CPU)</td></tr>
+      <tr><td>128 samples</td><td>~2.7 ms</td><td>Real-time recording</td></tr>
+      <tr><td>256 samples</td><td>~5.3 ms</td><td>Default — works on most hardware</td></tr>
+      <tr><td>512 samples</td><td>~10.7 ms</td><td>Mixing / heavy plugin loads</td></tr>
+      <tr><td>1024 samples</td><td>~21.3 ms</td><td>Mastering / offline bounce</td></tr>
+    </table>
+
+    <p>Change the buffer in <strong>SelahBridge Manager → Audio</strong>, then click
+    <strong>Restart PipeWire</strong>.</p>
+
+    <h3>Setting Audio Driver in Your DAW</h3>
+    <p>In your Windows DAW (FL Studio, Ableton, Reaper, etc.), go to audio preferences
+    and select <strong>ASIO</strong> as the audio driver, then choose
+    <strong>WineASIO</strong> as the ASIO device.</p>
+
+    <div class="callout tip">
+      <strong>Tip:</strong> If WineASIO doesn't appear in your DAW, open
+      SelahBridge Manager → Audio → <strong>Register WineASIO</strong>, then restart the DAW.
+    </div>
+  </section>
+
+  <!-- ── RUNNING APPS ── -->
+  <section id="sb-apps">
+    <h2>Running Windows Apps</h2>
+
+    <h3>Installing an App</h3>
+    <p>Download the Windows installer (<code>.exe</code>) and run it via SelahBridge Manager
+    → Installed Apps → <strong>+ Add App</strong>, or from a terminal:</p>
+    <pre><code>wine ~/Downloads/SomeApp-setup.exe</code></pre>
+
+    <h3>Authorization (iLok, inMusic, Splice)</h3>
+    <p>SelahBridge installs Firefox for Windows inside the Wine prefix specifically for
+    authorization workflows. When an app opens a browser for license activation, it will
+    use this Firefox instance. Sign in normally — credentials are stored inside the Wine
+    prefix and persist across sessions.</p>
+
+    <h3>Known Working Apps</h3>
+    <p>The following Windows creative apps have been tested on SelahBridge:</p>
+    <ul>
+      <li>FL Studio 21 (ASIO audio, VST2/VST3)</li>
+      <li>Ableton Live 11/12 (ASIO, requires Windows 10 mode)</li>
+      <li>Reaper (full functionality)</li>
+      <li>iZotope RX (standalone + VST)</li>
+      <li>Native Instruments Komplete (via Native Access)</li>
+      <li>Splice (sample browser + downloads)</li>
+    </ul>
+
+    <div class="callout">
+      <strong>VST plugins:</strong> Point your DAW's plugin scanner at
+      <code>C:\Program Files\VSTPlugins</code> (which maps to
+      <code>~/.wine/drive_c/Program Files/VSTPlugins/</code> on disk).
+    </div>
+  </section>
+
+  <!-- ── RECOVERY ── -->
+  <section id="recovery">
+    <h2>Recovery Tools</h2>
+
+    <p>SelahOS includes several recovery tools accessible from the live environment
+    and from the installed system.</p>
+
+    <h3>selah-rescue</h3>
+    <p>Mounts the installed system and drops into a chroot for manual repair:</p>
+    <pre><code>sudo selah-rescue</code></pre>
+
+    <h3>selah-recover</h3>
+    <p>GUI recovery center — available in the Application Menu under System.
+    Offers options to reinstall the bootloader, reset the pacman keyring,
+    and repair broken packages.</p>
+
+    <h3>selah-update</h3>
+    <p>Safe system updater that handles keyring refresh, mirror ranking, and
+    pacman hooks in the correct order:</p>
+    <pre><code>selah-update</code></pre>
+
+    <h3>Bootloader Recovery (MacBook)</h3>
+    <p>If the system fails to boot on a MacBook after an NVRAM reset, boot from
+    the SelahOS USB, run <code>selah-rescue</code>, then:</p>
+    <pre><code>grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable</code></pre>
+  </section>
+
+  <!-- ── UPDATE ── -->
+  <section id="update">
+    <h2>Updating SelahOS</h2>
+    <p>SelahOS is a rolling release based on Arch Linux. To update:</p>
+    <pre><code>selah-update</code></pre>
+    <p>This is equivalent to <code>pacman -Syu</code> with pre-flight keyring and mirror
+    checks. Run it periodically — at least once a month — to keep packages current.</p>
+
+    <div class="callout warn">
+      <strong>Before major kernel or Wine updates:</strong> Create a SelahBridge snapshot
+      (Manager → Snapshots) so you can roll back if something breaks.
+    </div>
+  </section>
+
+  <!-- ── FAQ ── -->
+  <section id="faq">
+    <h2>FAQ</h2>
+
+    <h3>No audio in Wine / DAW after reboot</h3>
+    <p>Open SelahBridge Manager → Audio → <strong>Restart PipeWire</strong>.
+    If the problem persists, re-register WineASIO from the same tab.</p>
+
+    <h3>Wine prefix is corrupted / app won't launch</h3>
+    <p>Restore a snapshot from SelahBridge Manager → Snapshots, or re-initialize
+    the prefix from Wine Settings → <strong>Initialize Prefix</strong> (this wipes
+    all installed Windows apps).</p>
+
+    <h3>SelahBridge Setup fails at the Chaotic-AUR step</h3>
+    <p>This usually means the keyserver is temporarily unavailable. Wait a few minutes
+    and retry. Alternatively, run manually:</p>
+    <pre><code>sudo pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
+sudo pacman-key --lsign-key 3056513887B78AEB</code></pre>
+
+    <h3>DAW reports "ASIO driver not found"</h3>
+    <p>Open SelahBridge Manager → Audio → <strong>Register WineASIO</strong>,
+    then restart the DAW.</p>
+
+    <h3>System is slow / high CPU after install</h3>
+    <p>Check that the <code>linux-zen</code> kernel is running:</p>
+    <pre><code>uname -r   # should contain "zen"</code></pre>
+    <p>If not, run <code>selah-update</code> and reboot.</p>
+
+    <h3>SDDM login screen doesn't appear</h3>
+    <p>Boot to TTY (Ctrl+Alt+F2), log in, and run:</p>
+    <pre><code>sudo systemctl enable --now sddm</code></pre>
+
+    <h3>Black screen after GRUB on MacBook</h3>
+    <p>Add <code>nomodeset</code> temporarily at the GRUB prompt.
+    Then boot, install the correct GPU driver, and remove it.</p>
+  </section>
+
+  <footer>
+    <p>SelahOS &copy; 2026 Selah Technologies LLC &mdash; Dane-Brandon Noble, founder.</p>
+    <p style="margin-top:8px">
+      Built on Arch Linux &middot; linux-zen kernel &middot; KDE Plasma 6 &middot; PipeWire
+    </p>
+  </footer>
+
+</main>
+
+<script>
+  // Highlight active nav link on scroll
+  const sections = document.querySelectorAll('section[id]');
+  const links = document.querySelectorAll('nav a');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

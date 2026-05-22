@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-ai-setup — SelahOS AI Companion Setup
+# Public name: "AI Companion Preview"
+# Internal codename: Muse
+#
+# Optional post-install script. Installs Ollama, configures
+# the AI companion infrastructure, and optionally pulls
+# a recommended model based on hardware tier.
+#
+# Usage:
+#   selah-ai-setup              — auto-detect tier and configure
+#   selah-ai-setup --tier lite  — force specific tier
+#   selah-ai-setup --no-pull    — infrastructure only, skip model download
+#   selah-ai-setup --status     — show current AI companion status
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+set -e
+
+GOLD='\033[38;2;214;168;90m'
+TEAL='\033[38;2;142;195;184m'
+DANGER='\033[38;2;154;92;84m'
+PARCH='\033[38;2;241;232;216m'
+RESET='\033[0m'
+
+CONFIG="/opt/selah/ai/config/tiers.conf"
+MARKER="$HOME/.config/selahos/ai-companion-initialized"
+
+[ -f "$CONFIG" ] && source "$CONFIG"
+
+NO_PULL=0
+FORCE_TIER=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --no-pull)    NO_PULL=1 ;;
+        --tier)       shift; FORCE_TIER="$1" ;;
+        --tier=*)     FORCE_TIER="${arg#*=}" ;;
+        --status)
+            echo ""
+            echo -e "${GOLD}SelahOS AI Companion Status${RESET}"
+            if [ -f "$MARKER" ]; then
+                echo -e "${TEAL}✓ Initialized${RESET}"
+                cat "$MARKER"
+            else
+                echo "  Not initialized. Run: selah-ai-setup"
+            fi
+            if command -v ollama >/dev/null 2>&1; then
+                echo -e "${TEAL}✓ Ollama installed: $(ollama --version 2>/dev/null)${RESET}"
+                echo "  Models available:"
+                ollama list 2>/dev/null | tail -n +2 | awk '{print "   "$1}' || echo "   none"
+            else
+                echo "  Ollama: not installed"
+            fi
+            exit 0
+            ;;
+    esac
+done
+
+echo ""
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${GOLD}  SelahOS AI Companion Preview — Setup${RESET}"
+echo -e "${PARCH}  Experimental Local AI Infrastructure${RESET}"
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+
+# Detect tier if not forced
+if [ -z "$FORCE_TIER" ]; then
+    FORCE_TIER=$(selah-ai-detect --tier 2>/dev/null || echo "none")
+fi
+
+if [ "$FORCE_TIER" = "none" ]; then
+    echo -e "${DANGER}✗ Hardware insufficient for AI Companion${RESET}"
+    echo "  Minimum requirement: 4 GB RAM"
+    echo "  Your system: $(grep MemTotal /proc/meminfo | awk '{print int($2/1024/1024)}') GB RAM"
+    exit 1
+fi
+
+echo -e "${PARCH}→ Tier detected: $FORCE_TIER${RESET}"
+
+# Determine model
+case "$FORCE_TIER" in
+    lite)   MODEL="${AI_LITE_MODEL:-tinyllama:1.1b}" ;;
+    local)  MODEL="${AI_LOCAL_MODEL:-mistral:7b}" ;;
+    studio) MODEL="${AI_STUDIO_MODEL:-mistral:7b}" ;;
+    *)      MODEL="mistral:7b" ;;
+esac
+
+# Step 1: Install Ollama if not present
+if ! command -v ollama >/dev/null 2>&1; then
+    echo -e "${PARCH}→ Installing Ollama...${RESET}"
+    curl -fsSL https://ollama.ai/install.sh | sh
+    echo -e "${TEAL}  ✓ Ollama installed${RESET}"
+else
+    echo -e "${TEAL}  ✓ Ollama already installed: $(ollama --version 2>/dev/null)${RESET}"
+fi
+
+# Step 2: Enable and start Ollama service
+if systemctl is-enabled --quiet ollama 2>/dev/null; then
+    echo -e "${TEAL}  ✓ Ollama service already enabled${RESET}"
+else
+    sudo systemctl enable --now ollama 2>/dev/null || true
+    echo -e "${TEAL}  ✓ Ollama service enabled${RESET}"
+fi
+
+# Step 3: Configure AI companion directories
+echo -e "${PARCH}→ Configuring AI companion infrastructure...${RESET}"
+mkdir -p "$HOME/.config/selah/ai"
+mkdir -p "$HOME/.local/share/selah/ai/knowledge"
+
+# Copy system prompt template to user config
+if [ ! -f "$HOME/.config/selah/ai/system-prompt.txt" ]; then
+    cp /opt/selah/ai/prompts/system-prompt.txt "$HOME/.config/selah/ai/system-prompt.txt"
+fi
+
+# Write user tier config
+cat > "$HOME/.config/selah/ai/user.conf" <<EOF
+AI_TIER=$FORCE_TIER
+AI_MODEL=$MODEL
+CONFIGURED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+
+echo -e "${TEAL}  ✓ Infrastructure configured${RESET}"
+
+# Step 4: Optionally pull model
+if [ "$NO_PULL" -eq 0 ]; then
+    echo ""
+    read -rp "Download AI model '$MODEL' now? This requires ~4 GB download. [y/N] " PULL_ANSWER
+    if [[ "$PULL_ANSWER" =~ ^[Yy] ]]; then
+        echo -e "${PARCH}→ Pulling $MODEL (this may take several minutes)...${RESET}"
+        ollama pull "$MODEL"
+        echo -e "${TEAL}  ✓ Model ready${RESET}"
+    else
+        echo "  Skipped. Pull later with: ollama pull $MODEL"
+    fi
+else
+    echo "  Model pull skipped (--no-pull)"
+fi
+
+# Step 5: Mark as initialized
+mkdir -p "$(dirname "$MARKER")"
+cat > "$MARKER" <<EOF
+Initialized: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+Tier: $FORCE_TIER
+Model: $MODEL
+SelahOS Version: $(grep VERSION_ID /etc/os-release 2>/dev/null | cut -d= -f2)
+EOF
+
+echo ""
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${TEAL}  ✓ AI Companion Preview infrastructure ready${RESET}"
+echo ""
+echo -e "${PARCH}  Access via Open WebUI at: http://localhost:3000${RESET}"
+echo -e "${PARCH}  Or via terminal:           ollama run $MODEL${RESET}"
+echo -e "${PARCH}  Status:                    selah-ai-setup --status${RESET}"
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""

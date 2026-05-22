@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# ============================================================
+# selahos-firstrun-notice — First-Run Compatibility Notice
+#
+# Shows on first login after install, displays:
+#   - What works in V1 Beta
+#   - Known limitations and workarounds
+#   - Where to get help
+#
+# User clicks "I Understand" to dismiss permanently.
+# Dismissal recorded in ~/.config/selahos/firstrun-acknowledged
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+set -e
+
+ACKFILE="$HOME/.config/selahos/firstrun-acknowledged"
+NOTICE_HTML="/usr/share/selahos/docs/firstrun-notice.html"
+
+# Skip if already acknowledged
+if [ -f "$ACKFILE" ]; then
+    exit 0
+fi
+
+# Skip on live ISO (only show on installed system)
+if grep -q "archisobasedir" /proc/cmdline 2>/dev/null; then
+    exit 0
+fi
+
+# Wait for desktop to settle
+sleep 5
+
+# Show the notice via KDialog (KDE-native, matches Plasma styling)
+if command -v kdialog >/dev/null 2>&1; then
+    # Read the notice content
+    if [ -f "$NOTICE_HTML" ]; then
+        kdialog \
+            --title "Welcome to SelahOS — First Run Notice" \
+            --textbox "$NOTICE_HTML" \
+            900 700
+    else
+        kdialog \
+            --title "Welcome to SelahOS" \
+            --msgbox "Welcome to SelahOS v1.0-beta.\n\nVisit https://selahos.io for documentation."
+    fi
+
+    # Confirm acknowledgment
+    if kdialog \
+        --title "SelahOS — Acknowledgment" \
+        --yesno "Have you read the first-run notice?\n\nThis dialog will not appear again after you click Yes."; then
+        mkdir -p "$(dirname "$ACKFILE")"
+        date -u +"%Y-%m-%dT%H:%M:%SZ" > "$ACKFILE"
+        echo "User: $USER" >> "$ACKFILE"
+        echo "SelahOS Version: $(grep VERSION_ID /etc/os-release | cut -d= -f2)" >> "$ACKFILE"
+    fi
+fi

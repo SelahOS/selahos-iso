@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-update — SelahOS Over-The-Air Update Wrapper
+#
+# A friendly wrapper around pacman that respects SelahOS update
+# channels and provides update notifications via Plasma.
+#
+# Usage:
+#   selah-update            — check and prompt for updates
+#   selah-update --check    — check only, no prompt
+#   selah-update --apply    — apply available updates
+#   selah-update --info     — show channel info
+#   selah-update --channel  — switch update channel
+#
+# Channels (V1.0 GA):
+#   beta    — current development track (V1.0-beta users)
+#   stable  — slower, more tested (V1.0 GA users, default)
+#   edge    — daily snapshots (testing)
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+set -e
+
+CONFIG="/etc/selahos/repo.conf"
+[ -f "$CONFIG" ] && source "$CONFIG"
+
+CHANNEL="${SELAHOS_CHANNEL:-beta}"
+REPO_URL="${SELAHOS_REPO_URL:-https://repo.selahos.io}"
+
+GOLD='\033[38;2;214;168;90m'
+TEAL='\033[38;2;142;195;184m'
+PARCH='\033[38;2;241;232;216m'
+RESET='\033[0m'
+
+action="${1:---check}"
+
+check_updates() {
+    echo -e "${GOLD}SelahOS Update Check${RESET}"
+    echo -e "${PARCH}Channel: $CHANNEL${RESET}"
+    echo ""
+
+    # Sync databases (no upgrade)
+    sudo pacman -Sy >/dev/null 2>&1
+
+    # Get list of upgradable packages
+    UPDATES=$(pacman -Qu 2>/dev/null || true)
+
+    if [ -z "$UPDATES" ]; then
+        echo -e "${TEAL}✓ Your system is up to date.${RESET}"
+        return 0
+    fi
+
+    UPDATE_COUNT=$(echo "$UPDATES" | wc -l)
+    echo -e "${GOLD}$UPDATE_COUNT update(s) available:${RESET}"
+    echo ""
+    echo "$UPDATES" | head -20
+    [ "$UPDATE_COUNT" -gt 20 ] && echo "  ... and $((UPDATE_COUNT - 20)) more"
+    echo ""
+    return 1
+}
+
+apply_updates() {
+    echo -e "${GOLD}Applying SelahOS updates...${RESET}"
+    sudo pacman -Syu --noconfirm
+    echo ""
+    echo -e "${TEAL}✓ Updates applied.${RESET}"
+
+    # Check if kernel was updated — recommend reboot
+    RUNNING_KERNEL=$(uname -r)
+    INSTALLED_KERNEL=$(pacman -Q linux-zen 2>/dev/null | awk '{print $2}' || echo "")
+
+    if [ -n "$INSTALLED_KERNEL" ] && [ "$RUNNING_KERNEL" != "${INSTALLED_KERNEL}-zen" ]; then
+        echo ""
+        echo -e "${GOLD}⚠ Kernel updated. Reboot recommended.${RESET}"
+        if command -v notify-send >/dev/null 2>&1; then
+            notify-send "SelahOS Update" "Kernel updated. Please reboot at your convenience." -i system-reboot
+        fi
+    fi
+}
+
+show_info() {
+    echo -e "${GOLD}SelahOS Update Configuration${RESET}"
+    echo "  Channel:        $CHANNEL"
+    echo "  Repository:     $REPO_URL"
+    echo "  Check interval: ${SELAHOS_CHECK_INTERVAL:-3600}s"
+    echo "  Notify mode:    ${SELAHOS_NOTIFY_MODE:-notify}"
+    echo ""
+    echo "  Current kernel:  $(uname -r)"
+    echo "  Installed kernel: $(pacman -Q linux-zen 2>/dev/null | awk '{print $2}')"
+    echo "  Wine version:    $(wine --version 2>/dev/null || echo "not installed")"
+}
+
+switch_channel() {
+    NEW_CHANNEL="$2"
+    case "$NEW_CHANNEL" in
+        beta|stable|edge)
+            sudo sed -i "s/^SELAHOS_CHANNEL=.*/SELAHOS_CHANNEL=\"$NEW_CHANNEL\"/" "$CONFIG"
+            echo -e "${TEAL}✓ Switched to channel: $NEW_CHANNEL${RESET}"
+            echo "  Run 'selah-update --apply' to fetch packages from new channel."
+            ;;
+        *)
+            echo "Available channels: beta | stable | edge"
+            echo "Current: $CHANNEL"
+            exit 1
+            ;;
+    esac
+}
+
+case "$action" in
+    --check)
+        check_updates || true
+        ;;
+    --apply)
+        apply_updates
+        ;;
+    --info)
+        show_info
+        ;;
+    --channel)
+        switch_channel "$@"
+        ;;
+    --help|-h)
+        head -25 "$0" | tail -22
+        ;;
+    *)
+        # Default: check, then prompt
+        if ! check_updates; then
+            read -rp "Apply updates now? [y/N] " ANSWER
+            if [[ "$ANSWER" =~ ^[Yy] ]]; then
+                apply_updates
+            fi
+        fi
+        ;;
+esac

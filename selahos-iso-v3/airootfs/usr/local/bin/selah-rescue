@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-rescue — SelahOS Boot Recovery Tool
+#
+# Run from a SelahOS USB stick when your installed system
+# won't boot. Common causes:
+#   - Mac NVRAM reset wiped EFI boot entry
+#   - Bootloader files damaged
+#   - Wrong kernel selected as default
+#
+# This tool:
+#   1. Detects your installed SelahOS partition
+#   2. Mounts it
+#   3. chroots in
+#   4. Reinstalls bootloader with --removable flag (Mac-safe)
+#   5. Regenerates initramfs
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+set -e
+
+GOLD='\033[38;2;214;168;90m'
+TEAL='\033[38;2;142;195;184m'
+DANGER='\033[38;2;154;92;84m'
+PARCH='\033[38;2;241;232;216m'
+RESET='\033[0m'
+
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${DANGER}selah-rescue must be run as root.${RESET}"
+    echo "  sudo selah-rescue"
+    exit 1
+fi
+
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${GOLD}  SelahOS Rescue Tool${RESET}"
+echo -e "${PARCH}  Recovering an installed SelahOS system${RESET}"
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""
+
+# Find candidate root partitions
+echo -e "${PARCH}→ Scanning for SelahOS installations...${RESET}"
+echo ""
+
+# List ext4 partitions
+mapfile -t PARTITIONS < <(lsblk -ln -o NAME,FSTYPE,SIZE,MOUNTPOINT | awk '$2=="ext4" && $4=="" {print $1}')
+
+if [ ${#PARTITIONS[@]} -eq 0 ]; then
+    echo -e "${DANGER}✗ No unmounted ext4 partitions found.${RESET}"
+    echo "  Your installed system may use a different filesystem,"
+    echo "  or no installation exists on this machine."
+    exit 1
+fi
+
+# Show options
+echo "Found these candidate partitions:"
+for i in "${!PARTITIONS[@]}"; do
+    PART="${PARTITIONS[$i]}"
+    SIZE=$(lsblk -ln -o SIZE "/dev/$PART" 2>/dev/null | head -1)
+    echo "  [$((i+1))] /dev/$PART ($SIZE)"
+done
+echo ""
+
+read -rp "Which partition is your SelahOS root? [1-${#PARTITIONS[@]}]: " CHOICE
+ROOT_PART="${PARTITIONS[$((CHOICE-1))]}"
+
+if [ -z "$ROOT_PART" ]; then
+    echo -e "${DANGER}Invalid choice.${RESET}"
+    exit 1
+fi
+
+echo ""
+echo -e "${PARCH}→ Mounting /dev/$ROOT_PART...${RESET}"
+mkdir -p /mnt/selahos-rescue
+mount "/dev/$ROOT_PART" /mnt/selahos-rescue
+
+# Verify it's a SelahOS install
+if [ ! -f /mnt/selahos-rescue/etc/os-release ] || ! grep -q "selahos" /mnt/selahos-rescue/etc/os-release; then
+    echo -e "${DANGER}✗ This doesn't appear to be a SelahOS partition.${RESET}"
+    umount /mnt/selahos-rescue
+    exit 1
+fi
+
+echo -e "${TEAL}  ✓ SelahOS installation detected${RESET}"
+
+# Find EFI partition
+echo ""
+echo -e "${PARCH}→ Looking for EFI partition...${RESET}"
+EFI_PART=$(lsblk -ln -o NAME,FSTYPE | awk '$2=="vfat" {print $1; exit}')
+
+if [ -z "$EFI_PART" ]; then
+    echo -e "${DANGER}✗ No EFI partition found.${RESET}"
+    umount /mnt/selahos-rescue
+    exit 1
+fi
+
+echo -e "${TEAL}  ✓ EFI partition: /dev/$EFI_PART${RESET}"
+
+mkdir -p /mnt/selahos-rescue/boot
+mount "/dev/$EFI_PART" /mnt/selahos-rescue/boot
+
+# Bind mount system dirs
+for dir in dev proc sys run; do
+    mount --bind "/$dir" "/mnt/selahos-rescue/$dir"
+done
+
+# Detect Apple hardware
+IS_APPLE=0
+if [ -f /sys/class/dmi/id/sys_vendor ] && grep -qi "apple" /sys/class/dmi/id/sys_vendor; then
+    IS_APPLE=1
+    echo -e "${TEAL}  ✓ Apple hardware — using --removable flag${RESET}"
+fi
+
+# Reinstall bootloader
+echo ""
+echo -e "${PARCH}→ Reinstalling GRUB bootloader...${RESET}"
+
+if [ "$IS_APPLE" -eq 1 ]; then
+    chroot /mnt/selahos-rescue grub-install \
+        --target=x86_64-efi \
+        --efi-directory=/boot \
+        --bootloader-id=SelahOS \
+        --removable \
+        --recheck
+else
+    chroot /mnt/selahos-rescue grub-install \
+        --target=x86_64-efi \
+        --efi-directory=/boot \
+        --bootloader-id=SelahOS \
+        --recheck
+fi
+
+echo -e "${PARCH}→ Regenerating GRUB config...${RESET}"
+chroot /mnt/selahos-rescue grub-mkconfig -o /boot/grub/grub.cfg
+
+echo -e "${PARCH}→ Regenerating initramfs...${RESET}"
+chroot /mnt/selahos-rescue mkinitcpio -P
+
+# Cleanup
+echo ""
+echo -e "${PARCH}→ Cleaning up...${RESET}"
+for dir in run sys proc dev; do
+    umount "/mnt/selahos-rescue/$dir" 2>/dev/null || true
+done
+umount /mnt/selahos-rescue/boot 2>/dev/null || true
+umount /mnt/selahos-rescue 2>/dev/null || true
+
+echo ""
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo -e "${TEAL}  ✓ Recovery complete${RESET}"
+echo -e "${PARCH}  Remove the USB stick and reboot.${RESET}"
+echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"

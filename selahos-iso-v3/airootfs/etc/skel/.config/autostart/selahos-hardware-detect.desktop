@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Hardware Detection
+Exec=/usr/local/bin/selahos-hardware-detect
+X-KDE-autostart-after=panel
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;
+NoDisplay=true

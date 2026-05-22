@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=SelahOS
+Description=SelahOS boot splash — Pause. Reflect. Create.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/selahos
+ScriptFile=/usr/share/plymouth/themes/selahos/selahos.script

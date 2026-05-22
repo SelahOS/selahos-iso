@@ -1,0 +1,511 @@
+#!/usr/bin/env python3
+# ============================================================
+# SelahOS Recovery Center
+# Accessible from KDE Application Menu → System → SelahOS Recovery
+# Runs on the INSTALLED system (not just live ISO)
+#
+# Provides:
+# 1. System Health Check — shows what's installed/working
+# 2. SelahBridge Repair — reinstalls Wine/DXVK/WineASIO
+# 3. Audio Repair — fixes PipeWire/JACK issues
+# 4. Theme Restore — reapplies SelahOS KDE theme
+# 5. Fresh Install Helper — guides reinstall from USB
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+
+import sys
+import os
+import subprocess
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout,
+    QHBoxLayout, QLabel, QPushButton, QTextEdit,
+    QFrame, QScrollArea, QStackedWidget
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont
+
+COLORS = {
+    'bg':     '#0B0F1A',
+    'bg2':    '#111827',
+    'bg3':    '#1A2030',
+    'gold':   '#D6A85A',
+    'parch':  '#EDE4D4',
+    'muted':  '#9A8D7B',
+    'teal':   '#8EC3B8',
+    'red':    '#B97A6F',
+    'border': '#2A3042',
+    'green':  '#6A9A7A',
+}
+
+STYLESHEET = f"""
+QMainWindow, QWidget {{
+    background-color: {COLORS['bg']};
+    color: {COLORS['parch']};
+    font-family: 'Noto Sans', sans-serif;
+    font-size: 14px;
+}}
+QLabel {{ background: transparent; color: {COLORS['parch']}; }}
+QPushButton {{
+    background-color: {COLORS['gold']};
+    color: {COLORS['bg']};
+    border: none;
+    border-radius: 4px;
+    padding: 10px 24px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton:hover {{ background-color: #E6C27A; }}
+QPushButton:disabled {{ background-color: {COLORS['border']}; color: {COLORS['muted']}; }}
+QPushButton#danger {{
+    background-color: transparent;
+    color: {COLORS['red']};
+    border: 1px solid {COLORS['red']};
+}}
+QPushButton#danger:hover {{ background-color: {COLORS['red']}; color: {COLORS['parch']}; }}
+QPushButton#secondary {{
+    background-color: transparent;
+    color: {COLORS['muted']};
+    border: 1px solid {COLORS['border']};
+}}
+QPushButton#secondary:hover {{ color: {COLORS['parch']}; border-color: {COLORS['muted']}; }}
+QPushButton#nav {{
+    background-color: transparent;
+    color: {COLORS['muted']};
+    border: none;
+    border-left: 2px solid transparent;
+    border-radius: 0;
+    padding: 12px 20px;
+    text-align: left;
+    font-weight: normal;
+}}
+QPushButton#nav:hover {{ color: {COLORS['parch']}; background: {COLORS['bg2']}; }}
+QPushButton#nav[active="true"] {{
+    color: {COLORS['gold']};
+    border-left: 2px solid {COLORS['gold']};
+    background: {COLORS['bg2']};
+}}
+QTextEdit {{
+    background-color: {COLORS['bg2']};
+    color: {COLORS['muted']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    padding: 8px;
+}}
+QScrollArea {{ border: none; background: transparent; }}
+QScrollBar:vertical {{
+    background: {COLORS['bg2']};
+    width: 6px;
+    border-radius: 3px;
+}}
+QScrollBar::handle:vertical {{
+    background: {COLORS['border']};
+    border-radius: 3px;
+}}
+"""
+
+
+def run_cmd(cmd, capture=True):
+    try:
+        result = subprocess.run(
+            cmd, shell=isinstance(cmd, str),
+            capture_output=capture, text=True, timeout=30
+        )
+        return result.returncode == 0, result.stdout + result.stderr
+    except Exception as e:
+        return False, str(e)
+
+
+def check_package(pkg):
+    ok, _ = run_cmd(['pacman', '-Q', pkg])
+    return ok
+
+
+def check_service(svc):
+    ok, out = run_cmd(['systemctl', 'is-active', svc])
+    return 'active' in out
+
+
+class WorkerThread(QThread):
+    log = pyqtSignal(str)
+    done = pyqtSignal(bool)
+
+    def __init__(self, tasks):
+        super().__init__()
+        self.tasks = tasks
+
+    def run(self):
+        success = True
+        for desc, cmd in self.tasks:
+            self.log.emit(f"→ {desc}")
+            ok, out = run_cmd(cmd)
+            if out.strip():
+                for line in out.strip().splitlines()[-3:]:
+                    self.log.emit(f"  {line}")
+            if ok:
+                self.log.emit(f"  ✓ Done")
+            else:
+                self.log.emit(f"  ⚠ Issue (may be ok)")
+            if not ok:
+                success = False
+        self.done.emit(success)
+
+
+class HealthPage(QWidget):
+    def __init__(self):
+        super().__init__()
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 32, 40, 32)
+        layout.setSpacing(20)
+
+        title = QLabel("System Health Check")
+        title.setFont(QFont('Noto Sans', 22, QFont.Weight.Light))
+        title.setStyleSheet(f"color: {COLORS['gold']};")
+        layout.addWidget(title)
+
+        sub = QLabel("Current status of SelahOS components")
+        sub.setStyleSheet(f"color: {COLORS['muted']};")
+        layout.addWidget(sub)
+
+        self.results_layout = QVBoxLayout()
+        layout.addLayout(self.results_layout)
+        layout.addStretch()
+
+        btn = QPushButton("Run Health Check")
+        btn.setFixedHeight(44)
+        btn.clicked.connect(self.run_check)
+        layout.addWidget(btn)
+
+        # Run automatically
+        QTimer.singleShot(500, self.run_check)
+
+    def run_check(self):
+        # Clear existing
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        checks = [
+            ("Wine Staging",        check_package('wine-staging')),
+            ("DXVK",                check_package('dxvk-async-git') or check_package('dxvk')),
+            ("WineASIO",            check_package('wineasio')),
+            ("Realtime privileges", check_package('realtime-privileges')),
+            ("PipeWire",            check_service('pipewire')),
+            ("NetworkManager",      check_service('NetworkManager')),
+            ("SDDM",                check_service('sddm')),
+            ("NTSYNC",              os.path.exists('/dev/ntsync')),
+            ("Broadcom WiFi",       check_package('broadcom-wl-dkms')),
+            ("KDE Plasma",          check_package('plasma-desktop')),
+            ("SelahBridge tools",   os.path.exists('/usr/local/bin/selahbridge-setup')),
+            ("Kvantum theme",       check_package('kvantum')),
+        ]
+
+        for name, status in checks:
+            row = QFrame()
+            row.setStyleSheet(f"background: {COLORS['bg2']}; border: 1px solid {COLORS['border']}; border-radius: 4px;")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(16, 10, 16, 10)
+
+            icon = QLabel("✓" if status else "✗")
+            icon.setStyleSheet(f"color: {COLORS['teal'] if status else COLORS['red']}; font-size: 16px; background: transparent;")
+            icon.setFixedWidth(24)
+
+            lbl = QLabel(name)
+            lbl.setStyleSheet(f"color: {COLORS['parch'] if status else COLORS['muted']}; background: transparent;")
+
+            stat = QLabel("OK" if status else "Missing / Inactive")
+            stat.setStyleSheet(f"color: {COLORS['teal'] if status else COLORS['red']}; font-size: 12px; background: transparent;")
+            stat.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+            row_layout.addWidget(icon)
+            row_layout.addWidget(lbl)
+            row_layout.addStretch()
+            row_layout.addWidget(stat)
+            self.results_layout.addWidget(row)
+
+
+class RepairPage(QWidget):
+    def __init__(self, title, subtitle, tasks, danger=False):
+        super().__init__()
+        self.title_text = title
+        self.subtitle_text = subtitle
+        self.tasks = tasks
+        self.danger = danger
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 32, 40, 32)
+        layout.setSpacing(16)
+
+        title = QLabel(self.title_text)
+        title.setFont(QFont('Noto Sans', 22, QFont.Weight.Light))
+        title.setStyleSheet(f"color: {COLORS['gold']};")
+        layout.addWidget(title)
+
+        sub = QLabel(self.subtitle_text)
+        sub.setStyleSheet(f"color: {COLORS['muted']};")
+        sub.setWordWrap(True)
+        layout.addWidget(sub)
+
+        div = QFrame()
+        div.setFixedHeight(1)
+        div.setStyleSheet(f"background: {COLORS['border']};")
+        layout.addWidget(div)
+
+        steps_label = QLabel("This will:")
+        steps_label.setStyleSheet(f"color: {COLORS['parch']};")
+        layout.addWidget(steps_label)
+
+        for _, desc in self.tasks:
+            step = QLabel(f"  • {desc}" if isinstance(desc, str) else f"  • {desc}")
+            step.setStyleSheet(f"color: {COLORS['muted']}; font-size: 13px;")
+            layout.addWidget(step)
+
+        layout.addSpacing(8)
+
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(180)
+        self.log.setPlaceholderText("Output will appear here...")
+        layout.addWidget(self.log)
+
+        self.btn = QPushButton(f"Run {self.title_text}")
+        self.btn.setFixedHeight(44)
+        if self.danger:
+            self.btn.setObjectName("danger")
+        self.btn.clicked.connect(self._run)
+        layout.addWidget(self.btn)
+
+        self.status = QLabel("")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status.setStyleSheet(f"color: {COLORS['teal']};")
+        layout.addWidget(self.status)
+
+    def _run(self):
+        self.btn.setEnabled(False)
+        self.btn.setText("Running...")
+        self.log.clear()
+
+        self.worker = WorkerThread(self.tasks)
+        self.worker.log.connect(self.log.append)
+        self.worker.done.connect(self._done)
+        self.worker.start()
+
+    def _done(self, success):
+        if success:
+            self.status.setText("✓ Complete — you may need to log out and back in")
+            self.status.setStyleSheet(f"color: {COLORS['teal']};")
+        else:
+            self.status.setText("⚠ Some steps had issues — check output above")
+            self.status.setStyleSheet(f"color: {COLORS['gold']};")
+        self.btn.setText("Run Again")
+        self.btn.setEnabled(True)
+
+
+class FreshInstallPage(QWidget):
+    def __init__(self):
+        super().__init__()
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 32, 40, 32)
+        layout.setSpacing(16)
+
+        title = QLabel("Fresh Install Guide")
+        title.setFont(QFont('Noto Sans', 22, QFont.Weight.Light))
+        title.setStyleSheet(f"color: {COLORS['gold']};")
+        layout.addWidget(title)
+
+        steps = [
+            ("1", "Download the latest SelahOS ISO", "From beta@selahos.io or selahos.io/download"),
+            ("2", "Burn to USB with dd", "sudo dd if=selahos-*.iso of=/dev/sdX bs=4M status=progress oflag=sync"),
+            ("3", "Boot from USB", "Hold Option (Mac) or F12 (PC) during startup"),
+            ("4", "Connect ethernet", "WiFi driver loads after first reboot — use cable for install"),
+            ("5", "Click Install SelahOS", "From the desktop — or run: sudo python3 /usr/local/bin/selahos-installer"),
+            ("6", "If installer fails", "Open terminal and run: sudo selah-recover"),
+        ]
+
+        for num, step_title, step_body in steps:
+            frame = QFrame()
+            frame.setStyleSheet(f"background: {COLORS['bg2']}; border: 1px solid {COLORS['border']}; border-radius: 4px;")
+            frame_layout = QHBoxLayout(frame)
+            frame_layout.setContentsMargins(16, 14, 16, 14)
+            frame_layout.setSpacing(16)
+
+            num_label = QLabel(num)
+            num_label.setFixedSize(28, 28)
+            num_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            num_label.setStyleSheet(f"background: {COLORS['gold']}; color: {COLORS['bg']}; border-radius: 14px; font-weight: bold; font-size: 13px;")
+
+            text_layout = QVBoxLayout()
+            text_layout.setSpacing(2)
+            t = QLabel(step_title)
+            t.setStyleSheet(f"color: {COLORS['parch']}; font-weight: bold; background: transparent;")
+            b = QLabel(step_body)
+            b.setStyleSheet(f"color: {COLORS['muted']}; font-size: 12px; font-family: monospace; background: transparent;")
+            b.setWordWrap(True)
+            text_layout.addWidget(t)
+            text_layout.addWidget(b)
+
+            frame_layout.addWidget(num_label)
+            frame_layout.addLayout(text_layout)
+            layout.addWidget(frame)
+
+        layout.addStretch()
+
+        note = QLabel("SelahOS v1.0-beta · selahos.io · beta@selahos.io")
+        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        note.setStyleSheet(f"color: {COLORS['border']}; font-size: 12px;")
+        layout.addWidget(note)
+
+
+class SelahRecoveryCenter(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("SelahOS Recovery Center")
+        self.setMinimumSize(820, 580)
+        self.resize(880, 620)
+        self._build()
+        self._center()
+
+    def _center(self):
+        screen = QApplication.primaryScreen().geometry()
+        self.move(
+            (screen.width() - self.width()) // 2,
+            (screen.height() - self.height()) // 2
+        )
+
+    def _build(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        main = QHBoxLayout(central)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+
+        # Sidebar
+        sidebar = QFrame()
+        sidebar.setFixedWidth(220)
+        sidebar.setStyleSheet(f"background: {COLORS['bg2']}; border-right: 1px solid {COLORS['border']};")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(0)
+
+        # Logo
+        logo_frame = QFrame()
+        logo_frame.setStyleSheet(f"background: {COLORS['bg3']}; border-bottom: 1px solid {COLORS['border']};")
+        logo_layout = QVBoxLayout(logo_frame)
+        logo_layout.setContentsMargins(20, 20, 20, 20)
+        logo = QLabel("SelahOS")
+        logo.setFont(QFont('Noto Sans', 16, QFont.Weight.Light))
+        logo.setStyleSheet(f"color: {COLORS['gold']}; letter-spacing: 2px;")
+        sub = QLabel("Recovery Center")
+        sub.setStyleSheet(f"color: {COLORS['muted']}; font-size: 11px; letter-spacing: 1px;")
+        logo_layout.addWidget(logo)
+        logo_layout.addWidget(sub)
+        sidebar_layout.addWidget(logo_frame)
+
+        # Nav buttons
+        self.nav_buttons = []
+        nav_items = [
+            ("Health Check",       0),
+            ("SelahBridge Repair", 1),
+            ("Audio Repair",       2),
+            ("Theme Restore",      3),
+            ("Fresh Install",      4),
+        ]
+
+        for label, idx in nav_items:
+            btn = QPushButton(label)
+            btn.setObjectName("nav")
+            btn.setFixedHeight(44)
+            btn.clicked.connect(lambda checked, i=idx: self._switch(i))
+            sidebar_layout.addWidget(btn)
+            self.nav_buttons.append(btn)
+
+        sidebar_layout.addStretch()
+
+        ver = QLabel("v1.0-beta")
+        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ver.setStyleSheet(f"color: {COLORS['border']}; font-size: 11px; padding: 12px;")
+        sidebar_layout.addWidget(ver)
+
+        main.addWidget(sidebar)
+
+        # Content area
+        self.stack = QStackedWidget()
+
+        # Page 0: Health
+        self.stack.addWidget(HealthPage())
+
+        # Page 1: SelahBridge Repair
+        selahbridge_tasks = [
+            (['pacman', '-S', '--noconfirm', '--needed', 'wine-staging', 'wine-mono', 'wine-gecko', 'winetricks'], "Install/update Wine Staging"),
+            (['pacman', '-S', '--noconfirm', '--needed', 'dxvk-async-git'], "Install/update DXVK"),
+            (['pacman', '-S', '--noconfirm', '--needed', 'wineasio'], "Install/update WineASIO"),
+            (['pacman', '-S', '--noconfirm', '--needed', 'realtime-privileges', 'lib32-pipewire-jack'], "Install supporting packages"),
+            (['usermod', '-aG', 'realtime,audio', os.environ.get('SUDO_USER', 'dbnoble')], "Add user to audio groups"),
+        ]
+        self.stack.addWidget(RepairPage(
+            "SelahBridge Repair",
+            "Reinstalls or repairs the Windows compatibility layer. Use this if Wine, DXVK, or WineASIO stopped working.",
+            selahbridge_tasks
+        ))
+
+        # Page 2: Audio Repair
+        audio_tasks = [
+            (['systemctl', '--user', 'restart', 'pipewire', 'wireplumber'], "Restart PipeWire"),
+            (['pacman', '-S', '--noconfirm', '--needed', 'pipewire-jack', 'pipewire-pulse', 'pipewire-alsa'], "Reinstall PipeWire components"),
+            (['pacman', '-S', '--noconfirm', '--needed', 'realtime-privileges'], "Reinstall realtime privileges"),
+        ]
+        self.stack.addWidget(RepairPage(
+            "Audio Repair",
+            "Fixes PipeWire, JACK, and audio routing issues. Use this if audio stopped working or is crackling.",
+            audio_tasks
+        ))
+
+        # Page 3: Theme Restore
+        theme_tasks = [
+            (['pacman', '-S', '--noconfirm', '--needed', 'kvantum', 'kvantum-qt5'], "Install Kvantum"),
+            (['bash', '-c', 'kwriteconfig5 --file ~/.config/kdeglobals --group General --key ColorScheme Selah'], "Apply Selah color scheme"),
+            (['bash', '-c', 'kwriteconfig5 --file ~/.config/kdeglobals --group General --key widgetStyle kvantum-dark'], "Apply Kvantum engine"),
+            (['bash', '-c', 'kquitapp6 plasmashell; sleep 2; kstart6 plasmashell &'], "Restart Plasma shell"),
+        ]
+        self.stack.addWidget(RepairPage(
+            "Theme Restore",
+            "Reapplies the SelahOS Selah KDE theme. Use this if the desktop theme looks wrong or reverted.",
+            theme_tasks
+        ))
+
+        # Page 4: Fresh Install
+        self.stack.addWidget(FreshInstallPage())
+
+        main.addWidget(self.stack)
+
+        self._switch(0)
+
+    def _switch(self, idx):
+        self.stack.setCurrentIndex(idx)
+        for i, btn in enumerate(self.nav_buttons):
+            btn.setProperty("active", "true" if i == idx else "false")
+            btn.setStyle(btn.style())
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("SelahOS Recovery Center")
+    app.setStyleSheet(STYLESHEET)
+    window = SelahRecoveryCenter()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS First Run Notice
+GenericName=Compatibility Notice
+Comment=Displays SelahOS compatibility notice on first login after install
+Exec=/usr/local/bin/selahos-firstrun-notice
+Icon=help-about
+Terminal=false
+StartupNotify=false
+X-KDE-StartupNotify=false
+X-KDE-autostart-after=panel
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;

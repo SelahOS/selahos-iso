@@ -1,0 +1,1079 @@
+#!/usr/bin/env python3
+# ============================================================
+# SelahOS Installer — selahos-installer
+# A branded graphical installer for SelahOS
+# Built with PyQt6, runs on the live ISO
+#
+# Replaces Calamares for Beta 1.0
+# Uses archinstall as the backend engine
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# Licensed under GPL-3.0-or-later
+# ============================================================
+
+import sys
+import os
+import subprocess
+import threading
+import time
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QComboBox, QStackedWidget,
+    QFrame, QProgressBar, QSizePolicy, QScrollArea, QCheckBox
+)
+from PyQt6.QtCore import (
+    Qt, QTimer, QThread, pyqtSignal, QPropertyAnimation,
+    QEasingCurve, QRect, QSize, pyqtProperty, QObject
+)
+from PyQt6.QtGui import (
+    QFont, QColor, QPalette, QPixmap, QPainter, QLinearGradient,
+    QBrush, QPen, QFontDatabase, QIcon, QMovie
+)
+
+# ── SelahOS Design Tokens ─────────────────────────────────────
+COLORS = {
+    'bg':       '#0B0F1A',
+    'bg2':      '#111827',
+    'bg3':      '#1A2030',
+    'gold':     '#D6A85A',
+    'gold_lt':  '#E6C27A',
+    'parch':    '#F1E8D8',
+    'teal':     '#8EC3B8',
+    'muted':    '#9A8D7B',
+    'danger':   '#B97A6F',
+    'border':   '#2A3042',
+}
+
+SLIDES = [
+    {
+        'title': 'Welcome to SelahOS',
+        'subtitle': 'Pause. Reflect. Create.',
+        'body': 'An operating system designed for creators.\n\nBuilt on Linux. Opinionated about audio.\nHardware-adaptive by design.\n\nMade by Selah Technologies LLC.',
+        'accent': COLORS['gold'],
+    },
+    {
+        'title': 'SelahBridge™',
+        'subtitle': 'Your Windows tools. On Linux.',
+        'body': 'Drop a Windows installer.\nIt installs. It opens. It runs.\n\nMPC. Reaper. FL Studio. AIR plugins.\nAll on SelahOS — no virtual machine required.',
+        'accent': COLORS['teal'],
+    },
+    {
+        'title': 'Hardware-Adaptive',
+        'subtitle': 'Every machine deserves a creative life.',
+        'body': 'Older Mac? Older PC? SelahOS adapts.\n\nGive your machine another decade of useful life.\nThe hardware you already own is enough.',
+        'accent': COLORS['gold_lt'],
+    },
+    {
+        'title': 'Your Audio, First-Class',
+        'subtitle': 'Built for the studio. Tuned for the bedroom.',
+        'body': 'PipeWire. JACK. ASIO.\nLow-latency by default.\n\nNative Linux DAWs and Windows software\nside by side through SelahBridge.',
+        'accent': COLORS['teal'],
+    },
+    {
+        'title': 'Selah.',
+        'subtitle': 'A Hebrew word. A creative philosophy.',
+        'body': 'In the ancient Psalms, Selah meant:\npause, reflect, consider.\n\nWe built an OS around that idea.\nYour tools should create space — not consume it.\n\nThank you for choosing SelahOS.',
+        'accent': COLORS['gold'],
+    },
+]
+
+STYLESHEET = f"""
+QMainWindow, QWidget {{
+    background-color: {COLORS['bg']};
+    color: {COLORS['parch']};
+    font-family: 'Noto Sans', sans-serif;
+}}
+QLabel {{
+    color: {COLORS['parch']};
+    background: transparent;
+}}
+QLineEdit {{
+    background-color: {COLORS['bg3']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    color: {COLORS['parch']};
+    padding: 10px 14px;
+    font-size: 15px;
+    selection-background-color: {COLORS['gold']};
+}}
+QLineEdit:focus {{
+    border-color: {COLORS['gold']};
+}}
+QPushButton {{
+    background-color: {COLORS['gold']};
+    color: {COLORS['bg']};
+    border: none;
+    border-radius: 6px;
+    padding: 12px 28px;
+    font-size: 15px;
+    font-weight: bold;
+}}
+QPushButton:hover {{
+    background-color: {COLORS['gold_lt']};
+}}
+QPushButton:disabled {{
+    background-color: {COLORS['border']};
+    color: {COLORS['muted']};
+}}
+QPushButton#secondary {{
+    background-color: transparent;
+    color: {COLORS['muted']};
+    border: 1px solid {COLORS['border']};
+}}
+QPushButton#secondary:hover {{
+    color: {COLORS['parch']};
+    border-color: {COLORS['muted']};
+}}
+QComboBox {{
+    background-color: {COLORS['bg3']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 6px;
+    color: {COLORS['parch']};
+    padding: 10px 14px;
+    font-size: 15px;
+}}
+QComboBox:focus {{
+    border-color: {COLORS['gold']};
+}}
+QComboBox::drop-down {{
+    border: none;
+    padding-right: 10px;
+}}
+QProgressBar {{
+    background-color: {COLORS['bg3']};
+    border: none;
+    border-radius: 3px;
+    height: 6px;
+}}
+QProgressBar::chunk {{
+    background-color: {COLORS['gold']};
+    border-radius: 3px;
+}}
+QCheckBox {{
+    color: {COLORS['parch']};
+    font-size: 14px;
+    spacing: 8px;
+}}
+QCheckBox::indicator {{
+    width: 18px;
+    height: 18px;
+    background-color: {COLORS['bg3']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 4px;
+}}
+QCheckBox::indicator:checked {{
+    background-color: {COLORS['gold']};
+    border-color: {COLORS['gold']};
+}}
+"""
+
+
+class SlideWidget(QWidget):
+    """A single installer slide with branding and text."""
+
+    def __init__(self, slide_data, parent=None):
+        super().__init__(parent)
+        self.slide = slide_data
+        self.setMinimumHeight(300)
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(60, 50, 60, 50)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # Accent line
+        accent = QFrame()
+        accent.setFixedHeight(3)
+        accent.setStyleSheet(f"background: {self.slide['accent']}; border: none; border-radius: 2px;")
+        layout.addWidget(accent)
+
+        layout.addSpacing(20)
+
+        # Title
+        title = QLabel(self.slide['title'])
+        title.setFont(QFont('Noto Sans', 34, QFont.Weight.Light))
+        title.setStyleSheet(f"color: {COLORS['parch']}; background: transparent;")
+        layout.addWidget(title)
+
+        # Subtitle
+        subtitle = QLabel(self.slide['subtitle'])
+        subtitle.setFont(QFont('Noto Sans', 16))
+        subtitle.setStyleSheet(f"color: {self.slide['accent']}; font-style: italic; background: transparent;")
+        layout.addWidget(subtitle)
+
+        layout.addSpacing(16)
+
+        # Body
+        body = QLabel(self.slide['body'])
+        body.setFont(QFont('Noto Sans', 14))
+        body.setStyleSheet(f"color: {COLORS['muted']}; line-height: 1.8; background: transparent;")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+
+        layout.addStretch()
+
+
+class WelcomePage(QWidget):
+    proceed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(80, 60, 80, 60)
+        layout.setSpacing(0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # Brand mark
+        brand = QLabel('SELAH')
+        brand.setFont(QFont('Noto Sans', 72, QFont.Weight.Thin))
+        brand.setStyleSheet(f"color: {COLORS['gold']}; letter-spacing: 20px; background: transparent;")
+        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(brand)
+
+        tagline = QLabel('Pause.  Reflect.  Create.')
+        tagline.setFont(QFont('Noto Sans', 18))
+        tagline.setStyleSheet(f"color: {COLORS['muted']}; letter-spacing: 6px; font-style: italic; background: transparent;")
+        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(tagline)
+
+        layout.addSpacing(60)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background: {COLORS['border']};")
+        layout.addWidget(divider)
+
+        layout.addSpacing(40)
+
+        desc = QLabel('Welcome to the SelahOS installer.\n\nThis process will guide you through installing SelahOS\non your computer. The installation takes approximately\n15–30 minutes.')
+        desc.setFont(QFont('Noto Sans', 15))
+        desc.setStyleSheet(f"color: {COLORS['parch']}; line-height: 2; background: transparent;")
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(desc)
+
+        layout.addSpacing(50)
+
+        btn = QPushButton('Begin Installation')
+        btn.setFixedSize(260, 52)
+        btn.setFont(QFont('Noto Sans', 15, QFont.Weight.Bold))
+        btn.clicked.connect(self.proceed)
+        layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addSpacing(20)
+
+        note = QLabel('SelahOS v1.0-beta · Selah Technologies LLC')
+        note.setFont(QFont('Noto Sans', 11))
+        note.setStyleSheet(f"color: {COLORS['border']}; background: transparent;")
+        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(note)
+
+
+class DiskPage(QWidget):
+    proceed = pyqtSignal(str)
+    back = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.disks = []
+        self._build()
+        self._scan_disks()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(80, 60, 80, 60)
+        layout.setSpacing(24)
+
+        title = QLabel('Choose Installation Disk')
+        title.setFont(QFont('Noto Sans', 28, QFont.Weight.Light))
+        title.setStyleSheet(f"color: {COLORS['parch']}; background: transparent;")
+        layout.addWidget(title)
+
+        sub = QLabel('SelahOS will be installed on the selected disk.\nAll data on the selected disk will be erased.')
+        sub.setFont(QFont('Noto Sans', 14))
+        sub.setStyleSheet(f"color: {COLORS['danger']}; background: transparent;")
+        layout.addWidget(sub)
+
+        layout.addSpacing(10)
+
+        self.disk_combo = QComboBox()
+        self.disk_combo.setFixedHeight(48)
+        layout.addWidget(self.disk_combo)
+
+        self.disk_info = QLabel('')
+        self.disk_info.setFont(QFont('Noto Sans', 13))
+        self.disk_info.setStyleSheet(f"color: {COLORS['muted']}; background: transparent;")
+        layout.addWidget(self.disk_info)
+
+        self.disk_combo.currentIndexChanged.connect(self._update_info)
+
+        layout.addStretch()
+
+        # Warn
+        warn_frame = QFrame()
+        warn_frame.setStyleSheet(f"background: {COLORS['bg3']}; border: 1px solid {COLORS['danger']}; border-radius: 8px;")
+        warn_layout = QVBoxLayout(warn_frame)
+        warn_layout.setContentsMargins(20, 16, 20, 16)
+        warn_label = QLabel('⚠  This will permanently erase all data on the selected disk.\nMake sure you have backed up any important files.')
+        warn_label.setFont(QFont('Noto Sans', 13))
+        warn_label.setStyleSheet(f"color: {COLORS['danger']}; background: transparent;")
+        warn_label.setWordWrap(True)
+        warn_layout.addWidget(warn_label)
+        layout.addWidget(warn_frame)
+
+        layout.addSpacing(20)
+
+        btn_row = QHBoxLayout()
+        back_btn = QPushButton('Back')
+        back_btn.setObjectName('secondary')
+        back_btn.setFixedSize(120, 48)
+        back_btn.clicked.connect(self.back)
+
+        self.next_btn = QPushButton('Continue')
+        self.next_btn.setFixedSize(160, 48)
+        self.next_btn.clicked.connect(self._proceed)
+
+        btn_row.addWidget(back_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self.next_btn)
+        layout.addLayout(btn_row)
+
+    def _scan_disks(self):
+        try:
+            result = subprocess.run(
+                ['lsblk', '-dpno', 'NAME,SIZE,MODEL'],
+                capture_output=True, text=True
+            )
+            self.disks = []
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split(None, 2)
+                if len(parts) >= 2:
+                    name = parts[0]
+                    size = parts[1]
+                    model = parts[2] if len(parts) > 2 else 'Unknown'
+                    # Skip loop devices and very small devices
+                    if not name.startswith('/dev/loop') and 'M' not in size:
+                        self.disks.append({'name': name, 'size': size, 'model': model.strip()})
+                        self.disk_combo.addItem(f"{name}  —  {size}  —  {model.strip()}")
+        except Exception as e:
+            self.disk_combo.addItem('/dev/sda  —  (scan failed)')
+            self.disks = [{'name': '/dev/sda', 'size': '?', 'model': 'Unknown'}]
+
+    def _update_info(self, idx):
+        if idx >= 0 and idx < len(self.disks):
+            d = self.disks[idx]
+            self.disk_info.setText(f"Device: {d['name']}   Size: {d['size']}   Model: {d['model']}")
+
+    def _proceed(self):
+        idx = self.disk_combo.currentIndex()
+        if idx >= 0 and idx < len(self.disks):
+            self.proceed.emit(self.disks[idx]['name'])
+
+
+class UserPage(QWidget):
+    proceed = pyqtSignal(dict)
+    back = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(80, 60, 80, 60)
+        layout.setSpacing(20)
+
+        title = QLabel('Create Your Account')
+        title.setFont(QFont('Noto Sans', 28, QFont.Weight.Light))
+        title.setStyleSheet(f"color: {COLORS['parch']}; background: transparent;")
+        layout.addWidget(title)
+
+        sub = QLabel('Set up your username, password, and system name.')
+        sub.setFont(QFont('Noto Sans', 14))
+        sub.setStyleSheet(f"color: {COLORS['muted']}; background: transparent;")
+        layout.addWidget(sub)
+
+        layout.addSpacing(10)
+
+        def field(label_text):
+            lbl = QLabel(label_text)
+            lbl.setFont(QFont('Noto Sans', 13))
+            lbl.setStyleSheet(f"color: {COLORS['muted']}; background: transparent;")
+            inp = QLineEdit()
+            inp.setFixedHeight(48)
+            return lbl, inp
+
+        lbl, self.username = field('Username')
+        self.username.setPlaceholderText('e.g. creator  (letters and numbers only)')
+        layout.addWidget(lbl)
+        layout.addWidget(self.username)
+
+        lbl2, self.password = field('Password')
+        self.password.setPlaceholderText('Choose a strong password')
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(lbl2)
+        layout.addWidget(self.password)
+
+        lbl3, self.hostname = field('Computer Name')
+        self.hostname.setPlaceholderText('e.g. SelahOS')
+        self.hostname.setText('SelahOS')
+        layout.addWidget(lbl3)
+        layout.addWidget(self.hostname)
+
+        self.autologin = QCheckBox('Automatically log in at startup')
+        self.autologin.setFont(QFont('Noto Sans', 14))
+        layout.addWidget(self.autologin)
+
+        self.error_label = QLabel('')
+        self.error_label.setFont(QFont('Noto Sans', 13))
+        self.error_label.setStyleSheet(f"color: {COLORS['danger']}; background: transparent;")
+        layout.addWidget(self.error_label)
+
+        layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        back_btn = QPushButton('Back')
+        back_btn.setObjectName('secondary')
+        back_btn.setFixedSize(120, 48)
+        back_btn.clicked.connect(self.back)
+
+        next_btn = QPushButton('Continue')
+        next_btn.setFixedSize(160, 48)
+        next_btn.clicked.connect(self._proceed)
+
+        btn_row.addWidget(back_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(next_btn)
+        layout.addLayout(btn_row)
+
+    def _proceed(self):
+        user = self.username.text().strip().lower()
+        pw = self.password.text()
+        host = self.hostname.text().strip()
+
+        # Sanitize username - Linux usernames must be lowercase alphanumeric + underscore/hyphen
+        import re
+        user = re.sub(r'[^a-z0-9_-]', '', user.lower().replace(' ', '').replace('.', ''))
+        if not user:
+            self.error_label.setText('Username is required (letters and numbers only).')
+            return
+        if len(user) < 2:
+            self.error_label.setText('Username must be at least 2 characters.')
+            return
+        # Update the field to show sanitized username
+        self.username.setText(user)
+        if not pw or len(pw) < 6:
+            self.error_label.setText('Password must be at least 6 characters.')
+            return
+        if not host:
+            self.error_label.setText('Computer name is required.')
+            return
+
+        self.error_label.setText('')
+        self.proceed.emit({
+            'username': user,
+            'password': pw,
+            'hostname': host,
+            'autologin': self.autologin.isChecked(),
+        })
+
+
+class InstallPage(QWidget):
+    """Shows the SelahOS story slides while installation runs."""
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_slide = 0
+        self.slide_timer = QTimer()
+        self.slide_timer.timeout.connect(self._next_slide)
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Slide area
+        self.slide_stack = QStackedWidget()
+        for slide in SLIDES:
+            self.slide_stack.addWidget(SlideWidget(slide))
+        layout.addWidget(self.slide_stack, stretch=1)
+
+        # Bottom bar
+        bottom = QFrame()
+        bottom.setStyleSheet(f"background: {COLORS['bg2']}; border-top: 1px solid {COLORS['border']};")
+        bottom.setFixedHeight(90)
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(60, 14, 60, 14)
+        bottom_layout.setSpacing(8)
+
+        self.status_label = QLabel('Preparing installation...')
+        self.status_label.setFont(QFont('Noto Sans', 13))
+        self.status_label.setStyleSheet(f"color: {COLORS['muted']}; background: transparent;")
+        bottom_layout.addWidget(self.status_label)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)  # Indeterminate
+        self.progress.setFixedHeight(6)
+        bottom_layout.addWidget(self.progress)
+
+        # Slide dots
+        dots_layout = QHBoxLayout()
+        dots_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dots_layout.setSpacing(8)
+        self.dots = []
+        for i in range(len(SLIDES)):
+            dot = QLabel('●')
+            dot.setFont(QFont('Noto Sans', 8))
+            dot.setStyleSheet(f"color: {COLORS['border']}; background: transparent;")
+            dots_layout.addWidget(dot)
+            self.dots.append(dot)
+        bottom_layout.addLayout(dots_layout)
+
+        layout.addWidget(bottom)
+        self._update_dots()
+
+    def _update_dots(self):
+        for i, dot in enumerate(self.dots):
+            if i == self.current_slide:
+                dot.setStyleSheet(f"color: {COLORS['gold']}; background: transparent;")
+            else:
+                dot.setStyleSheet(f"color: {COLORS['border']}; background: transparent;")
+
+    def _next_slide(self):
+        self.current_slide = (self.current_slide + 1) % len(SLIDES)
+        self.slide_stack.setCurrentIndex(self.current_slide)
+        self._update_dots()
+
+    def start_install(self, config):
+        """Begin installation with given config dict."""
+        self.config = config
+        self.slide_timer.start(8000)
+
+        # Run install in background thread
+        self.install_thread = InstallThread(config)
+        self.install_thread.status_update.connect(self._update_status)
+        self.install_thread.progress_value.connect(self._update_progress)
+        self.install_thread.finished_signal.connect(self._install_done)
+        self.install_thread.start()
+
+    def _update_status(self, msg):
+        self.status_label.setText(msg)
+
+    def _update_progress(self, val):
+        if val < 0:
+            self.progress.setRange(0, 0)
+        else:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(val)
+
+    def _install_done(self, success, msg):
+        self.slide_timer.stop()
+        self.finished.emit(success, msg)
+
+
+class InstallThread(QThread):
+    status_update = pyqtSignal(str)
+    progress_value = pyqtSignal(int)
+    finished_signal = pyqtSignal(bool, str)
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self.config = config
+
+    def run(self):
+        try:
+            self._do_install()
+        except Exception as e:
+            self.finished_signal.emit(False, str(e))
+
+    def _do_install(self):
+        disk = self.config['disk']
+        username = self.config['username']
+        password = self.config['password']
+        hostname = self.config['hostname']
+
+        log_path = '/tmp/selahos-install.log'
+
+        # Check network connectivity before starting
+        self.status_update.emit('Checking network connectivity...')
+        self.progress_value.emit(3)
+        import subprocess as sp
+        net_ok = sp.run(
+            ['ping', '-c', '1', '-W', '3', '8.8.8.8'],
+            capture_output=True
+        ).returncode == 0
+
+        if not net_ok:
+            self.finished_signal.emit(False,
+                'No internet connection detected.\n\n'
+                'Please connect to WiFi first:\n'
+                '1. Open Konsole\n'
+                '2. Run: nmtui\n'
+                '3. Select "Activate a connection"\n'
+                '4. Choose your WiFi network\n'
+                '5. Then click Install SelahOS again'
+            )
+            return
+
+        self.status_update.emit('Network OK. Preparing installation...')
+        self.progress_value.emit(5)
+
+        # Write a shell script that calls archinstall using expect-style
+        # input feeding. This avoids all JSON config version issues.
+        install_script = f"""#!/bin/bash
+set -e
+LOG=/tmp/selahos-install.log
+exec >> "$LOG" 2>&1
+
+echo "=== SelahOS Installation Script ==="
+echo "Disk: {disk}"
+echo "User: {username}"
+echo "Host: {hostname}"
+echo ""
+
+# Ensure keyring works
+pacman-key --init 2>/dev/null || true
+pacman-key --populate archlinux 2>/dev/null || true
+
+# Ensure mirrorlist has entries
+if ! grep -q "^Server" /etc/pacman.d/mirrorlist 2>/dev/null; then
+    echo "Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch" > /etc/pacman.d/mirrorlist
+    echo "Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch" >> /etc/pacman.d/mirrorlist
+fi
+
+echo "=== Partitioning disk ==="
+# Wipe and partition the disk
+sgdisk --zap-all {disk}
+sgdisk --new=1:0:+512M --typecode=1:ef00 --change-name=1:EFI {disk}
+sgdisk --new=2:0:0 --typecode=2:8300 --change-name=2:ROOT {disk}
+partprobe {disk}
+sleep 2
+
+# Detect partition names
+if [[ "{disk}" == *"nvme"* ]]; then
+    EFI="{disk}p1"
+    ROOT="{disk}p2"
+else
+    EFI="{disk}1"
+    ROOT="{disk}2"
+fi
+
+echo "EFI partition: $EFI"
+echo "ROOT partition: $ROOT"
+
+# Format
+mkfs.fat -F32 "$EFI"
+mkfs.ext4 -F "$ROOT"
+
+# Mount
+mount "$ROOT" /mnt
+mkdir -p /mnt/boot
+mount "$EFI" /mnt/boot
+
+echo "=== Installing base system ==="
+# Bootstrap with pacstrap
+pacstrap -K /mnt base base-devel linux-zen linux-zen-headers linux-firmware \
+    networkmanager sudo grub efibootmgr os-prober \
+    pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse wireplumber \
+    sddm plasma-meta kde-applications-meta \
+    nano vim git wget curl \
+    intel-ucode amd-ucode
+
+echo "=== Generating fstab ==="
+genfstab -U /mnt >> /mnt/etc/fstab
+
+echo "=== Configuring system ==="
+# Timezone
+arch-chroot /mnt ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+arch-chroot /mnt hwclock --systohc
+
+# Locale
+echo "en_US.UTF-8 UTF-8" >> /mnt/etc/locale.gen
+arch-chroot /mnt locale-gen
+echo "LANG=en_US.UTF-8" > /mnt/etc/locale.conf
+
+# Hostname
+echo "{hostname}" > /mnt/etc/hostname
+cat > /mnt/etc/hosts << HOSTS
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   {hostname}.localdomain {hostname}
+HOSTS
+
+# Users
+arch-chroot /mnt useradd -m -G wheel,audio,video,storage,network,input -s /bin/bash {username}
+# Create ALL groups before user creation (Omolara fix)
+for grp in wheel audio video storage network input bluetooth realtime; do
+    arch-chroot /mnt groupadd -f "$grp" 2>/dev/null || true
+done
+
+# Create user with safe base groups only
+arch-chroot /mnt useradd -m \
+    -G wheel,audio,video,storage,network,input \
+    -s /bin/bash {username} 2>/dev/null || \
+    arch-chroot /mnt usermod -aG wheel,audio,video,storage,network,input {username}
+
+# Add realtime AFTER user creation
+arch-chroot /mnt usermod -aG realtime {username} 2>/dev/null || true
+arch-chroot /mnt usermod -aG bluetooth {username} 2>/dev/null || true
+
+echo "{username}:{password}" | arch-chroot /mnt chpasswd
+echo "root:{password}" | arch-chroot /mnt chpasswd
+echo "%wheel ALL=(ALL) ALL" >> /mnt/etc/sudoers
+
+# Services
+arch-chroot /mnt systemctl enable NetworkManager
+arch-chroot /mnt systemctl enable sddm
+
+# SelahOS branding
+cat > /mnt/etc/os-release << OSREL
+NAME="SelahOS"
+PRETTY_NAME="SelahOS v1.0-beta"
+ID=selahos
+ID_LIKE=arch
+BUILD_ID=rolling
+HOME_URL="https://selahos.io"
+VENDOR_NAME="Selah Technologies LLC"
+VENDOR_URL="https://selahtechnologies.io"
+OSREL
+
+# Fix GRUB distributor name
+sed -i 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/' /mnt/etc/default/grub
+arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
+
+echo "=== Installing bootloader ==="
+arch-chroot /mnt grub-install \
+    --target=x86_64-efi \
+    --efi-directory=/boot \
+    --bootloader-id=SelahOS \
+    --removable \
+    --recheck
+arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+
+echo "=== Unmounting ==="
+umount -R /mnt
+
+echo "=== Installation complete ==="
+"""
+
+        script_path = '/tmp/selahos-do-install.sh'
+        with open(script_path, 'w') as f:
+            f.write(install_script)
+        os.chmod(script_path, 0o755)
+
+        log_file = open(log_path, 'w')
+        log_file.write(f"SelahOS Installer Log\nDisk: {disk}\nUser: {username}\nHost: {hostname}\n\n")
+        log_file.flush()
+
+        self.status_update.emit('Partitioning disk...')
+        self.progress_value.emit(15)
+
+        cmd = ['bash', script_path]
+
+        log_file = open('/tmp/selahos-install.log', 'w')
+        log_file.write(f"SelahOS Installer Log\nDisk: {disk}\nUser: {username}\nHost: {hostname}\n\n")
+        log_file.flush()
+
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+
+        progress_map = {
+            'partitioning': (30, 'Partitioning disk...'),
+            'Installing': (40, 'Installing packages...'),
+            'base': (45, 'Installing base system...'),
+            'kernel': (55, 'Installing kernel...'),
+            'plasma': (65, 'Installing KDE Plasma...'),
+            'bootloader': (80, 'Installing bootloader...'),
+            'grub': (80, 'Configuring GRUB...'),
+            'locale': (85, 'Configuring locale...'),
+            'user': (88, 'Creating user account...'),
+            'network': (90, 'Configuring network...'),
+            'Done': (95, 'Finalizing installation...'),
+        }
+
+        for line in process.stdout:
+            line = line.strip()
+            log_file.write(line + "\n")
+            log_file.flush()
+            for keyword, (pct, msg) in progress_map.items():
+                if keyword.lower() in line.lower():
+                    self.status_update.emit(msg)
+                    self.progress_value.emit(pct)
+                    break
+
+        process.wait()
+        log_file.write(f"\nReturn code: {process.returncode}\n")
+        log_file.close()
+
+        if process.returncode != 0:
+            self.finished_signal.emit(False,
+                'Installation failed. Check /tmp/selahos-install.log for details.')
+            return
+
+        # Post-install: apply Mac GRUB --removable flag if Apple hardware
+        if self._is_apple():
+            self.status_update.emit('Applying Mac bootloader fix...')
+            self._apply_mac_grub()
+
+        # Post-install: set hostname branding
+        self.status_update.emit('Applying SelahOS branding...')
+        self._apply_branding(hostname)
+
+        self.progress_value.emit(100)
+        self.status_update.emit('Installation complete!')
+        time.sleep(1)
+        self.finished_signal.emit(True, '')
+
+    def _is_apple(self):
+        try:
+            with open('/sys/class/dmi/id/sys_vendor') as f:
+                return 'apple' in f.read().lower()
+        except:
+            return False
+
+    def _apply_mac_grub(self):
+        """Apply --removable flag to survive Mac NVRAM resets."""
+        try:
+            subprocess.run([
+                'arch-chroot', '/mnt',
+                'grub-install',
+                '--target=x86_64-efi',
+                '--efi-directory=/boot',
+                '--bootloader-id=SelahOS',
+                '--removable',
+                '--recheck'
+            ], capture_output=True)
+            subprocess.run([
+                'arch-chroot', '/mnt',
+                'grub-mkconfig', '-o', '/boot/grub/grub.cfg'
+            ], capture_output=True)
+        except:
+            pass
+
+    def _apply_branding(self, hostname):
+        """Write SelahOS os-release branding to installed system."""
+        try:
+            os_release = f"""NAME="SelahOS"
+PRETTY_NAME="SelahOS v1.0-beta"
+ID=selahos
+ID_LIKE=arch
+BUILD_ID=rolling
+VERSION="1.0.0-beta"
+HOME_URL="https://selahos.io"
+VENDOR_NAME="Selah Technologies LLC"
+VENDOR_URL="https://selahtechnologies.io"
+"""
+            with open('/mnt/etc/os-release', 'w') as f:
+                f.write(os_release)
+
+            with open('/mnt/etc/hostname', 'w') as f:
+                f.write(hostname + '\n')
+        except:
+            pass
+
+
+class FinishPage(QWidget):
+    reboot = pyqtSignal()
+
+    def __init__(self, success, message, parent=None):
+        super().__init__(parent)
+        self.success = success
+        self.message = message
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(80, 80, 80, 80)
+        layout.setSpacing(24)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        if self.success:
+            icon = QLabel('✓')
+            icon.setFont(QFont('Noto Sans', 64))
+            icon.setStyleSheet(f"color: {COLORS['teal']}; background: transparent;")
+            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(icon)
+
+            title = QLabel('SelahOS is Installed')
+            title.setFont(QFont('Noto Sans', 32, QFont.Weight.Light))
+            title.setStyleSheet(f"color: {COLORS['parch']}; background: transparent;")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(title)
+
+            sub = QLabel('Remove your USB drive and click Reboot\nto start using SelahOS.')
+            sub.setFont(QFont('Noto Sans', 16))
+            sub.setStyleSheet(f"color: {COLORS['muted']}; background: transparent;")
+            sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(sub)
+
+            layout.addSpacing(40)
+
+            brand = QLabel('Pause. Reflect. Create.')
+            brand.setFont(QFont('Noto Sans', 14))
+            brand.setStyleSheet(f"color: {COLORS['gold']}; font-style: italic; background: transparent;")
+            brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(brand)
+
+            layout.addSpacing(40)
+
+            btn = QPushButton('Reboot Now')
+            btn.setFixedSize(200, 52)
+            btn.setFont(QFont('Noto Sans', 15, QFont.Weight.Bold))
+            btn.clicked.connect(self.reboot)
+            layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        else:
+            icon = QLabel('⚠')
+            icon.setFont(QFont('Noto Sans', 64))
+            icon.setStyleSheet(f"color: {COLORS['danger']}; background: transparent;")
+            icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(icon)
+
+            title = QLabel('Installation Failed')
+            title.setFont(QFont('Noto Sans', 32, QFont.Weight.Light))
+            title.setStyleSheet(f"color: {COLORS['parch']}; background: transparent;")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(title)
+
+            msg = QLabel(self.message or 'An error occurred during installation.\nPlease try again or use the terminal installer.')
+            msg.setFont(QFont('Noto Sans', 14))
+            msg.setStyleSheet(f"color: {COLORS['danger']}; background: transparent;")
+            msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            msg.setWordWrap(True)
+            layout.addWidget(msg)
+
+            layout.addSpacing(30)
+
+            note = QLabel('You can also install via terminal:\nsudo archinstall')
+            note.setFont(QFont('Noto Sans', 13))
+            note.setStyleSheet(f"color: {COLORS['muted']}; background: transparent;")
+            note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(note)
+
+
+class SelahOSInstaller(QMainWindow):
+    """Main installer window."""
+
+    def __init__(self):
+        super().__init__()
+        self.install_config = {}
+        self._setup_window()
+        self._build_ui()
+        self._show_page(0)
+
+    def _setup_window(self):
+        self.setWindowTitle('Install SelahOS')
+        self.setMinimumSize(900, 620)
+        self.resize(960, 680)
+        # Center on screen
+        screen = QApplication.primaryScreen().geometry()
+        x = (screen.width() - self.width()) // 2
+        y = (screen.height() - self.height()) // 2
+        self.move(x, y)
+
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Header bar
+        header = QFrame()
+        header.setFixedHeight(48)
+        header.setStyleSheet(f"background: {COLORS['bg2']}; border-bottom: 1px solid {COLORS['border']};")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(24, 0, 24, 0)
+
+        logo = QLabel('SelahOS')
+        logo.setFont(QFont('Noto Sans', 14, QFont.Weight.Bold))
+        logo.setStyleSheet(f"color: {COLORS['gold']}; background: transparent; letter-spacing: 2px;")
+        header_layout.addWidget(logo)
+        header_layout.addStretch()
+
+        self.step_label = QLabel('Welcome')
+        self.step_label.setFont(QFont('Noto Sans', 12))
+        self.step_label.setStyleSheet(f"color: {COLORS['muted']}; background: transparent;")
+        header_layout.addWidget(self.step_label)
+
+        main_layout.addWidget(header)
+
+        # Page stack
+        self.pages = QStackedWidget()
+        main_layout.addWidget(self.pages, stretch=1)
+
+        # Build pages
+        self.welcome = WelcomePage()
+        self.welcome.proceed.connect(lambda: self._show_page(1))
+        self.pages.addWidget(self.welcome)  # 0
+
+        self.disk_page = DiskPage()
+        self.disk_page.proceed.connect(self._disk_chosen)
+        self.disk_page.back.connect(lambda: self._show_page(0))
+        self.pages.addWidget(self.disk_page)  # 1
+
+        self.user_page = UserPage()
+        self.user_page.proceed.connect(self._user_done)
+        self.user_page.back.connect(lambda: self._show_page(1))
+        self.pages.addWidget(self.user_page)  # 2
+
+        self.install_page = InstallPage()
+        self.install_page.finished.connect(self._install_finished)
+        self.pages.addWidget(self.install_page)  # 3
+
+    def _show_page(self, idx):
+        self.pages.setCurrentIndex(idx)
+        steps = ['Welcome', 'Select Disk', 'Create Account', 'Installing']
+        if idx < len(steps):
+            self.step_label.setText(f'Step {idx + 1} of {len(steps)}  ·  {steps[idx]}')
+
+    def _disk_chosen(self, disk):
+        self.install_config['disk'] = disk
+        self._show_page(2)
+
+    def _user_done(self, user_data):
+        self.install_config.update(user_data)
+        self._show_page(3)
+        self.install_page.start_install(self.install_config)
+
+    def _install_finished(self, success, message):
+        finish = FinishPage(success, message)
+        finish.reboot.connect(self._do_reboot)
+        self.pages.addWidget(finish)
+        self.pages.setCurrentWidget(finish)
+        self.step_label.setText('Complete' if success else 'Error')
+
+    def _do_reboot(self):
+        subprocess.run(['reboot'], check=False)
+
+
+def main():
+    # Must run as root for installation
+    if os.geteuid() != 0:
+        print("SelahOS Installer must be run as root.")
+        print("Try: sudo selahos-installer")
+        sys.exit(1)
+
+    app = QApplication(sys.argv)
+    app.setApplicationName('SelahOS Installer')
+    app.setStyleSheet(STYLESHEET)
+
+    window = SelahOSInstaller()
+    window.show()
+
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()
