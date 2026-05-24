@@ -460,3 +460,38 @@ Audio (CS8409) after resume: PASS
 Display auto-wake: PASS — 1-2 second delay via selah-display-resume hook
 Bluetooth mouse after resume: PASS — auto-reconnects and wakes display
 All subsystems survived suspend/resume cycle: CONFIRMED
+
+=== THUNDERBOLT DEEP INVESTIGATION — May 24 2026 ===
+
+ROOT CAUSE CONFIRMED:
+Thunderbolt controller on MBP14,1 is completely 
+unpowered at Linux boot. Apple gates it via SMC.
+
+SMC KEYS FOUND:
+- Bvtb (index 169, type ui32) = 0x00000000
+- MTBc (index 564, type flt)  = 0x00000000  
+- MTBg (index 565, type flt)  = 0x00000000
+- MTBt (index 566, type flt)  = 0x00000000
+
+HYPOTHESIS:
+Writing non-zero value to Bvtb via SMC would 
+power up Thunderbolt controller, making it 
+visible on PCIe bus for Linux driver binding.
+
+BLOCKER:
+applesmc kernel driver marks key_at_index_data 
+as read-only. Cannot write to Bvtb from userspace.
+
+REQUIRED FIX:
+Patch applesmc driver to allow controlled writes
+to specific TB power keys (Bvtb specifically).
+This is a kernel contribution opportunity.
+
+NEXT STEPS:
+1. File bug report with linux-kernel mailing list
+2. Submit applesmc patch to allow Bvtb writes
+3. Write SelahSeedCore TB wake service once writable
+4. Test across MBP14,1, MBP9,2, iMac16,2
+
+SELAH Ticket: SELAH-29
+Priority: P1 — Affects all Intel Mac TB ports
