@@ -451,3 +451,12 @@ Node 0x47 [Vendor Defined Widget] wcaps 0xf002c1: Stereo Digital
   Unsolicited: tag=00, enabled=0
   Processing caps: benign=0, ncoeff=255
 Subsystem: 0x106b3300 — not in cs8409 quirk table in linux-zen 7.0.5 or linux-lts 6.18
+
+=== SUSPEND/WAKE VALIDATION — May 24 2026 ===
+Lid close → suspend: PASS
+Resume from suspend: PASS
+WiFi (BCM4350) after resume: PASS — SelahSeedCore held
+Audio (CS8409) after resume: PASS
+Display auto-wake: PASS — 1-2 second delay via selah-display-resume hook
+Bluetooth mouse after resume: PASS — auto-reconnects and wakes display
+All subsystems survived suspend/resume cycle: CONFIRMED
