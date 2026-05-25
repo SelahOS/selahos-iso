@@ -18,3 +18,5 @@ selahos-iso-output/
 .DS_Store
 __pycache__/
 *.pyc
+selahos-iso-v3/airootfs/usr/local/bin/selahbridge*
+selahos-iso-v3/airootfs/usr/share/applications/selahbridge*
