@@ -393,3 +393,18 @@ xl2tpd
 zram-generator
 zsh
 python-pyqt6
+
+# === SelahSeedCore — Hardware Support ===
+mbpfan
+tlp
+cpupower
+thermald
+irqbalance
+bolt
+bluez
+bluez-utils
+facetimehd-firmware
+facetimehd-dkms
+snd-hda-codec-cs8409
+wireless_tools
+iw

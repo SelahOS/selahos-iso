@@ -1,0 +1,13 @@
+#!/bin/bash
+# SelahSeedCore — Display Resume Hook
+# Handles both old and new systemd-sleep argument formats
+
+case "$1/$2" in
+    post/*)
+        sleep 1
+        # Wake display via kscreen-doctor
+        export XDG_RUNTIME_DIR=/run/user/1000
+        su dbnoble -c "XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 kscreen-doctor output.eDP-1.enable" 2>/dev/null || true
+        su dbnoble -c "XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 kscreen-doctor output.eDP-1.brightness.80" 2>/dev/null || true
+        ;;
+esac

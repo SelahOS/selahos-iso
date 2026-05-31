@@ -1,0 +1,12 @@
+[Unit]
+Description=SelahSeedCore — Bluetooth Init Delay for BCM firmware
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'sleep 3 && bluetoothctl power off && sleep 1 && bluetoothctl power on'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

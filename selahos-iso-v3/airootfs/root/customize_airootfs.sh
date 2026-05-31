@@ -180,3 +180,12 @@ if [ -f /etc/mkinitcpio.conf ]; then
 fi
 
 echo "customize_airootfs.sh complete — SelahOS v1.0-beta"
+
+# SelahSeedCore services
+systemctl enable selah-wifi-wake.service
+systemctl enable bluetooth-init-delay.service
+systemctl enable mbpfan
+systemctl enable tlp
+systemctl enable thermald
+systemctl enable irqbalance
+systemctl enable bluetooth
