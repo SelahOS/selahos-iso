@@ -405,6 +405,7 @@ bluez
 bluez-utils
 facetimehd-firmware
 facetimehd-dkms
-snd-hda-codec-cs8409
+
 wireless_tools
 iw
+snd-hda-macbookpro-dkms-git
