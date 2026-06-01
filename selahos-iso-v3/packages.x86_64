@@ -204,7 +204,6 @@ acpid
 inetutils
 
 # === Thunderbolt (per Dane request: auto-installed for Mac/TB hardware) ===
-bolt
 
 # === FireWire (per Dane request: auto-installed for legacy creator hardware) ===
 libavc1394
@@ -395,12 +394,11 @@ zsh
 python-pyqt6
 
 # === SelahSeedCore — Hardware Support ===
-mbpfan
-tlp
+mbpfan-git
+tlp-git
 cpupower
 thermald
 irqbalance
-bolt
 bluez
 bluez-utils
 facetimehd-firmware
@@ -408,4 +406,5 @@ facetimehd-dkms
 
 wireless_tools
 iw
+bolt
 snd-hda-macbookpro-dkms-git
