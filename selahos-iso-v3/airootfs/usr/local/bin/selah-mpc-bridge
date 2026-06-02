@@ -46,8 +46,8 @@ MPC_STUDIO2_VID   = 0x09E8
 MPC_STUDIO2_PID   = 0x0076
 
 # Port name fragments to match (first match wins, case-insensitive)
-MPC_PORT_PATTERNS = ["MPC Studio 2", "MPC Studio2", "Akai MPC Studio 2",
-                     "MPC Studio (USB MIDI)"]
+MPC_PORT_PATTERNS = ["MPC Studio MPC Public", "MPC Studio 2", "MPC Studio2",
+                     "Akai MPC Studio 2", "MPC Studio (USB MIDI)", "MPC Studio"]
 
 # Virtual ALSA port names the DAW will see
 VIRTUAL_PORT_DAW  = "SelahMPC"           # DAW reads pads/knobs from here
