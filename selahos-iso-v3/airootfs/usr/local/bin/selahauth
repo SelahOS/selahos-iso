@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selahauth — SelahBridgePro Authorization Browser v1
+#  Lightweight PyQt6 WebEngine shell for DAW license/account flows
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  Usage: selahauth [<url>]
+#         selahauth --daw <flstudio|ableton|reaper|protools>
+#         selahauth --title "My DAW"  https://vendor.com/activate
+#
+#  Wine routing: set BROWSER=selahauth in the selahwine environment.
+#  Wine's winebrowser checks $BROWSER before xdg-open, so all DAW
+#  calls to ShellExecute("http://...") route here automatically.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+# ── Selah color palette ───────────────────────────────────────────────────────
+C = {
+    "bg":     "#0B0F1A",
+    "bg2":    "#111827",
+    "bg3":    "#1A2030",
+    "gold":   "#D6A85A",
+    "parch":  "#EDE4D4",
+    "muted":  "#9A8D7B",
+    "teal":   "#8EC3B8",
+    "red":    "#B97A6F",
+    "border": "#2A3042",
+}
+
+DAW_PORTALS = {
+    "flstudio":  ("https://customers.image-line.com/login", "FL Studio Authorization"),
+    "fl":        ("https://customers.image-line.com/login", "FL Studio Authorization"),
+    "ableton":   ("https://www.ableton.com/en/login/",      "Ableton Live Authorization"),
+    "live":      ("https://www.ableton.com/en/login/",      "Ableton Live Authorization"),
+    "reaper":    ("https://www.reaper.fm/purchase.php",     "REAPER License"),
+    "protools":  ("https://my.avid.com",                    "Pro Tools / Avid Account"),
+    "pt":        ("https://my.avid.com",                    "Pro Tools / Avid Account"),
+}
+
+# Vendor schemes that signal auth completion (auto-close triggers)
+COMPLETION_SCHEMES = {"ablton", "ilok", "image-line", "reaper", "avid", "fl-auth"}
+
+COOKIE_DIR = Path.home() / ".local" / "share" / "selahbridgepro" / "auth"
+
+# ── Fallback: no WebEngine available ─────────────────────────────────────────
+def _fallback_open(url: str, title: str):
+    """Open URL in system browser when QtWebEngineWidgets is unavailable."""
+    import subprocess, shutil
+    print(f"[selahauth] QtWebEngineWidgets not available — opening in system browser")
+    print(f"[selahauth] URL: {url}")
+    for cmd in ["xdg-open", "firefox", "chromium", "falkon"]:
+        if shutil.which(cmd):
+            subprocess.Popen([cmd, url])
+            return
+    print(f"[selahauth] No browser found. Visit manually: {url}", file=sys.stderr)
+
+# ── Main auth browser ─────────────────────────────────────────────────────────
+def run_browser(url: str, window_title: str = "SelahBridgePro Authorization"):
+    try:
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+        from PyQt6.QtWebEngineCore import (
+            QWebEngineProfile, QWebEnginePage, QWebEngineSettings
+        )
+    except ImportError:
+        _fallback_open(url, window_title)
+        return
+
+    from PyQt6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QPushButton, QLabel, QFrame, QSizePolicy, QToolButton,
+    )
+    from PyQt6.QtCore import Qt, QUrl, QSize
+    from PyQt6.QtGui import QFont, QIcon, QColor, QPalette, QFontDatabase
+
+    app = QApplication(sys.argv)
+    app.setApplicationName("SelahAuth")
+    app.setOrganizationName("Selah Technologies")
+
+    # ── Persistent cookie profile ─────────────────────────────────────────────
+    COOKIE_DIR.mkdir(parents=True, exist_ok=True)
+    profile = QWebEngineProfile("selahauth", None)
+    profile.setPersistentStoragePath(str(COOKIE_DIR))
+    profile.setPersistentCookiesPolicy(
+        QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
+    )
+    profile.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
+    profile.setHttpCacheMaximumSize(32 * 1024 * 1024)  # 32 MB
+
+    # Modern UA — some vendor portals reject old strings
+    profile.setHttpUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36 SelahAuth/1.0"
+    )
+
+    # ── Web page with auto-close detection ───────────────────────────────────
+    page = QWebEnginePage(profile, None)
+    page.settings().setAttribute(
+        QWebEngineSettings.WebAttribute.JavascriptEnabled, True
+    )
+    page.settings().setAttribute(
+        QWebEngineSettings.WebAttribute.LocalStorageEnabled, True
+    )
+
+    # ── Main window ──────────────────────────────────────────────────────────
+    win = QMainWindow()
+    win.setWindowTitle(window_title)
+    win.setMinimumSize(860, 640)
+    win.resize(920, 700)
+    win.setWindowFlags(Qt.WindowType.Window)
+
+    STYLESHEET = f"""
+    QMainWindow, QWidget {{
+        background-color: {C['bg']};
+        color: {C['parch']};
+        font-family: 'Noto Sans', 'Segoe UI', sans-serif;
+        font-size: 13px;
+    }}
+    QToolButton {{
+        background: {C['bg3']};
+        color: {C['muted']};
+        border: 1px solid {C['border']};
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+        min-width: 28px;
+    }}
+    QToolButton:hover  {{ background: {C['bg2']}; color: {C['gold']}; }}
+    QToolButton:pressed {{ background: {C['bg']};  }}
+    QToolButton:disabled {{ color: #3A3A4A; border-color: #1E2230; }}
+    QLabel#url_bar {{
+        background: {C['bg3']};
+        color: {C['muted']};
+        border: 1px solid {C['border']};
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 12px;
+    }}
+    QLabel#status_bar {{
+        background: {C['bg2']};
+        color: {C['muted']};
+        font-size: 11px;
+        padding: 2px 8px;
+        border-top: 1px solid {C['border']};
+    }}
+    QFrame#toolbar {{
+        background: {C['bg2']};
+        border-bottom: 1px solid {C['border']};
+    }}
+    QPushButton#done_btn {{
+        background: {C['gold']};
+        color: {C['bg']};
+        font-weight: bold;
+        border: none;
+        border-radius: 4px;
+        padding: 5px 18px;
+        font-size: 13px;
+    }}
+    QPushButton#done_btn:hover {{ background: #E8B86A; }}
+    """
+    win.setStyleSheet(STYLESHEET)
+
+    # ── Toolbar ──────────────────────────────────────────────────────────────
+    central = QWidget()
+    win.setCentralWidget(central)
+    layout = QVBoxLayout(central)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+
+    toolbar = QFrame()
+    toolbar.setObjectName("toolbar")
+    toolbar.setFixedHeight(44)
+    tb_layout = QHBoxLayout(toolbar)
+    tb_layout.setContentsMargins(8, 4, 8, 4)
+    tb_layout.setSpacing(6)
+
+    btn_back    = QToolButton(); btn_back.setText("←")
+    btn_forward = QToolButton(); btn_forward.setText("→")
+    btn_reload  = QToolButton(); btn_reload.setText("↻")
+
+    url_label = QLabel(url)
+    url_label.setObjectName("url_bar")
+    url_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    url_label.setFixedHeight(30)
+    url_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+    from PyQt6.QtWidgets import QPushButton
+    done_btn = QPushButton("Done")
+    done_btn.setObjectName("done_btn")
+    done_btn.setFixedHeight(30)
+    done_btn.setToolTip("Close the authorization window")
+
+    tb_layout.addWidget(btn_back)
+    tb_layout.addWidget(btn_forward)
+    tb_layout.addWidget(btn_reload)
+    tb_layout.addWidget(url_label)
+    tb_layout.addWidget(done_btn)
+    layout.addWidget(toolbar)
+
+    # ── WebView ───────────────────────────────────────────────────────────────
+    view = QWebEngineView()
+    view.setPage(page)
+    layout.addWidget(view)
+
+    # ── Status bar ────────────────────────────────────────────────────────────
+    status_bar = QLabel("Loading...")
+    status_bar.setObjectName("status_bar")
+    status_bar.setFixedHeight(22)
+    layout.addWidget(status_bar)
+
+    # ── Wiring ────────────────────────────────────────────────────────────────
+    btn_back.clicked.connect(view.back)
+    btn_forward.clicked.connect(view.forward)
+    btn_reload.clicked.connect(view.reload)
+    done_btn.clicked.connect(win.close)
+
+    def _on_url_changed(q):
+        u = q.toString()
+        url_label.setText(u)
+        # Auto-close if a vendor app scheme signals completion
+        scheme = q.scheme()
+        if scheme in COMPLETION_SCHEMES:
+            status_bar.setText("Authorization complete — closing...")
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(1200, win.close)
+
+    def _on_title(title):
+        win.setWindowTitle(f"{title}  —  {window_title}" if title else window_title)
+
+    def _on_load_started():
+        status_bar.setText("Loading...")
+        btn_reload.setEnabled(False)
+
+    def _on_load_finished(ok):
+        btn_reload.setEnabled(True)
+        if ok:
+            status_bar.setText("Ready")
+        else:
+            status_bar.setText("Page could not be loaded — check your connection")
+
+    def _on_nav_state():
+        btn_back.setEnabled(view.history().canGoBack())
+        btn_forward.setEnabled(view.history().canGoForward())
+
+    page.urlChanged.connect(_on_url_changed)
+    page.titleChanged.connect(_on_title)
+    view.loadStarted.connect(_on_load_started)
+    view.loadFinished.connect(_on_load_finished)
+    page.urlChanged.connect(lambda _: _on_nav_state())
+
+    btn_back.setEnabled(False)
+    btn_forward.setEnabled(False)
+
+    view.load(QUrl(url))
+    win.show()
+    sys.exit(app.exec())
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+def main():
+    parser = argparse.ArgumentParser(
+        prog="selahauth",
+        description="SelahBridgePro Authorization Browser — lightweight DAW auth shell",
+    )
+    parser.add_argument("url", nargs="?", help="URL to open")
+    parser.add_argument("--daw", metavar="NAME",
+                        help="Open the authorization portal for a known DAW "
+                             "(flstudio, ableton, reaper, protools)")
+    parser.add_argument("--title", metavar="TITLE", default="",
+                        help="Window title prefix")
+    parser.add_argument("--list", action="store_true",
+                        help="List known DAW portals and exit")
+    args = parser.parse_args()
+
+    if args.list:
+        print("Known DAW authorization portals:")
+        seen = set()
+        for key, (portal_url, title) in DAW_PORTALS.items():
+            if portal_url not in seen:
+                print(f"  {key:<12} {portal_url}")
+                seen.add(portal_url)
+        sys.exit(0)
+
+    if args.daw:
+        daw_key = args.daw.lower()
+        if daw_key not in DAW_PORTALS:
+            print(f"Unknown DAW '{args.daw}'. Known: {', '.join(DAW_PORTALS)}", file=sys.stderr)
+            sys.exit(1)
+        url, title = DAW_PORTALS[daw_key]
+        run_browser(url, args.title or title)
+
+    elif args.url:
+        title = args.title or "SelahBridgePro Authorization"
+        run_browser(args.url, title)
+
+    else:
+        parser.print_help()
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

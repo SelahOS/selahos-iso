@@ -113,6 +113,10 @@ _build_env() {
     # PipeWire JACK latency negotiation
     export PIPEWIRE_LATENCY="${buffer}/${rate}"
 
+    # Route Wine's ShellExecute URL calls to selahauth instead of system browser.
+    # Wine's winebrowser binary checks $BROWSER before falling back to xdg-open.
+    export BROWSER="selahauth"
+
     # DLL overrides
     export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-wineasio=n,b}"
 

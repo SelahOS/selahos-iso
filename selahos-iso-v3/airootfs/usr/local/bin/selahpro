@@ -162,6 +162,12 @@ def cmd_install(daw_name: str | None):
                  "wine-staging", "wine-mono", "wine-gecko", "winetricks",
                  "dxvk-async-git", "wineasio",
                  "lib32-pipewire-jack", "pipewire-jack", check=False)
+
+    # selahauth browser dependency
+    if not _pyqt6_webengine_available():
+        _run_cmd("Installing selahauth dependency (python-pyqt6-webengine)",
+                 "sudo", "pacman", "-S", "--noconfirm",
+                 "python-pyqt6-webengine", check=False)
     else:
         ok("wine-staging present")
 
@@ -304,6 +310,8 @@ def cmd_launch(daw_name: str, exe_override: str | None = None):
         "WINEDEBUG":             profile_env.get("WINEDEBUG", "-all"),
         "DXVK_ASYNC":            profile_env.get("DXVK_ASYNC", "1"),
         "DXVK_LOG_LEVEL":        profile_env.get("DXVK_LOG_LEVEL", "none"),
+        # Route DAW ShellExecute URL calls to selahauth
+        "BROWSER":               "selahauth",
     }
     if "WINEDLLOVERRIDES" in profile_env:
         launch_env["WINEDLLOVERRIDES"] = (
@@ -533,6 +541,46 @@ def cmd_midi_passthrough(device: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  AUTH BROWSER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _pyqt6_webengine_available() -> bool:
+    try:
+        import importlib.util
+        return importlib.util.find_spec("PyQt6.QtWebEngineWidgets") is not None
+    except Exception:
+        return False
+
+def cmd_auth(daw_name: str | None, url: str | None = None):
+    """Open the authorization browser for a DAW or a specific URL."""
+    _check_license()
+
+    selahauth = shutil.which("selahauth")
+    if not selahauth:
+        die("selahauth not found. Run: selahpro install")
+
+    if not _pyqt6_webengine_available():
+        warn("python-pyqt6-webengine not installed — selahauth will open system browser")
+        info("Install: sudo pacman -S python-pyqt6-webengine")
+
+    if url:
+        hdr("SelahBridgePro Authorization")
+        info(f"URL: {url}")
+        os.execvp(selahauth, [selahauth, url])
+    elif daw_name:
+        daw_key = daw_name.lower()
+        if daw_key not in KNOWN_DAWS:
+            die(f"Unknown DAW '{daw_name}'. Known: {', '.join(KNOWN_DAWS)}")
+        hdr(f"{KNOWN_DAWS[daw_key]['name']} Authorization")
+        os.execvp(selahauth, [selahauth, "--daw", daw_key])
+    else:
+        hdr("SelahBridgePro Authorization Browser")
+        info("Usage: selahpro auth <daw>  or  selahpro auth --url <url>")
+        info("Known DAWs: " + ", ".join(KNOWN_DAWS))
+        subprocess.run([selahauth, "--list"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  AUDIO CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -593,6 +641,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {GOLD}selahpro install flstudio{RESET}          Install + scaffold FL Studio prefix\n"
             f"  {GOLD}selahpro install{RESET}                   Install SelahBridgePro runtime only\n"
             f"  {GOLD}selahpro launch reaper{RESET}             Launch REAPER via SelahWine\n"
+            f"  {GOLD}selahpro auth ableton{RESET}              Open Ableton authorization browser\n"
             f"  {GOLD}selahpro diagnose{RESET}                  Full system readiness check\n"
             f"  {GOLD}selahpro midi list{RESET}                 List MIDI devices\n"
             f"  {GOLD}selahpro midi passthrough mpk{RESET}      Activate Akai MPK Mini 4 passthrough\n"
@@ -620,6 +669,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     # diagnose
     sub.add_parser("diagnose", help="Run system readiness checks")
+
+    # auth
+    auth = sub.add_parser("auth", help="Open DAW authorization browser")
+    auth.add_argument("daw", nargs="?",
+                      help="DAW to authorize (flstudio/ableton/reaper/protools)")
+    auth.add_argument("--url", metavar="URL", help="Open a specific authorization URL")
 
     # midi
     midi = sub.add_parser("midi", help="MIDI device management")
@@ -689,6 +744,8 @@ def main():
         cmd_install(getattr(args, "daw", None))
     elif cmd == "launch":
         cmd_launch(args.daw, getattr(args, "exe", None))
+    elif cmd == "auth":
+        cmd_auth(getattr(args, "daw", None), getattr(args, "url", None))
     elif cmd == "diagnose":
         cmd_diagnose()
     elif cmd == "midi":
