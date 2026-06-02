@@ -152,7 +152,7 @@ def _run_cmd(desc: str, *args, check=True, capture=False):
         kwargs["text"] = True
     return subprocess.run(list(args), **kwargs)
 
-def cmd_install(daw_name: str | None):
+def cmd_install(daw_name: str | None, existing_prefix: str | None = None):
     """Install SelahBridgePro runtime and optionally scaffold a DAW Wine prefix."""
     hdr("SelahBridgePro Install")
     _check_license()
@@ -213,20 +213,27 @@ def cmd_install(daw_name: str | None):
         if not daw:
             warn(f"Unknown DAW '{daw_name}'. Known: {', '.join(KNOWN_DAWS)}")
         else:
-            _scaffold_prefix(daw)
+            _scaffold_prefix(daw, existing_prefix=existing_prefix)
 
     ok("SelahBridgePro installation complete")
     info("Launch a DAW: selahpro launch <daw>")
     info("Diagnose issues: selahpro diagnose")
 
-def _scaffold_prefix(daw: dict):
-    """Create a DAW-specific Wine prefix with the correct profile applied."""
+def _scaffold_prefix(daw: dict, existing_prefix: str | None = None):
+    """Create or patch a DAW-specific Wine prefix with the correct profile applied."""
     name = daw["name"]
     profile_key = daw["profile"]
-    prefix_path = Path.home() / f".wine-selah-{profile_key}"
 
-    hdr(f"Scaffolding {name} Wine Prefix")
-    info(f"Prefix: {prefix_path}")
+    if existing_prefix:
+        prefix_path = Path(existing_prefix).expanduser().resolve()
+        if not prefix_path.exists():
+            die(f"Prefix path does not exist: {prefix_path}")
+        hdr(f"Applying {name} Fixes to Existing Prefix")
+        info(f"Prefix: {prefix_path}  (existing)")
+    else:
+        prefix_path = Path.home() / f".wine-selah-{profile_key}"
+        hdr(f"Scaffolding {name} Wine Prefix")
+        info(f"Prefix: {prefix_path}")
 
     profile_file = PROFILE_DIR / f"{profile_key}.profile"
     if not profile_file.exists():
@@ -241,6 +248,8 @@ def _scaffold_prefix(daw: dict):
         info(f"Initializing {name} Wine prefix...")
         subprocess.run(["wineboot", "--init"], env={**os.environ, **env},
                        check=False, capture_output=True)
+    else:
+        ok(f"Using existing prefix at {prefix_path}")
 
     # Apply registry defaults
     reg = Path("/usr/share/selahbridgepro/selahwine-defaults.reg")
@@ -711,7 +720,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # install
     ins = sub.add_parser("install", help="Install SelahBridgePro runtime [+ DAW scaffold]")
-    ins.add_argument("daw", nargs="?", help="DAW to scaffold (flstudio/ableton/reaper/protools)")
+    ins.add_argument("daw", nargs="?",
+                     help="DAW to scaffold (flstudio/ableton/reaper/protools/dp)")
+    ins.add_argument("--prefix", metavar="PATH",
+                     help="Apply fixes to an existing Wine prefix instead of creating a new one")
 
     # launch
     launch = sub.add_parser("launch", help="Launch a DAW via SelahWine")
@@ -792,7 +804,7 @@ def main():
 
     cmd = args.command
     if cmd == "install":
-        cmd_install(getattr(args, "daw", None))
+        cmd_install(getattr(args, "daw", None), getattr(args, "prefix", None))
     elif cmd == "launch":
         cmd_launch(args.daw, getattr(args, "exe", None))
     elif cmd == "auth":
