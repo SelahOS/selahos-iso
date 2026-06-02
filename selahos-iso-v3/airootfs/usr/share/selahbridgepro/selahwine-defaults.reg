@@ -1,0 +1,70 @@
+REGEDIT4
+
+; SelahWine Creator-Optimized Registry Defaults v1
+; Applied once per Wine prefix by selahwine on first launch.
+; Selah Technologies LLC — Copyright (C) 2026
+
+; ── Disable Wine crash reporter ──────────────────────────────────
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\AeDebug]
+"Auto"="0"
+"Debugger"=""
+
+; ── Disable Windows Error Reporting ──────────────────────────────
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\Windows Error Reporting]
+"Disabled"=dword:00000001
+"DontShowUI"=dword:00000001
+"LoggingDisabled"=dword:00000001
+
+; ── Disable telemetry / CEIP ─────────────────────────────────────
+[HKEY_LOCAL_MACHINE\Software\Microsoft\SQMClient\Windows]
+"CEIPEnable"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\DataCollection]
+"AllowTelemetry"=dword:00000000
+
+; ── Audio: prefer ASIO / WDM-KS over MME ─────────────────────────
+[HKEY_CURRENT_USER\Software\Wine\WineASIO]
+"Number of inputs"=dword:00000020
+"Number of outputs"=dword:00000020
+"Preferred sample rate"=dword:0000bb80
+"Fixed buffersize"=dword:00000000
+"Preferred buffersize"=dword:00000100
+"Connect to hardware"=dword:00000001
+"Autostart server"=dword:00000001
+
+; ── MIDI: enable ALSA MIDI sequencer ─────────────────────────────
+[HKEY_CURRENT_USER\Software\Wine\Midi]
+"MidiMapper"="Microsoft MIDI Mapper"
+
+; ── Multimedia: audio thread priority ────────────────────────────
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile\Tasks\Pro Audio]
+"Affinity"=dword:00000000
+"Background Only"="False"
+"Clock Rate"=dword:00002710
+"GPU Priority"=dword:00000001
+"Priority"=dword:00000001
+"Scheduling Category"="High"
+"SFIO Priority"="High"
+
+; ── Disable Automatic Updates nag ────────────────────────────────
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update]
+"AUOptions"=dword:00000001
+
+; ── Visual: disable animations for snappier DAW UI ───────────────
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"UserPreferencesMask"=hex:90,12,01,80
+"MenuShowDelay"="0"
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced]
+"TaskbarAnimations"=dword:00000000
+
+; ── Font rendering: ClearType for readability ─────────────────────
+[HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics]
+"Shell Icon BPP"="32"
+
+[HKEY_CURRENT_USER\Software\Microsoft\Avalon.Graphics]
+"USEREGIONDISPLAY"=dword:00000000
+
+; ── High-DPI awareness (DAW UIs need this) ───────────────────────
+[HKEY_CURRENT_USER\Software\Wine\X11 Driver]
+"LogPixels"=dword:00000060
