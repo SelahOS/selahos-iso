@@ -1,0 +1,922 @@
+#!/usr/bin/env python3
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selahbridgepro — SelahBridgePro v1 GUI Application
+#  Creator DAW compatibility layer for SelahOS
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  Launch: selahbridgepro
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import sys, os, subprocess, shutil, hashlib, datetime
+from pathlib import Path
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QTabWidget, QLabel, QPushButton, QFrame, QTextEdit, QScrollArea,
+    QComboBox, QSlider, QListWidget, QListWidgetItem, QSizePolicy,
+    QGridLayout, QLineEdit, QMessageBox, QStackedWidget, QSpacerItem,
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
+from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPalette
+
+VERSION = "1.0.0"
+PRODUCT = "SelahBridgePro"
+SUPPORT = "support@selahtechnologies.com"
+PROFILE_DIR = Path("/etc/selahbridgepro/profiles")
+LIC_DIR     = Path("/etc/selahbridgepro")
+LIC_FILE    = LIC_DIR / "license"
+TRIAL_FILE  = LIC_DIR / "trial.conf"
+TRIAL_DAYS  = 14
+_P1, _P2, _P3 = "S3L4HP", "R02026Y", "Z5K7M!"
+_SECRET = _P1 + _P2 + _P3
+
+# ── Colour palette ────────────────────────────────────────────────────────────
+C = {
+    "bg":     "#0B0F1A",
+    "bg2":    "#111827",
+    "bg3":    "#1A2030",
+    "gold":   "#D6A85A",
+    "parch":  "#EDE4D4",
+    "muted":  "#9A8D7B",
+    "teal":   "#8EC3B8",
+    "red":    "#B97A6F",
+    "green":  "#7EC8A0",
+    "border": "#2A3042",
+}
+
+STYLESHEET = f"""
+QMainWindow, QWidget {{
+    background-color: {C['bg']};
+    color: {C['parch']};
+    font-family: 'Noto Sans', 'Segoe UI', sans-serif;
+    font-size: 13px;
+}}
+QLabel {{ background: transparent; color: {C['parch']}; }}
+QTabWidget::pane {{
+    border: 1px solid {C['border']};
+    border-radius: 0 4px 4px 4px;
+    background: {C['bg']};
+}}
+QTabBar::tab {{
+    background: {C['bg3']};
+    color: {C['muted']};
+    border: 1px solid {C['border']};
+    padding: 9px 22px;
+    margin-right: 2px;
+    border-radius: 4px 4px 0 0;
+    font-size: 13px;
+}}
+QTabBar::tab:selected {{ background: {C['bg']}; color: {C['gold']}; border-bottom-color: {C['bg']}; }}
+QTabBar::tab:hover:!selected {{ color: {C['parch']}; }}
+QPushButton {{
+    background-color: {C['gold']};
+    color: {C['bg']};
+    border: none;
+    border-radius: 4px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: bold;
+}}
+QPushButton:hover {{ background-color: #E6C27A; }}
+QPushButton:disabled {{ background-color: {C['border']}; color: {C['muted']}; }}
+QPushButton#secondary {{
+    background-color: transparent;
+    color: {C['muted']};
+    border: 1px solid {C['border']};
+    font-weight: normal;
+}}
+QPushButton#secondary:hover {{ color: {C['parch']}; border-color: {C['muted']}; }}
+QPushButton#launch {{
+    background-color: {C['teal']};
+    color: {C['bg']};
+}}
+QPushButton#launch:hover {{ background-color: #A8D8CE; }}
+QComboBox {{
+    background-color: {C['bg3']};
+    color: {C['parch']};
+    border: 1px solid {C['border']};
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    min-width: 160px;
+}}
+QComboBox::drop-down {{ border: none; padding-right: 8px; }}
+QComboBox QAbstractItemView {{
+    background-color: {C['bg3']};
+    color: {C['parch']};
+    border: 1px solid {C['border']};
+    selection-background-color: {C['gold']};
+    selection-color: {C['bg']};
+}}
+QSlider::groove:horizontal {{
+    height: 4px;
+    background: {C['border']};
+    border-radius: 2px;
+}}
+QSlider::handle:horizontal {{
+    background: {C['gold']};
+    width: 16px; height: 16px;
+    margin: -6px 0;
+    border-radius: 8px;
+}}
+QSlider::sub-page:horizontal {{ background: {C['gold']}; border-radius: 2px; }}
+QTextEdit {{
+    background-color: {C['bg2']};
+    color: {C['muted']};
+    border: 1px solid {C['border']};
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+    font-size: 12px;
+    padding: 8px;
+}}
+QListWidget {{
+    background-color: {C['bg2']};
+    color: {C['parch']};
+    border: 1px solid {C['border']};
+    border-radius: 4px;
+    padding: 4px;
+}}
+QListWidget::item {{ padding: 6px 10px; border-radius: 3px; }}
+QListWidget::item:selected {{ background: {C['bg3']}; color: {C['gold']}; }}
+QFrame#card {{
+    background-color: {C['bg2']};
+    border: 1px solid {C['border']};
+    border-radius: 8px;
+}}
+QFrame#card_ok    {{ border-color: {C['teal']}; }}
+QFrame#card_warn  {{ border-color: {C['gold']}; }}
+QFrame#card_fail  {{ border-color: {C['red']};  }}
+QScrollArea {{ border: none; background: transparent; }}
+QScrollBar:vertical {{
+    background: {C['bg3']};
+    width: 8px;
+    border-radius: 4px;
+}}
+QScrollBar::handle:vertical {{
+    background: {C['border']};
+    border-radius: 4px;
+    min-height: 20px;
+}}
+QLineEdit {{
+    background-color: {C['bg3']};
+    color: {C['parch']};
+    border: 1px solid {C['border']};
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+}}
+"""
+
+KNOWN_DAWS = [
+    {"key": "flstudio",         "name": "FL Studio",          "ver": "21+",   "profile": "flstudio"},
+    {"key": "ableton",          "name": "Ableton Live",       "ver": "11/12", "profile": "ableton"},
+    {"key": "reaper",           "name": "REAPER",             "ver": "7+",    "profile": "reaper"},
+    {"key": "protools",         "name": "Pro Tools",          "ver": "First", "profile": "protools"},
+    {"key": "digitalperformer", "name": "Digital Performer",  "ver": "11.x",  "profile": "digitalperformer"},
+]
+
+SAMPLE_RATES   = [44100, 48000, 88200, 96000]
+BUFFER_SIZES   = [32, 64, 128, 256, 512, 1024]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LICENSE HELPERS (mirrors selahpro logic)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _machine_id() -> str:
+    for p in [Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")]:
+        if p.exists():
+            return p.read_text().strip()
+    import socket
+    return hashlib.sha256(socket.gethostname().encode()).hexdigest()[:32]
+
+def _expected_key(mid: str) -> str:
+    raw = hashlib.sha256((mid + _SECRET).encode()).hexdigest()[:16].upper()
+    return f"SELAHPRO-{raw[0:4]}-{raw[4:8]}-{raw[8:12]}-{raw[12:16]}"
+
+def _license_status() -> tuple[str, str]:
+    """Returns (status_label, detail_string)."""
+    mid = _machine_id()
+    if LIC_FILE.exists():
+        if LIC_FILE.read_text().strip() == _expected_key(mid):
+            return ("licensed", "Activated on this machine")
+    if TRIAL_FILE.exists():
+        try:
+            first = datetime.date.fromisoformat(TRIAL_FILE.read_text().strip())
+            rem = TRIAL_DAYS - (datetime.date.today() - first).days
+            if rem > 0:
+                return ("trial", f"{rem} day(s) remaining")
+            return ("expired", "Trial expired")
+        except ValueError:
+            pass
+    return ("notstarted", "No trial started yet")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  BACKGROUND WORKER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CommandWorker(QThread):
+    line_out  = pyqtSignal(str)
+    finished  = pyqtSignal(int)
+
+    def __init__(self, cmd: list, env: dict | None = None):
+        super().__init__()
+        self.cmd = cmd
+        self.env = env or os.environ.copy()
+
+    def run(self):
+        try:
+            proc = subprocess.Popen(
+                self.cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, env=self.env, bufsize=1
+            )
+            for raw in proc.stdout:
+                line = raw.rstrip()
+                if line:
+                    self.line_out.emit(line)
+            proc.wait()
+            self.finished.emit(proc.returncode)
+        except FileNotFoundError:
+            self.line_out.emit(f"✗  Command not found: {self.cmd[0]}")
+            self.finished.emit(127)
+        except Exception as exc:
+            self.line_out.emit(f"✗  {exc}")
+            self.finished.emit(1)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  REUSABLE WIDGETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _divider():
+    d = QFrame()
+    d.setFrameShape(QFrame.Shape.HLine)
+    d.setStyleSheet(f"color: {C['border']}; margin: 4px 0;")
+    return d
+
+def _label(text, color=None, bold=False, size=None):
+    lbl = QLabel(text)
+    style = f"color: {color or C['parch']};"
+    if bold:
+        style += " font-weight: bold;"
+    if size:
+        style += f" font-size: {size}px;"
+    lbl.setStyleSheet(style)
+    return lbl
+
+def _log_panel():
+    t = QTextEdit()
+    t.setReadOnly(True)
+    t.setMinimumHeight(200)
+    return t
+
+def _log_append(panel: QTextEdit, line: str):
+    """Append a line to the log panel with colour based on prefix."""
+    line_stripped = line
+    # Strip ANSI codes for display
+    import re
+    line_clean = re.sub(r'\033\[[0-9;]*m', '', line_stripped)
+    if not line_clean.strip():
+        return
+    if any(c in line_clean for c in ('✓', '✔', 'OK', 'ok', 'installed', 'complete', 'success')):
+        color = C['teal']
+    elif any(c in line_clean for c in ('✗', 'Error', 'error', 'fail', 'FAIL', 'not found')):
+        color = C['red']
+    elif any(c in line_clean for c in ('⚠', 'warn', 'Warning', 'warning')):
+        color = C['gold']
+    else:
+        color = C['muted']
+    panel.append(f'<span style="color:{color}; font-family:monospace;">{line_clean}</span>')
+    panel.verticalScrollBar().setValue(panel.verticalScrollBar().maximum())
+
+
+class StatusCard(QFrame):
+    """Small status indicator card used on the Home tab."""
+    def __init__(self, title: str, value: str, state: str = "ok"):
+        super().__init__()
+        self.setObjectName(f"card_{state}")
+        self.setFixedHeight(78)
+        self.setMinimumWidth(140)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(4)
+        dot_color = {"ok": C["teal"], "warn": C["gold"], "fail": C["red"]}.get(state, C["muted"])
+        top = QHBoxLayout()
+        dot = QLabel("●")
+        dot.setStyleSheet(f"color: {dot_color}; font-size: 10px;")
+        top.addWidget(dot)
+        top.addWidget(_label(title, C["muted"], size=11))
+        top.addStretch()
+        lay.addLayout(top)
+        self.val_lbl = _label(value, C["parch"], bold=True, size=13)
+        lay.addWidget(self.val_lbl)
+
+    def update(self, value: str, state: str):
+        self.val_lbl.setText(value)
+        self.setObjectName(f"card_{state}")
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TABS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class HomeTab(QWidget):
+    launch_requested = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(20)
+
+        # Brand header
+        hdr = QHBoxLayout()
+        brand = _label(f"SelahBridgePro™", C["gold"], bold=True, size=22)
+        ver   = _label(f"v{VERSION}", C["muted"], size=13)
+        hdr.addWidget(brand)
+        hdr.addSpacing(10)
+        hdr.addWidget(ver)
+        hdr.addStretch()
+        self.lic_badge = _label("●  Checking…", C["muted"], size=12)
+        hdr.addWidget(self.lic_badge)
+        root.addLayout(hdr)
+
+        root.addWidget(_divider())
+
+        # Status cards row
+        root.addWidget(_label("System Status", C["muted"], size=11))
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(10)
+        self.card_wine    = StatusCard("Wine",      "Checking…", "warn")
+        self.card_asio    = StatusCard("SelahASIO", "Checking…", "warn")
+        self.card_pw      = StatusCard("PipeWire",  "Checking…", "warn")
+        self.card_midi    = StatusCard("MIDI",      "Checking…", "warn")
+        self.card_dxvk    = StatusCard("DXVK",      "Checking…", "warn")
+        for card in (self.card_wine, self.card_asio, self.card_pw, self.card_midi, self.card_dxvk):
+            cards_row.addWidget(card)
+        cards_row.addStretch()
+        root.addLayout(cards_row)
+
+        root.addWidget(_divider())
+
+        # Quick launch
+        root.addWidget(_label("Quick Launch", C["muted"], size=11))
+        launch_row = QHBoxLayout()
+        launch_row.setSpacing(10)
+        for daw in KNOWN_DAWS:
+            btn = QPushButton(daw["name"])
+            btn.setObjectName("launch")
+            btn.setFixedHeight(38)
+            btn.clicked.connect(lambda _, k=daw["key"]: self.launch_requested.emit(k))
+            launch_row.addWidget(btn)
+        launch_row.addStretch()
+        root.addLayout(launch_row)
+
+        root.addWidget(_divider())
+
+        # Audio summary
+        self.audio_lbl = _label("Audio: not configured", C["muted"], size=12)
+        root.addWidget(self.audio_lbl)
+
+        root.addStretch()
+
+        # Footer
+        foot = _label(
+            f"SelahOS · Selah Technologies LLC · support: {SUPPORT}",
+            C["muted"], size=11
+        )
+        foot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(foot)
+
+        QTimer.singleShot(200, self._check_system)
+
+    def _check_system(self):
+        # Wine
+        if shutil.which("wine"):
+            self.card_wine.update("Ready", "ok")
+        else:
+            self.card_wine.update("Not found", "fail")
+
+        # WineASIO
+        r = subprocess.run(
+            ["find", "/usr/lib", "/usr/lib32", "-name", "wineasio.dll.so"],
+            capture_output=True)
+        self.card_asio.update("Ready" if r.stdout.strip() else "Not installed",
+                              "ok" if r.stdout.strip() else "fail")
+
+        # PipeWire
+        r2 = subprocess.run(["pgrep", "pipewire"], capture_output=True)
+        self.card_pw.update("Running" if r2.returncode == 0 else "Not running",
+                            "ok" if r2.returncode == 0 else "fail")
+
+        # MIDI
+        midi_nodes = list(Path("/dev/snd").glob("midiC*D*")) if Path("/dev/snd").exists() else []
+        self.card_midi.update(f"{len(midi_nodes)} device(s)" if midi_nodes else "None",
+                              "ok" if midi_nodes else "warn")
+
+        # DXVK
+        r3 = subprocess.run(
+            ["find", "/usr/share", "-name", "dxgi.dll"],
+            capture_output=True)
+        self.card_dxvk.update("Ready" if r3.stdout.strip() else "Not found",
+                              "ok" if r3.stdout.strip() else "fail")
+
+        # License
+        status, detail = _license_status()
+        colors = {"licensed": C["teal"], "trial": C["gold"],
+                  "expired": C["red"], "notstarted": C["muted"]}
+        labels = {"licensed": "●  Licensed", "trial": f"●  Trial  ({detail})",
+                  "expired": "●  Trial Expired", "notstarted": "●  No trial"}
+        self.lic_badge.setText(labels.get(status, "●  Unknown"))
+        self.lic_badge.setStyleSheet(f"color: {colors.get(status, C['muted'])}; font-size: 12px;")
+
+        # Audio summary
+        cfg = Path.home() / ".config/pipewire/pipewire.conf.d/selah-asio-rt.conf"
+        if cfg.exists():
+            text = cfg.read_text()
+            import re
+            buf  = re.search(r"clock\.quantum\s*=\s*(\d+)", text)
+            rate = re.search(r"clock\.rate\s*=\s*(\d+)", text)
+            if buf and rate:
+                b, r = int(buf.group(1)), int(rate.group(1))
+                ms = (b / r) * 1000
+                self.audio_lbl.setText(
+                    f"Audio: {rate.group(1)} Hz  ·  {buf.group(1)} samples  ·  {ms:.2f} ms latency")
+                return
+        self.audio_lbl.setText("Audio: run 'selahpro audio config' to configure")
+
+
+class DawsTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(16)
+
+        root.addWidget(_label("DAW Setup & Launch", C["gold"], bold=True, size=15))
+        root.addWidget(_label(
+            "Install Wine prefix + dependencies for each DAW, then launch directly.",
+            C["muted"], size=12))
+        root.addWidget(_divider())
+
+        # DAW selector row
+        sel_row = QHBoxLayout()
+        sel_row.addWidget(_label("DAW:", C["muted"]))
+        self.daw_combo = QComboBox()
+        for d in KNOWN_DAWS:
+            self.daw_combo.addItem(f"{d['name']}  ({d['ver']})", d["key"])
+        sel_row.addWidget(self.daw_combo)
+        sel_row.addSpacing(16)
+
+        self.btn_install = QPushButton("Install / Setup")
+        self.btn_install.setFixedWidth(160)
+        self.btn_launch  = QPushButton("Launch DAW")
+        self.btn_launch.setObjectName("launch")
+        self.btn_launch.setFixedWidth(140)
+        self.btn_auth    = QPushButton("Authorize…")
+        self.btn_auth.setObjectName("secondary")
+        self.btn_auth.setFixedWidth(120)
+
+        sel_row.addWidget(self.btn_install)
+        sel_row.addSpacing(6)
+        sel_row.addWidget(self.btn_launch)
+        sel_row.addSpacing(6)
+        sel_row.addWidget(self.btn_auth)
+        sel_row.addStretch()
+        root.addLayout(sel_row)
+
+        # Prefix info
+        self.prefix_lbl = _label("", C["muted"], size=11)
+        root.addWidget(self.prefix_lbl)
+        self.daw_combo.currentIndexChanged.connect(self._update_prefix_label)
+        self._update_prefix_label()
+
+        # Log output
+        root.addWidget(_label("Output", C["muted"], size=11))
+        self.log = _log_panel()
+        root.addWidget(self.log, stretch=1)
+
+        # Status bar
+        self.status_lbl = _label("Ready.", C["muted"], size=11)
+        root.addWidget(self.status_lbl)
+
+        self.btn_install.clicked.connect(self._do_install)
+        self.btn_launch.clicked.connect(self._do_launch)
+        self.btn_auth.clicked.connect(self._do_auth)
+        self._worker = None
+
+    def _daw_key(self):
+        return self.daw_combo.currentData()
+
+    def _update_prefix_label(self):
+        key = self._daw_key()
+        prefix = Path.home() / f".wine-selah-{key}"
+        exists = "exists" if prefix.exists() else "not yet created"
+        self.prefix_lbl.setText(f"Prefix: {prefix}  ({exists})")
+
+    def _set_busy(self, busy: bool):
+        self.btn_install.setEnabled(not busy)
+        self.btn_launch.setEnabled(not busy)
+        self.btn_auth.setEnabled(not busy)
+        self.daw_combo.setEnabled(not busy)
+
+    def _run(self, cmd: list, done_msg: str):
+        self._set_busy(True)
+        self.log.clear()
+        self.status_lbl.setText("Running…")
+        self._worker = CommandWorker(cmd)
+        self._worker.line_out.connect(lambda l: _log_append(self.log, l))
+        self._worker.finished.connect(lambda rc: self._on_done(rc, done_msg))
+        self._worker.start()
+
+    def _on_done(self, rc: int, done_msg: str):
+        self._set_busy(False)
+        self._update_prefix_label()
+        if rc == 0:
+            self.status_lbl.setText(f"✓  {done_msg}")
+            _log_append(self.log, f"✓  {done_msg}")
+        else:
+            self.status_lbl.setText(f"✗  Finished with errors (exit {rc})")
+            _log_append(self.log, f"✗  Exit code {rc}")
+
+    def _do_install(self):
+        self._run(["selahpro", "install", self._daw_key()],
+                  "Installation complete")
+
+    def _do_launch(self):
+        key = self._daw_key()
+        self.status_lbl.setText(f"Launching {key}…")
+        subprocess.Popen(["selahpro", "launch", key])
+
+    def _do_auth(self):
+        subprocess.Popen(["selahpro", "auth", self._daw_key()])
+
+
+class AudioTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(18)
+
+        root.addWidget(_label("SelahASIO Audio Configuration", C["gold"], bold=True, size=15))
+        root.addWidget(_label(
+            "Configure PipeWire sample rate and buffer size for DAW production.",
+            C["muted"], size=12))
+        root.addWidget(_divider())
+
+        grid = QGridLayout()
+        grid.setSpacing(14)
+        grid.setColumnMinimumWidth(0, 140)
+
+        # Sample rate
+        grid.addWidget(_label("Sample Rate", C["muted"]), 0, 0)
+        self.rate_combo = QComboBox()
+        for r in SAMPLE_RATES:
+            self.rate_combo.addItem(f"{r} Hz", r)
+        self.rate_combo.setCurrentIndex(1)  # 48000
+        grid.addWidget(self.rate_combo, 0, 1)
+
+        # Buffer size
+        grid.addWidget(_label("Buffer Size", C["muted"]), 1, 0)
+        self.buf_combo = QComboBox()
+        for b in BUFFER_SIZES:
+            self.buf_combo.addItem(f"{b} samples", b)
+        self.buf_combo.setCurrentIndex(3)  # 256
+        grid.addWidget(self.buf_combo, 1, 1)
+
+        # Latency readout
+        grid.addWidget(_label("Latency", C["muted"]), 2, 0)
+        self.latency_lbl = _label("5.33 ms", C["gold"], bold=True, size=16)
+        grid.addWidget(self.latency_lbl, 2, 1)
+
+        root.addLayout(grid)
+
+        self.rate_combo.currentIndexChanged.connect(self._update_latency)
+        self.buf_combo.currentIndexChanged.connect(self._update_latency)
+        self._update_latency()
+
+        # Apply button
+        btn_row = QHBoxLayout()
+        self.btn_apply = QPushButton("Apply & Restart PipeWire")
+        self.btn_apply.setFixedWidth(240)
+        btn_row.addWidget(self.btn_apply)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        root.addWidget(_divider())
+        root.addWidget(_label("Output", C["muted"], size=11))
+        self.log = _log_panel()
+        self.log.setMaximumHeight(180)
+        root.addWidget(self.log)
+        root.addStretch()
+
+        self.btn_apply.clicked.connect(self._do_apply)
+        self._worker = None
+
+    def _update_latency(self):
+        rate = self.rate_combo.currentData()
+        buf  = self.buf_combo.currentData()
+        ms = (buf / rate) * 1000
+        self.latency_lbl.setText(f"{ms:.2f} ms")
+        color = C["teal"] if ms <= 5 else (C["gold"] if ms <= 10 else C["red"])
+        self.latency_lbl.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 16px;")
+
+    def _do_apply(self):
+        rate = self.rate_combo.currentData()
+        buf  = self.buf_combo.currentData()
+        self.btn_apply.setEnabled(False)
+        self.log.clear()
+        self._worker = CommandWorker(
+            ["selahpro", "audio", "config", "--rate", str(rate), "--buffer", str(buf)])
+        self._worker.line_out.connect(lambda l: _log_append(self.log, l))
+        self._worker.finished.connect(lambda rc: self._on_done(rc))
+        self._worker.start()
+
+    def _on_done(self, rc: int):
+        self.btn_apply.setEnabled(True)
+        _log_append(self.log, "✓  Audio settings applied." if rc == 0 else f"✗  Exit {rc}")
+
+
+class MidiTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(16)
+
+        root.addWidget(_label("USB MIDI Devices", C["gold"], bold=True, size=15))
+        root.addWidget(_label(
+            "Connected MIDI devices detected by SelahBridgePro udev rules.",
+            C["muted"], size=12))
+        root.addWidget(_divider())
+
+        # Device list
+        list_row = QHBoxLayout()
+        self.device_list = QListWidget()
+        self.device_list.setMinimumHeight(200)
+        list_row.addWidget(self.device_list, stretch=1)
+
+        side = QVBoxLayout()
+        side.setSpacing(8)
+        self.btn_refresh    = QPushButton("Refresh")
+        self.btn_passthrough = QPushButton("Enable\nPassthrough")
+        self.btn_passthrough.setObjectName("secondary")
+        self.btn_passthrough.setFixedHeight(54)
+        for b in (self.btn_refresh, self.btn_passthrough):
+            b.setFixedWidth(140)
+            side.addWidget(b)
+        side.addStretch()
+        list_row.addLayout(side)
+        root.addLayout(list_row)
+
+        root.addWidget(_divider())
+        root.addWidget(_label("ALSA Sequencer Ports", C["muted"], size=11))
+        self.alsa_text = QTextEdit()
+        self.alsa_text.setReadOnly(True)
+        self.alsa_text.setMaximumHeight(130)
+        root.addWidget(self.alsa_text)
+        root.addStretch()
+
+        self.btn_refresh.clicked.connect(self._refresh)
+        self.btn_passthrough.clicked.connect(self._passthrough)
+        self._refresh()
+
+    def _refresh(self):
+        self.device_list.clear()
+        # SelahBridgePro symlinks
+        midi_dir = Path("/dev/selah-midi")
+        if midi_dir.exists():
+            for p in sorted(midi_dir.iterdir()):
+                item = QListWidgetItem(f"  {p.name}")
+                item.setForeground(QColor(C["parch"]))
+                self.device_list.addItem(item)
+        # lsusb Akai devices
+        r = subprocess.run(["lsusb", "-d", "09e8:"], capture_output=True, text=True, check=False)
+        for line in r.stdout.strip().splitlines():
+            item = QListWidgetItem(f"  {line.strip()}")
+            item.setForeground(QColor(C["teal"]))
+            self.device_list.addItem(item)
+        if self.device_list.count() == 0:
+            item = QListWidgetItem("  No devices detected — connect a USB MIDI controller")
+            item.setForeground(QColor(C["muted"]))
+            self.device_list.addItem(item)
+        # ALSA ports
+        r2 = subprocess.run(["aconnect", "-l"], capture_output=True, text=True, check=False)
+        self.alsa_text.setPlainText(r2.stdout.strip() if r2.returncode == 0
+                                    else "(aconnect not available — install alsa-utils)")
+
+    def _passthrough(self):
+        sel = self.device_list.currentItem()
+        if not sel:
+            return
+        device = sel.text().strip().split()[0]
+        subprocess.Popen(["selahpro", "midi", "passthrough", device])
+
+
+class DiagnoseTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(16)
+
+        root.addWidget(_label("System Diagnostics", C["gold"], bold=True, size=15))
+        root.addWidget(_label(
+            "Checks Wine, ASIO, PipeWire, DXVK, realtime limits, MIDI, and kernel.",
+            C["muted"], size=12))
+
+        btn_row = QHBoxLayout()
+        self.btn_run = QPushButton("Run Diagnostics")
+        self.btn_run.setFixedWidth(180)
+        btn_row.addWidget(self.btn_run)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
+
+        root.addWidget(_divider())
+        self.log = _log_panel()
+        root.addWidget(self.log, stretch=1)
+
+        self.btn_run.clicked.connect(self._run)
+        self._worker = None
+
+    def _run(self):
+        self.btn_run.setEnabled(False)
+        self.log.clear()
+        self._worker = CommandWorker(["selahpro", "diagnose"])
+        self._worker.line_out.connect(lambda l: _log_append(self.log, l))
+        self._worker.finished.connect(lambda _: self.btn_run.setEnabled(True))
+        self._worker.start()
+
+
+class LicenseTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(16)
+
+        root.addWidget(_label("License & Activation", C["gold"], bold=True, size=15))
+        root.addWidget(_divider())
+
+        # Status card
+        self.status_frame = QFrame()
+        self.status_frame.setObjectName("card")
+        sf_lay = QVBoxLayout(self.status_frame)
+        sf_lay.setContentsMargins(18, 14, 18, 14)
+        sf_lay.setSpacing(6)
+        self.status_lbl  = _label("Checking…", C["muted"], size=13)
+        self.detail_lbl  = _label("", C["muted"], size=12)
+        sf_lay.addWidget(self.status_lbl)
+        sf_lay.addWidget(self.detail_lbl)
+        root.addWidget(self.status_frame)
+
+        # Machine ID
+        mid_row = QHBoxLayout()
+        mid_row.addWidget(_label("Machine ID:", C["muted"]))
+        self.mid_lbl = QLineEdit(_machine_id())
+        self.mid_lbl.setReadOnly(True)
+        self.mid_lbl.setFixedWidth(320)
+        mid_row.addWidget(self.mid_lbl)
+        btn_copy = QPushButton("Copy")
+        btn_copy.setObjectName("secondary")
+        btn_copy.setFixedWidth(80)
+        btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(self.mid_lbl.text()))
+        mid_row.addWidget(btn_copy)
+        mid_row.addStretch()
+        root.addLayout(mid_row)
+        root.addWidget(_label(
+            f"Send your Machine ID to {SUPPORT} to receive a license key.",
+            C["muted"], size=11))
+
+        root.addWidget(_divider())
+
+        # Activation
+        root.addWidget(_label("Activate with License Key", C["parch"], size=13))
+        key_row = QHBoxLayout()
+        self.key_input = QLineEdit()
+        self.key_input.setPlaceholderText("SELAHPRO-XXXX-XXXX-XXXX-XXXX")
+        self.key_input.setFixedWidth(320)
+        key_row.addWidget(self.key_input)
+        self.btn_activate = QPushButton("Activate")
+        self.btn_activate.setFixedWidth(120)
+        self.btn_activate.clicked.connect(self._activate)
+        key_row.addWidget(self.btn_activate)
+        key_row.addStretch()
+        root.addLayout(key_row)
+        self.act_result = _label("", C["muted"], size=12)
+        root.addWidget(self.act_result)
+
+        root.addStretch()
+        self._refresh_status()
+
+    def _refresh_status(self):
+        status, detail = _license_status()
+        labels = {
+            "licensed":   ("●  Licensed",      C["teal"]),
+            "trial":      ("●  Trial Active",   C["gold"]),
+            "expired":    ("●  Trial Expired",  C["red"]),
+            "notstarted": ("●  Not Started",    C["muted"]),
+        }
+        lbl, color = labels.get(status, ("●  Unknown", C["muted"]))
+        self.status_lbl.setText(lbl)
+        self.status_lbl.setStyleSheet(f"color: {color}; font-size: 13px;")
+        self.detail_lbl.setText(detail)
+
+    def _activate(self):
+        key = self.key_input.text().strip().upper()
+        mid = _machine_id()
+        expected = _expected_key(mid)
+        if key == expected:
+            LIC_DIR.mkdir(parents=True, exist_ok=True)
+            LIC_FILE.write_text(key)
+            os.chmod(LIC_FILE, 0o600)
+            self.act_result.setText("✓  Activated successfully!")
+            self.act_result.setStyleSheet(f"color: {C['teal']}; font-size: 12px;")
+            self._refresh_status()
+        else:
+            self.act_result.setText("✗  Invalid key for this machine.")
+            self.act_result.setStyleSheet(f"color: {C['red']}; font-size: 12px;")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAIN WINDOW
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SelahBridgeProWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"SelahBridgePro  v{VERSION}")
+        self.setMinimumSize(860, 600)
+        self.resize(1000, 680)
+
+        # Try to set icon (same selahbridge.png from existing icon set)
+        icon_candidates = [
+            "/usr/share/icons/hicolor/256x256/apps/selahbridge.png",
+            "/usr/local/share/icons/selahbridge.png",
+            str(Path(__file__).parent / "selahbridge.png"),
+        ]
+        for ic in icon_candidates:
+            if Path(ic).exists():
+                self.setWindowIcon(QIcon(ic))
+                break
+
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+
+        self.home_tab     = HomeTab()
+        self.daws_tab     = DawsTab()
+        self.audio_tab    = AudioTab()
+        self.midi_tab     = MidiTab()
+        self.diagnose_tab = DiagnoseTab()
+        self.license_tab  = LicenseTab()
+
+        tabs.addTab(self.home_tab,     "  Home  ")
+        tabs.addTab(self.daws_tab,     "  DAWs  ")
+        tabs.addTab(self.audio_tab,    "  Audio  ")
+        tabs.addTab(self.midi_tab,     "  MIDI  ")
+        tabs.addTab(self.diagnose_tab, "  Diagnose  ")
+        tabs.addTab(self.license_tab,  "  License  ")
+
+        self.setCentralWidget(tabs)
+
+        # Wire Home tab quick-launch → switch to DAWs tab and trigger launch
+        self.home_tab.launch_requested.connect(self._quick_launch)
+
+    def _quick_launch(self, daw_key: str):
+        for i, d in enumerate(KNOWN_DAWS):
+            if d["key"] == daw_key:
+                # Switch to DAWs tab, select the DAW, launch
+                self.centralWidget().setCurrentIndex(1)
+                self.daws_tab.daw_combo.setCurrentIndex(i)
+                self.daws_tab._do_launch()
+                return
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENTRY POINT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("SelahBridgePro")
+    app.setOrganizationName("Selah Technologies")
+    app.setStyleSheet(STYLESHEET)
+
+    # Start trial on first run if not yet licensed
+    status, _ = _license_status()
+    if status == "notstarted":
+        LIC_DIR.mkdir(parents=True, exist_ok=True)
+        TRIAL_FILE.write_text(datetime.date.today().isoformat())
+        os.chmod(TRIAL_FILE, 0o600)
+
+    win = SelahBridgeProWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

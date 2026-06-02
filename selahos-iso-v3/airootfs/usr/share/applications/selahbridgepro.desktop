@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=SelahBridgePro
+GenericName=DAW Compatibility Layer
+Comment=Creator DAW compatibility for SelahOS — Wine, ASIO, MIDI, and DAW profiles
+Exec=/usr/local/bin/selahbridgepro
+Terminal=false
+Type=Application
+Icon=selahbridge
+Categories=AudioVideo;Audio;Music;
+Keywords=DAW;Wine;ASIO;MIDI;Audio;FL Studio;Ableton;REAPER;Pro Tools;Digital Performer;
+StartupWMClass=SelahBridgePro
+StartupNotify=true
