@@ -1,0 +1,699 @@
+#!/usr/bin/env python3
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selah-mpc-bridge — MPC Studio 2 ↔ SelahOS MIDI Bridge Daemon
+#  Selah Technologies LLC — Part of the SelahBridgePro suite
+#
+#  Creates a virtual ALSA MIDI port ("SelahMPC") that DAWs connect to.
+#  Routes MPC pad/knob/transport MIDI through with optional transformation.
+#  Routes LED feedback from the DAW back to the MPC pad LEDs.
+#  Reconnects automatically when the device is unplugged/replugged.
+#
+#  Usage:
+#    selah-mpc-bridge                  # foreground (Ctrl-C to stop)
+#    selah-mpc-bridge --daemon         # background daemon
+#    selah-mpc-bridge status           # check running status
+#    selah-mpc-bridge stop             # stop daemon
+#    selah-mpc-bridge reload           # reload config (SIGHUP)
+#    selah-mpc-bridge list-ports       # list available MIDI ports
+#    selah-mpc-bridge monitor          # print raw MPC MIDI (no virtual port)
+#
+#  Requires: python-rtmidi  (pip install python-rtmidi)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import sys
+import os
+import time
+import signal
+import logging
+import argparse
+import threading
+import configparser
+from pathlib import Path
+from typing import Optional, List, Tuple
+
+try:
+    import rtmidi
+except ImportError:
+    sys.exit("Error: python-rtmidi not installed.\n"
+             "  pip install python-rtmidi\n"
+             "  # or: sudo pacman -S python-rtmidi")
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+VERSION           = "1.0.0"
+APP_NAME          = "selah-mpc-bridge"
+
+MPC_STUDIO2_VID   = 0x09E8
+MPC_STUDIO2_PID   = 0x0076
+
+# Port name fragments to match (first match wins, case-insensitive)
+MPC_PORT_PATTERNS = ["MPC Studio 2", "MPC Studio2", "Akai MPC Studio 2",
+                     "MPC Studio (USB MIDI)"]
+
+# Virtual ALSA port names the DAW will see
+VIRTUAL_PORT_DAW  = "SelahMPC"           # DAW reads pads/knobs from here
+VIRTUAL_PORT_LEDS = "SelahMPC Feedback"  # DAW writes LED commands here
+
+PID_FILE      = Path("/run/selah-mpc-bridge.pid")
+DEFAULT_CFG   = Path("/etc/selah-mpc/mpc-studio2.conf")
+LOG_FILE      = Path("/var/log/selah-mpc-bridge.log")
+
+# MPC Studio 2 sends pad notes starting at note 36 (C2) by default.
+# Pads 1-16 = notes 36-51 on channel 1 (factory default).
+MPC_PAD_INPUT_ROOT = 36
+MPC_PAD_COUNT      = 16
+
+# ── Scales (semitone intervals from root) ──────────────────────────────────────
+SCALES = {
+    "chromatic":        list(range(12)),
+    "major":            [0, 2, 4, 5, 7, 9, 11],
+    "minor":            [0, 2, 3, 5, 7, 8, 10],
+    "pentatonic_major": [0, 2, 4, 7, 9],
+    "pentatonic_minor": [0, 3, 5, 7, 10],
+    "blues":            [0, 3, 5, 6, 7, 10],
+    "dorian":           [0, 2, 3, 5, 7, 9, 10],
+    "lydian":           [0, 2, 4, 6, 7, 9, 11],
+    "mixolydian":       [0, 2, 4, 5, 7, 9, 10],
+    "harmonic_minor":   [0, 2, 3, 5, 7, 8, 11],
+}
+
+# ── Velocity curves ────────────────────────────────────────────────────────────
+def _vel_linear(v: int) -> int: return v
+def _vel_soft(v: int)   -> int: return int(127 * (v / 127) ** 0.60)
+def _vel_hard(v: int)   -> int: return int(127 * (v / 127) ** 1.60)
+def _vel_fixed(v: int)  -> int: return 100 if v > 0 else 0
+
+VELOCITY_CURVES = {
+    "linear": _vel_linear,
+    "soft":   _vel_soft,
+    "hard":   _vel_hard,
+    "fixed":  _vel_fixed,
+}
+
+# ── Default config (written to /etc/selah-mpc/mpc-studio2.conf if absent) ──────
+DEFAULT_CONFIG = """\
+# ─────────────────────────────────────────────────────────────────────────────
+#  SelahMPC Bridge — MPC Studio 2 configuration
+#  Reload without restart: selah-mpc-bridge reload
+# ─────────────────────────────────────────────────────────────────────────────
+
+[device]
+# Comma-separated name fragments to match the MPC MIDI port (first match wins)
+port_names = MPC Studio 2,MPC Studio2,Akai MPC Studio 2
+# Seconds between reconnect attempts when device is unplugged
+reconnect_interval = 2
+
+[midi]
+# MIDI channel the MPC sends pad notes on (1-16; MPC factory default: 1)
+pad_channel = 1
+# MIDI channel for knob CC output forwarded to DAW (1-16)
+cc_channel = 1
+# MIDI channel the bridge listens on for LED feedback FROM the DAW
+feedback_channel = 1
+
+[pads]
+# Note the MPC hardware sends for pad 1 (bottom-left physical pad).
+# MPC Studio 2 factory default: 36 (C2). Run 'selah-mpc-bridge monitor'
+# and hit pad 1 to confirm if your unit differs.
+input_root = 36
+# ── Output mapping ──
+# layout:  passthrough  — notes forwarded unchanged
+#          chromatic    — pad 1 → root_note, pad 2 → root_note+1, etc.
+#          scale        — pads mapped to scale degrees from root_note
+#          drum         — GM drum map starting at root_note (36 = kick)
+layout = passthrough
+# Root output note for chromatic/scale/drum layouts (0-127; 36=C2, 48=C3)
+root_note = 36
+# Scale name when layout = scale
+# Options: major minor pentatonic_major pentatonic_minor blues
+#          dorian lydian mixolydian harmonic_minor chromatic
+scale = pentatonic_minor
+# Additional semitone transpose applied after layout mapping (-48 to +48)
+transpose = 0
+
+[velocity]
+# Curve applied to pad hit velocity before forwarding
+# Options: linear  soft (boost weak hits)  hard (compress loud hits)  fixed
+curve = linear
+# Clamp output velocity to this range (1-127)
+min_velocity = 1
+max_velocity = 127
+
+[leds]
+# Mirror pad hits back to MPC LEDs (pad lights up on hit, off on release)
+mirror_pads = true
+# Brightness of mirrored LED (1-127)
+mirror_brightness = 80
+# Flash all pads briefly when the MPC connects to confirm bridge is live
+startup_flash = true
+# Startup flash brightness
+flash_brightness = 60
+"""
+
+
+# ── Config loader ──────────────────────────────────────────────────────────────
+
+def load_config(path: Path) -> configparser.ConfigParser:
+    cfg = configparser.ConfigParser()
+    cfg.read_string(DEFAULT_CONFIG)
+    if path.exists():
+        cfg.read(str(path))
+    return cfg
+
+
+def write_default_config(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(DEFAULT_CONFIG)
+
+
+# ── MIDI utilities ─────────────────────────────────────────────────────────────
+
+def find_port(midi_obj, patterns: List[str]) -> Optional[int]:
+    """Return port index of first port whose name contains any pattern."""
+    ports = midi_obj.get_ports()
+    for i, port_name in enumerate(ports):
+        for pat in patterns:
+            if pat.lower() in port_name.lower():
+                return i
+    return None
+
+
+def build_note_map(layout: str, input_root: int, output_root: int,
+                   scale: str, transpose: int) -> dict:
+    """
+    Build a dict mapping incoming pad note → outgoing note.
+    Covers the 16 pads (input_root … input_root+15).
+    """
+    mapping = {}
+    if layout == "passthrough":
+        for i in range(MPC_PAD_COUNT):
+            mapping[input_root + i] = input_root + i
+        return mapping
+
+    if layout == "drum":
+        for i in range(MPC_PAD_COUNT):
+            mapping[input_root + i] = max(0, min(127, output_root + i + transpose))
+        return mapping
+
+    if layout in ("chromatic", "scale"):
+        intervals = (SCALES.get(scale, SCALES["chromatic"])
+                     if layout == "scale"
+                     else list(range(12)))
+        for i in range(MPC_PAD_COUNT):
+            octave   = i // len(intervals)
+            degree   = i % len(intervals)
+            out_note = output_root + octave * 12 + intervals[degree] + transpose
+            mapping[input_root + i] = max(0, min(127, out_note))
+        return mapping
+
+    # Unknown layout — passthrough
+    for i in range(MPC_PAD_COUNT):
+        mapping[input_root + i] = input_root + i
+    return mapping
+
+
+# ── LED helpers ────────────────────────────────────────────────────────────────
+
+def led_on(midiout, channel: int, note: int, brightness: int) -> None:
+    ch = max(0, min(15, channel - 1))
+    midiout.send_message([0x90 | ch, note & 0x7F, max(1, brightness & 0x7F)])
+
+
+def led_off(midiout, channel: int, note: int) -> None:
+    ch = max(0, min(15, channel - 1))
+    midiout.send_message([0x80 | ch, note & 0x7F, 0])
+
+
+def flash_pads(midiout, note_map: dict, channel: int,
+               brightness: int, duration: float = 0.12) -> None:
+    """Light all pads briefly on connect to confirm the bridge is live."""
+    ch = channel - 1
+    for in_note, out_note in note_map.items():
+        midiout.send_message([0x90 | ch, in_note, brightness])
+    time.sleep(duration)
+    for in_note in note_map:
+        midiout.send_message([0x80 | ch, in_note, 0])
+
+
+# ── Bridge ──────────────────────────────────────────────────────────────────────
+
+class MPCBridge:
+
+    def __init__(self, cfg: configparser.ConfigParser, log: logging.Logger):
+        self.cfg  = cfg
+        self.log  = log
+        self._stop   = threading.Event()
+        self._reload = threading.Event()
+
+        self._midiin_mpc:   Optional[rtmidi.MidiIn]  = None
+        self._midiout_mpc:  Optional[rtmidi.MidiOut] = None
+        self._midiout_daw:  Optional[rtmidi.MidiOut] = None  # virtual out → DAW
+        self._midiin_leds:  Optional[rtmidi.MidiIn]  = None  # virtual in ← DAW
+
+        self._apply_config()
+
+    # ── Config ────────────────────────────────────────────────────────────────
+
+    def _apply_config(self) -> None:
+        c = self.cfg
+        self._port_patterns  = [n.strip() for n in
+                                 c.get("device", "port_names").split(",")]
+        self._reconnect_sec  = c.getfloat("device", "reconnect_interval",
+                                          fallback=2.0)
+
+        self._pad_ch         = c.getint("midi", "pad_channel",      fallback=1)
+        self._cc_ch          = c.getint("midi", "cc_channel",        fallback=1)
+        self._fb_ch          = c.getint("midi", "feedback_channel",  fallback=1)
+
+        self._input_root     = c.getint("pads", "input_root",        fallback=36)
+        layout               = c.get   ("pads", "layout",            fallback="passthrough")
+        root_note            = c.getint("pads", "root_note",         fallback=36)
+        scale                = c.get   ("pads", "scale",             fallback="pentatonic_minor")
+        transpose            = c.getint("pads", "transpose",         fallback=0)
+
+        vcurve_name          = c.get   ("velocity", "curve",         fallback="linear")
+        self._vel_curve      = VELOCITY_CURVES.get(vcurve_name, _vel_linear)
+        self._vel_min        = c.getint("velocity", "min_velocity",  fallback=1)
+        self._vel_max        = c.getint("velocity", "max_velocity",  fallback=127)
+
+        self._mirror_pads    = c.getboolean("leds", "mirror_pads",      fallback=True)
+        self._mirror_bright  = c.getint    ("leds", "mirror_brightness", fallback=80)
+        self._startup_flash  = c.getboolean("leds", "startup_flash",     fallback=True)
+        self._flash_bright   = c.getint    ("leds", "flash_brightness",  fallback=60)
+
+        self._note_map = build_note_map(
+            layout, self._input_root, root_note, scale, transpose)
+
+        self.log.info("Config: layout=%s root=%d scale=%s curve=%s pads=%d",
+                      layout, root_note, scale, vcurve_name, len(self._note_map))
+
+    # ── Port management ───────────────────────────────────────────────────────
+
+    def _open_virtual_ports(self) -> None:
+        vout = rtmidi.MidiOut()
+        vout.open_virtual_port(VIRTUAL_PORT_DAW)
+        self._midiout_daw = vout
+
+        vin = rtmidi.MidiIn()
+        vin.open_virtual_port(VIRTUAL_PORT_LEDS)
+        vin.ignore_types(sysex=False, timing=False, active_sense=True)
+        self._midiin_leds = vin
+
+        self.log.info("Virtual ports: '%s' (to DAW)  '%s' (from DAW)",
+                      VIRTUAL_PORT_DAW, VIRTUAL_PORT_LEDS)
+
+    def _open_mpc_ports(self) -> bool:
+        try:
+            mi = rtmidi.MidiIn()
+            mo = rtmidi.MidiOut()
+
+            in_idx  = find_port(mi, self._port_patterns)
+            out_idx = find_port(mo, self._port_patterns)
+
+            if in_idx is None:
+                del mi, mo
+                return False
+
+            mi.open_port(in_idx)
+            mi.ignore_types(sysex=False, timing=False, active_sense=True)
+            self._midiin_mpc = mi
+
+            if out_idx is not None:
+                mo.open_port(out_idx)
+                self._midiout_mpc = mo
+                self.log.info("MPC Studio 2 connected (in=%d out=%d)", in_idx, out_idx)
+            else:
+                del mo
+                self.log.info("MPC Studio 2 connected (in=%d; no output port)",
+                              in_idx)
+            return True
+
+        except Exception as exc:
+            self.log.error("Failed to open MPC ports: %s", exc)
+            return False
+
+    def _close_mpc_ports(self) -> None:
+        for attr in ("_midiin_mpc", "_midiout_mpc"):
+            obj = getattr(self, attr, None)
+            if obj:
+                try:
+                    obj.close_port()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+    # ── Message handlers ──────────────────────────────────────────────────────
+
+    def _on_mpc_message(self, event, _data) -> None:
+        """Receive MIDI from MPC hardware, transform, forward to DAW virtual port."""
+        msg, _ts = event
+        if not msg:
+            return
+
+        status   = msg[0]
+        msg_type = status & 0xF0
+        channel  = status & 0x0F
+
+        # ── Note On / Off (pads) ────────────────────────────────────────────
+        if msg_type in (0x80, 0x90) and len(msg) >= 3:
+            note, vel = msg[1], msg[2]
+
+            if channel == (self._pad_ch - 1):
+                # Map to output note via note_map
+                out_note = self._note_map.get(note, note)
+
+                # Apply velocity transform (Note On with vel > 0 only)
+                if msg_type == 0x90 and vel > 0:
+                    vel = self._vel_curve(vel)
+                    vel = max(self._vel_min, min(self._vel_max, vel))
+                    if vel == 0:
+                        vel = self._vel_min
+
+                # Mirror LED: light up on hit, off on release
+                if self._mirror_pads and self._midiout_mpc:
+                    if msg_type == 0x90 and vel > 0:
+                        led_on(self._midiout_mpc, self._pad_ch, note,
+                               self._mirror_bright)
+                    else:
+                        led_off(self._midiout_mpc, self._pad_ch, note)
+
+                out_status = msg_type | (self._pad_ch - 1)
+                if self._midiout_daw:
+                    self._midiout_daw.send_message([out_status, out_note, vel])
+            else:
+                # Non-pad channel — pass through unchanged
+                if self._midiout_daw:
+                    self._midiout_daw.send_message(list(msg))
+
+        # ── CC (Q-Link knobs, faders) ────────────────────────────────────────
+        elif msg_type == 0xB0 and len(msg) >= 3:
+            out_status = 0xB0 | (self._cc_ch - 1)
+            if self._midiout_daw:
+                self._midiout_daw.send_message([out_status, msg[1], msg[2]])
+
+        # ── Everything else (PC, aftertouch, pitch bend, SysEx) ─────────────
+        else:
+            if self._midiout_daw:
+                self._midiout_daw.send_message(list(msg))
+
+    def _on_led_message(self, event, _data) -> None:
+        """Receive LED commands from DAW, forward directly to MPC hardware."""
+        msg, _ts = event
+        if msg and self._midiout_mpc:
+            self._midiout_mpc.send_message(list(msg))
+
+    # ── Main run loop ─────────────────────────────────────────────────────────
+
+    def run(self) -> None:
+        self._open_virtual_ports()
+
+        while not self._stop.is_set():
+            if not self._open_mpc_ports():
+                self.log.info("Waiting for MPC Studio 2 (port patterns: %s)...",
+                              ", ".join(self._port_patterns))
+                self._stop.wait(self._reconnect_sec)
+                continue
+
+            # Register callbacks
+            self._midiin_mpc.set_callback(self._on_mpc_message)
+            if self._midiin_leds:
+                self._midiin_leds.set_callback(self._on_led_message)
+
+            if self._startup_flash and self._midiout_mpc:
+                flash_pads(self._midiout_mpc, self._note_map,
+                           self._pad_ch, self._flash_bright)
+
+            self.log.info("Bridge live — connect your DAW to '%s'",
+                          VIRTUAL_PORT_DAW)
+
+            # Poll loop: check for disconnect or reload
+            while not self._stop.is_set():
+                if self._reload.is_set():
+                    self._reload.clear()
+                    self._apply_config()
+                    if self._startup_flash and self._midiout_mpc:
+                        flash_pads(self._midiout_mpc, self._note_map,
+                                   self._pad_ch, self._flash_bright)
+                    self.log.info("Config reloaded")
+
+                # Check if device is still present
+                probe = rtmidi.MidiIn()
+                still_up = find_port(probe, self._port_patterns) is not None
+                del probe
+
+                if not still_up:
+                    self.log.warning("MPC Studio 2 disconnected — waiting to reconnect")
+                    self._close_mpc_ports()
+                    break
+
+                self._stop.wait(1.5)
+
+        self._close_mpc_ports()
+        self.log.info("Bridge stopped")
+
+    def stop(self)   -> None: self._stop.set()
+    def reload(self) -> None: self._reload.set()
+
+
+# ── Monitor mode (raw MIDI display, no virtual port) ──────────────────────────
+
+def run_monitor(patterns: List[str]) -> int:
+    """Print every MIDI message from the MPC in real time. Ctrl-C to quit."""
+    mi = rtmidi.MidiIn()
+    idx = find_port(mi, patterns)
+    if idx is None:
+        print(f"MPC Studio 2 not found. Available ports:")
+        for i, p in enumerate(mi.get_ports()):
+            print(f"  [{i}] {p}")
+        return 1
+
+    mi.open_port(idx)
+    mi.ignore_types(sysex=False, timing=False, active_sense=True)
+    print(f"Monitoring: {mi.get_ports()[idx]}  (Ctrl-C to stop)\n")
+    print(f"{'STATUS':10} {'TYPE':20} {'BYTE2':8} {'BYTE3':8}")
+    print("─" * 50)
+
+    NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
+
+    def _fmt_note(n: int) -> str:
+        return f"{NOTE_NAMES[n % 12]}{n // 12 - 1}({n})"
+
+    def _on_msg(event, _data):
+        msg, ts = event
+        if not msg:
+            return
+        st = msg[0]
+        t  = st & 0xF0
+        ch = (st & 0x0F) + 1
+        if t == 0x90:
+            note, vel = msg[1], msg[2]
+            tag = "Note On " if vel > 0 else "Note Off"
+            print(f"  ch={ch:<3} {tag:<18} {_fmt_note(note):<10} vel={vel}")
+        elif t == 0x80:
+            print(f"  ch={ch:<3} {'Note Off':<18} {_fmt_note(msg[1]):<10} vel={msg[2]}")
+        elif t == 0xB0:
+            print(f"  ch={ch:<3} {'CC':<18} cc={msg[1]:<8} val={msg[2]}")
+        elif t == 0xC0:
+            print(f"  ch={ch:<3} {'Program Change':<18} prog={msg[1]}")
+        elif t == 0xD0:
+            print(f"  ch={ch:<3} {'Aftertouch':<18} val={msg[1]}")
+        elif t == 0xE0:
+            lsb, msb = msg[1], msg[2]
+            val = (msb << 7) | lsb - 8192
+            print(f"  ch={ch:<3} {'Pitch Bend':<18} val={val}")
+        elif st == 0xF0:
+            print(f"  SysEx  {len(msg)} bytes: {' '.join(f'{b:02X}' for b in msg[:8])}"
+                  + ("..." if len(msg) > 8 else ""))
+        else:
+            print(f"  raw: {' '.join(f'{b:02X}' for b in msg)}")
+
+    mi.set_callback(_on_msg)
+    try:
+        while True:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\nDone.")
+    return 0
+
+
+# ── Daemon helpers ─────────────────────────────────────────────────────────────
+
+def daemonize() -> None:
+    if os.fork() > 0:
+        sys.exit(0)
+    os.setsid()
+    if os.fork() > 0:
+        sys.exit(0)
+    devnull = open(os.devnull, "w")
+    sys.stdout = devnull
+    sys.stderr = devnull
+
+
+def write_pid(path: Path) -> None:
+    path.write_text(str(os.getpid()))
+
+
+def read_pid(path: Path) -> Optional[int]:
+    try:
+        return int(path.read_text().strip())
+    except Exception:
+        return None
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def setup_log(verbose: bool, to_file: bool) -> logging.Logger:
+    log = logging.getLogger(APP_NAME)
+    log.setLevel(logging.DEBUG if verbose else logging.INFO)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s",
+                            "%Y-%m-%d %H:%M:%S")
+    handler = (logging.FileHandler(LOG_FILE)
+               if to_file else logging.StreamHandler())
+    handler.setFormatter(fmt)
+    log.addHandler(handler)
+    return log
+
+
+# ── Subcommands ────────────────────────────────────────────────────────────────
+
+def cmd_status(_args) -> int:
+    pid = read_pid(PID_FILE)
+    if pid and pid_alive(pid):
+        print(f"selah-mpc-bridge: running (pid {pid})")
+        return 0
+    print("selah-mpc-bridge: not running")
+    if pid:
+        PID_FILE.unlink(missing_ok=True)
+    return 1
+
+
+def cmd_stop(_args) -> int:
+    pid = read_pid(PID_FILE)
+    if not pid:
+        print("selah-mpc-bridge: not running")
+        return 0
+    if not pid_alive(pid):
+        PID_FILE.unlink(missing_ok=True)
+        print("selah-mpc-bridge: stale PID file removed")
+        return 0
+    os.kill(pid, signal.SIGTERM)
+    print(f"Stopped (pid {pid})")
+    PID_FILE.unlink(missing_ok=True)
+    return 0
+
+
+def cmd_reload(_args) -> int:
+    pid = read_pid(PID_FILE)
+    if not pid or not pid_alive(pid):
+        print("selah-mpc-bridge: not running")
+        return 1
+    os.kill(pid, signal.SIGHUP)
+    print(f"Config reload signal sent (pid {pid})")
+    return 0
+
+
+def cmd_list_ports(_args) -> int:
+    mi = rtmidi.MidiIn()
+    mo = rtmidi.MidiOut()
+    print("MIDI Input ports:")
+    for i, p in enumerate(mi.get_ports()):
+        marker = " ◀ MPC" if any(pat.lower() in p.lower()
+                                 for pat in MPC_PORT_PATTERNS) else ""
+        print(f"  [{i}] {p}{marker}")
+    print("\nMIDI Output ports:")
+    for i, p in enumerate(mo.get_ports()):
+        marker = " ◀ MPC" if any(pat.lower() in p.lower()
+                                 for pat in MPC_PORT_PATTERNS) else ""
+        print(f"  [{i}] {p}{marker}")
+    return 0
+
+
+def cmd_run(args) -> int:
+    cfg_path = Path(args.config)
+    if not cfg_path.exists():
+        write_default_config(cfg_path)
+
+    cfg = load_config(cfg_path)
+
+    if args.daemon:
+        daemonize()
+
+    log = setup_log(args.verbose, args.daemon)
+    write_pid(PID_FILE)
+
+    bridge = MPCBridge(cfg, log)
+
+    def _on_sigterm(_s, _f):
+        log.info("SIGTERM — stopping")
+        bridge.stop()
+
+    def _on_sighup(_s, _f):
+        new_cfg = load_config(cfg_path)
+        bridge.cfg = new_cfg
+        bridge.reload()
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
+    signal.signal(signal.SIGHUP,  _on_sighup)
+
+    try:
+        bridge.run()
+    except KeyboardInterrupt:
+        log.info("Interrupted")
+        bridge.stop()
+    finally:
+        PID_FILE.unlink(missing_ok=True)
+
+    return 0
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog=APP_NAME,
+        description="MPC Studio 2 ↔ SelahOS MIDI Bridge"
+    )
+    parser.add_argument("--version", action="version",
+                        version=f"%(prog)s {VERSION}")
+    parser.add_argument("--config", default=str(DEFAULT_CFG),
+                        metavar="FILE", help="Config file (default: %(default)s)")
+    parser.add_argument("--daemon", action="store_true",
+                        help="Run in background as daemon")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Verbose logging")
+
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("status",      help="Show bridge status")
+    sub.add_parser("stop",        help="Stop running bridge")
+    sub.add_parser("reload",      help="Reload config without restart")
+    sub.add_parser("list-ports",  help="List MIDI ports (marks MPC if found)")
+    sub.add_parser("monitor",     help="Print raw MPC MIDI (no virtual port)")
+
+    args = parser.parse_args()
+
+    dispatch = {
+        "status":     cmd_status,
+        "stop":       cmd_stop,
+        "reload":     cmd_reload,
+        "list-ports": cmd_list_ports,
+    }
+
+    if args.command in dispatch:
+        return dispatch[args.command](args)
+
+    if args.command == "monitor":
+        cfg = load_config(Path(args.config))
+        patterns = [n.strip() for n in
+                    cfg.get("device", "port_names").split(",")]
+        return run_monitor(patterns)
+
+    return cmd_run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

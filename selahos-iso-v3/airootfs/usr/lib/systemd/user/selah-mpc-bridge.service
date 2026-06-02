@@ -1,0 +1,18 @@
+[Unit]
+Description=SelahMPC Bridge — MPC Studio 2 MIDI Bridge
+Documentation=man:selah-mpc-bridge(1)
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/selah-mpc-bridge
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3
+# Bridge waits for device internally; no need to delay start
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Install]
+WantedBy=default.target
