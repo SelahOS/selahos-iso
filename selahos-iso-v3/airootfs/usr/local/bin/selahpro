@@ -31,11 +31,17 @@ LIC_FILE     = LIC_DIR / "license"
 TRIAL_FILE   = LIC_DIR / "trial.conf"
 TRIAL_DAYS   = 14
 
-# License secret — split to reduce casual readability
-_P1 = "S3L4HP"
-_P2 = "R02026Y"
-_P3 = "Z5K7M!"
-_SECRET = _P1 + _P2 + _P3
+# License secret loaded at runtime from /etc/selahbridgepro/.keydata
+# That file is NOT in source control — it is deployed at ISO build time.
+# Without .keydata the license system operates in trial-only mode.
+def _load_secret() -> str:
+    kf = Path("/etc/selahbridgepro/.keydata")
+    try:
+        return kf.read_text().strip() if kf.exists() else ""
+    except OSError:
+        return ""
+
+_SECRET = _load_secret()
 
 # ── ANSI palette ──────────────────────────────────────────────────────────────
 GOLD  = "\033[38;2;214;168;90m"
