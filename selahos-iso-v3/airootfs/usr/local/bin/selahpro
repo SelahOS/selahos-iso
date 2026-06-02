@@ -56,13 +56,15 @@ BANNER = f"""\
 {RESET}"""
 
 KNOWN_DAWS = {
-    "flstudio":   {"name": "FL Studio",     "exe": "FL64.exe",                    "profile": "flstudio"},
-    "fl":         {"name": "FL Studio",     "exe": "FL64.exe",                    "profile": "flstudio"},
-    "ableton":    {"name": "Ableton Live",  "exe": "Ableton Live 12 Suite.exe",   "profile": "ableton"},
-    "live":       {"name": "Ableton Live",  "exe": "Ableton Live 12 Suite.exe",   "profile": "ableton"},
-    "reaper":     {"name": "REAPER",        "exe": "reaper.exe",                  "profile": "reaper"},
-    "protools":   {"name": "Pro Tools",     "exe": "Pro Tools.exe",               "profile": "protools"},
-    "pt":         {"name": "Pro Tools",     "exe": "Pro Tools.exe",               "profile": "protools"},
+    "flstudio":        {"name": "FL Studio",          "exe": "FL64.exe",                  "profile": "flstudio"},
+    "fl":              {"name": "FL Studio",          "exe": "FL64.exe",                  "profile": "flstudio"},
+    "ableton":         {"name": "Ableton Live",       "exe": "Ableton Live 12 Suite.exe", "profile": "ableton"},
+    "live":            {"name": "Ableton Live",       "exe": "Ableton Live 12 Suite.exe", "profile": "ableton"},
+    "reaper":          {"name": "REAPER",             "exe": "reaper.exe",                "profile": "reaper"},
+    "protools":        {"name": "Pro Tools",          "exe": "Pro Tools.exe",             "profile": "protools"},
+    "pt":              {"name": "Pro Tools",          "exe": "Pro Tools.exe",             "profile": "protools"},
+    "digitalperformer":{"name": "Digital Performer",  "exe": "DP.exe",                    "profile": "digitalperformer"},
+    "dp":              {"name": "Digital Performer",  "exe": "DP.exe",                    "profile": "digitalperformer"},
 }
 
 def ok(msg):    print(f"  {TEAL}✓{RESET} {PARCH}{msg}{RESET}")
@@ -247,6 +249,27 @@ def _scaffold_prefix(daw: dict):
                        env={**os.environ, **env}, check=False, capture_output=True)
         ok(f"Registry defaults applied for {name}")
 
+    # Apply DAW-specific registry fixes
+    extra_reg_path = env.get("SELAH_REG_EXTRA", "")
+    if extra_reg_path and Path(extra_reg_path).exists():
+        subprocess.run(["wine", "regedit", extra_reg_path],
+                       env={**os.environ, **env}, check=False, capture_output=True)
+        ok(f"DAW-specific registry fixes applied for {name}")
+
+    # Digital Performer: install native VC++ 2022 redistributable
+    # This fixes the msvcp140 null vtable crash (motucorelibs ABI mismatch)
+    if profile_key in ("digitalperformer",):
+        info("Installing VC++ 2022 Redistributable (required for Digital Performer)...")
+        result = subprocess.run(
+            ["winetricks", "-q", "vcredist2022"],
+            env={**os.environ, **env}, check=False, capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            ok("vcredist2022 installed — native msvcp140/vcruntime140 active")
+        else:
+            warn("vcredist2022 install failed — DP may crash on launch")
+            warn("Manual fix: WINEPREFIX=~/.wine-selah-digitalperformer winetricks vcredist2022")
+
     # Install WineASIO into this prefix
     subprocess.run(["selah-asio-config", "--install"],
                    env={**os.environ, **env}, check=False)
@@ -327,6 +350,34 @@ def cmd_launch(daw_name: str, exe_override: str | None = None):
     # Reconfigure PipeWire for this session
     subprocess.run(["selah-asio-config", "--rate", str(rate), "--buffer", str(buffer)],
                    env=launch_env, check=False, capture_output=True)
+
+    # Apply extra per-DAW registry file if the profile specifies one
+    extra_reg = profile_env.get("SELAH_REG_EXTRA", "")
+    if extra_reg and Path(extra_reg).exists():
+        info(f"Applying DAW-specific registry fixes...")
+        subprocess.run(
+            ["wine", "regedit", extra_reg],
+            env=launch_env, check=False, capture_output=True
+        )
+
+    # Pre-launch background services (e.g. LDSvc.exe for Digital Performer)
+    prelaunches = profile_env.get("SELAH_PRELAUNCHES", "").split()
+    prelaunch_wait = int(profile_env.get("SELAH_PRELAUNCH_WAIT", "0"))
+    if prelaunches:
+        selahwine_bin = shutil.which("selahwine") or "selahwine"
+        for svc_exe in prelaunches:
+            info(f"Pre-launching service: {svc_exe}")
+            subprocess.Popen(
+                [selahwine_bin, "--profile", daw["profile"],
+                 "start", "/b", svc_exe],
+                env=launch_env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        if prelaunch_wait > 0:
+            import time
+            info(f"Waiting {prelaunch_wait}s for services to register COM servers...")
+            time.sleep(prelaunch_wait)
 
     # Launch via selahwine (which wraps wine-staging)
     selahwine = shutil.which("selahwine") or "selahwine"

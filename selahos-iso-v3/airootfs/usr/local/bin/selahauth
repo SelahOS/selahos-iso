@@ -32,17 +32,19 @@ C = {
 }
 
 DAW_PORTALS = {
-    "flstudio":  ("https://customers.image-line.com/login", "FL Studio Authorization"),
-    "fl":        ("https://customers.image-line.com/login", "FL Studio Authorization"),
-    "ableton":   ("https://www.ableton.com/en/login/",      "Ableton Live Authorization"),
-    "live":      ("https://www.ableton.com/en/login/",      "Ableton Live Authorization"),
-    "reaper":    ("https://www.reaper.fm/purchase.php",     "REAPER License"),
-    "protools":  ("https://my.avid.com",                    "Pro Tools / Avid Account"),
-    "pt":        ("https://my.avid.com",                    "Pro Tools / Avid Account"),
+    "flstudio":         ("https://customers.image-line.com/login",   "FL Studio Authorization"),
+    "fl":               ("https://customers.image-line.com/login",   "FL Studio Authorization"),
+    "ableton":          ("https://www.ableton.com/en/login/",        "Ableton Live Authorization"),
+    "live":             ("https://www.ableton.com/en/login/",        "Ableton Live Authorization"),
+    "reaper":           ("https://www.reaper.fm/purchase.php",       "REAPER License"),
+    "protools":         ("https://my.avid.com",                      "Pro Tools / Avid Account"),
+    "pt":               ("https://my.avid.com",                      "Pro Tools / Avid Account"),
+    "digitalperformer": ("https://motu.com/en-us/store/account/",    "Digital Performer / MOTU Account"),
+    "dp":               ("https://motu.com/en-us/store/account/",    "Digital Performer / MOTU Account"),
 }
 
 # Vendor schemes that signal auth completion (auto-close triggers)
-COMPLETION_SCHEMES = {"ablton", "ilok", "image-line", "reaper", "avid", "fl-auth"}
+COMPLETION_SCHEMES = {"ablton", "ilok", "image-line", "reaper", "avid", "fl-auth", "motu"}
 
 COOKIE_DIR = Path.home() / ".local" / "share" / "selahbridgepro" / "auth"
 

@@ -1,0 +1,56 @@
+REGEDIT4
+
+; SelahBridgePro — Digital Performer COM / License Fixes
+; Applied to the DP Wine prefix by selahpro on first launch.
+; Selah Technologies LLC — Copyright (C) 2026
+;
+; Context: msvcp140 null vtable crash traced to LDSvc.exe COM server
+; not registering before DP.exe queries it. These entries pre-seed
+; the COM LocalServer path so Wine's COM subsystem can locate LDSvc
+; without waiting for the service's own self-registration.
+
+; ── Force native VC++ CRT DLLs ──────────────────────────────────
+; Belt-and-suspenders alongside WINEDLLOVERRIDES env var.
+[HKEY_CURRENT_USER\Software\Wine\DllOverrides]
+"msvcp140"="native,builtin"
+"vcruntime140"="native,builtin"
+"vcruntime140_1"="native,builtin"
+"ucrtbase"="native,builtin"
+
+; ── MOTU LDSvc COM LocalServer registration ─────────────────────
+; LDSvc.exe registers a COM LocalServer32 during startup, but if DP
+; polls before registration completes, motucorelibs gets a null COM
+; proxy → null std::function → crash at msvcp140+0x13080.
+; Pre-seeding the AppID entry lets COM find LDSvc without the race.
+[HKEY_LOCAL_MACHINE\Software\Classes\AppID\LDSvc.exe]
+"LocalService"=""
+"AppID"="{00000000-0000-0000-0000-000000000000}"
+
+; ── COM threading model for MOTU audio services ─────────────────
+; MOTU's services use free-threaded COM (MTA). If Wine initializes
+; them STA, inter-process COM calls can deadlock or return null.
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\LDSvc.exe]
+"MitigationOptions"=""
+
+; ── Disable MOTU crash reporting / telemetry ─────────────────────
+[HKEY_CURRENT_USER\Software\MOTU\Digital Performer]
+"SendCrashReports"=dword:00000000
+"SendUsageData"=dword:00000000
+"CheckForUpdates"=dword:00000000
+
+; ── MOTU audio: prefer ASIO over WASAPI ─────────────────────────
+[HKEY_CURRENT_USER\Software\MOTU\Digital Performer\AudioSetup]
+"PreferredDriverType"="ASIO"
+"SampleRate"=dword:0000bb80
+"BufferSize"=dword:00000100
+
+; ── Disable Wine crash dialog for DP ─────────────────────────────
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\AeDebug]
+"Auto"="0"
+"UserDebuggerHotKey"=dword:00000000
+
+; ── Ensure mDNSResponder can bind to local interfaces ────────────
+; MOTU's mDNS service (used for hardware/license discovery) needs
+; the loopback interface to be accessible for inter-process comms.
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\mDNSResponder]
+"Start"=dword:00000002
