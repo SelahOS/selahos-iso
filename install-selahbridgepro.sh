@@ -71,6 +71,15 @@ else
     ok "python-pyqt6-webengine ready"
 fi
 
+# python-rtmidi is required by selah-mpc-bridge
+if ! python -c "import rtmidi" &>/dev/null 2>&1; then
+    info "Installing python-rtmidi (selah-mpc-bridge)..."
+    pip install python-rtmidi --quiet || \
+        warn "python-rtmidi install failed — selah-mpc-bridge will not work"
+else
+    ok "python-rtmidi ready"
+fi
+
 # ── Step 2: Copy executables ──────────────────────────────────────────────────
 hdr "Installing executables"
 
@@ -84,6 +93,8 @@ install -Dm700 "$SRC/usr/local/bin/selah-asio-config" /usr/local/bin/selah-asio-
 ok "selah-asio-config"
 install -Dm700 "$SRC/usr/local/bin/selahauth"         /usr/local/bin/selahauth
 ok "selahauth"
+install -Dm755 "$SRC/usr/local/bin/selah-mpc-bridge" /usr/local/bin/selah-mpc-bridge
+ok "selah-mpc-bridge"
 
 # ── Step 3: Config and profiles ──────────────────────────────────────────────
 hdr "Installing profiles and config"
@@ -97,6 +108,16 @@ for profile in "$SRC"/etc/selahbridgepro/profiles/*.profile; do
     install -Dm644 "$profile" "/etc/selahbridgepro/profiles/$(basename "$profile")"
     ok "profile: $(basename "$profile")"
 done
+
+# MPC Studio 2 bridge config (only written if not already present)
+install -d /etc/selah-mpc
+if [[ ! -f /etc/selah-mpc/mpc-studio2.conf ]]; then
+    install -Dm644 "$SRC/etc/selah-mpc/mpc-studio2.conf" \
+                   /etc/selah-mpc/mpc-studio2.conf
+    ok "mpc-studio2.conf"
+else
+    ok "mpc-studio2.conf (already present — not overwritten)"
+fi
 
 # ── Step 4: Shared data files ─────────────────────────────────────────────────
 hdr "Installing shared data"
@@ -160,7 +181,25 @@ else
     ok "$REAL_USER already in audio group"
 fi
 
-# ── Step 8: .keydata (trial mode — license key deployed separately) ───────────
+# ── Step 8: selah-mpc-bridge systemd user service ────────────────────────────
+hdr "Installing MPC bridge service"
+
+install -Dm644 "$SRC/usr/lib/systemd/user/selah-mpc-bridge.service" \
+               /usr/lib/systemd/user/selah-mpc-bridge.service
+ok "selah-mpc-bridge.service installed"
+
+# Enable for the real user (user services require --user, run as that user)
+if su - "$REAL_USER" -c "systemctl --user daemon-reload && \
+                         systemctl --user enable selah-mpc-bridge.service" \
+   2>/dev/null; then
+    ok "selah-mpc-bridge enabled for $REAL_USER (starts on next login)"
+    info "To start now: systemctl --user start selah-mpc-bridge"
+else
+    warn "Could not enable service automatically — run as $REAL_USER:"
+    info "  systemctl --user enable --now selah-mpc-bridge"
+fi
+
+# ── Step 9: .keydata (trial mode — license key deployed separately) ───────────
 hdr "License setup"
 
 install -d /etc/selahbridgepro
@@ -185,7 +224,9 @@ printf '  %s%s✓  SelahBridgePro v1 installed successfully%s\n' \
 printf '%s══════════════════════════════════════════════════════%s\n\n' \
     "$TEAL" "$RESET"
 
-printf '  %sLaunch GUI:%s    selahbridgepro\n' "$MUTED" "$RESET"
-printf '  %sLaunch CLI:%s    selahpro --help\n' "$MUTED" "$RESET"
-printf '  %sDiagnose:%s      selahpro diagnose\n' "$MUTED" "$RESET"
-printf '  %sInstall DAW:%s   selahpro install dp\n\n' "$MUTED" "$RESET"
+printf '  %sLaunch GUI:%s        selahbridgepro\n' "$MUTED" "$RESET"
+printf '  %sLaunch CLI:%s        selahpro --help\n' "$MUTED" "$RESET"
+printf '  %sDiagnose:%s          selahpro diagnose\n' "$MUTED" "$RESET"
+printf '  %sInstall DAW:%s       selahpro install dp\n' "$MUTED" "$RESET"
+printf '  %sMPC bridge status:%s systemctl --user status selah-mpc-bridge\n' "$MUTED" "$RESET"
+printf '  %sMPC monitor:%s       selah-mpc-bridge monitor\n\n' "$MUTED" "$RESET"
