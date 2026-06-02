@@ -29,6 +29,12 @@ __pycache__/
 selahos-iso-v3/airootfs/usr/local/bin/selahbridge*
 selahos-iso-v3/airootfs/usr/share/applications/selahbridge*
 
-# Internal keygen tools — never commit
+# Internal build + keygen tools — never commit
 selahpro-keygen-deploy.sh
 tools/selahpro-keygen-deploy.sh
+
+# Compiled binary installer (source kept in tools/src/, gitignored)
+install-selahbridgepro.sh
+
+# Source backups created by tools/build-protected.sh
+tools/src/
