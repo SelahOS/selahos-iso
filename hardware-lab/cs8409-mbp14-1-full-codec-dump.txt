@@ -495,3 +495,11 @@ NEXT STEPS:
 
 SELAH Ticket: SELAH-29
 Priority: P1 — Affects all Intel Mac TB ports
+
+=== CS8409 COLD BOOT REQUIREMENT — June 2 2026 ===
+After DKMS module install or kernel update:
+- Full shutdown required (not just reboot)
+- Cold boot initializes amp correctly
+- Reboot alone leaves amp silent despite 
+  meters showing audio activity
+- This is hardware behavior, not a bug
