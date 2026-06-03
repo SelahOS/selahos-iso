@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selah-mpc-led — MPC Studio 2 Native LED Controller
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  Controls MPC Studio 2 pad LEDs directly via USB (no MIDI SysEx).
+#  Communicates with USB Interface 1 (vendor class) using libusb/pyusb.
+#
+#  Usage:
+#    selah-mpc-led pad <0-15> <r> <g> <b>   — set one pad color (0-127)
+#    selah-mpc-led all <r> <g> <b>           — set all 16 pads
+#    selah-mpc-led off                        — all pads off
+#    selah-mpc-led demo                       — rainbow sweep demo
+#    selah-mpc-led daemon                     — run as bridge daemon (reads stdin)
+#
+#  Dependencies: python3-pyusb (sudo pacman -S python-pyusb)
+#  Requires: audio group membership OR sudo (for claiming USB interface)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import sys
+import os
+import time
+import struct
+import argparse
+from pathlib import Path
+
+MPC_VID = 0x09E8
+MPC_PID = 0x004A
+MPC_PID_LEGACY = 0x0076
+
+# ── Protocol constants (filled in after USB snoop analysis) ───────────────────
+# These values are placeholders — run `selah-mpc-snoop probe` to determine
+# the correct endpoint address and packet format for your hardware revision.
+#
+# Known: MPC Software uses USB Interface 1 (vendor class 0xFF) via libusb.
+# The LED data goes to a bulk OUT or interrupt OUT endpoint on Interface 1.
+#
+# PROTOCOL_CONFIRMED = False means we're using the best-guess format.
+# Set to True once verified with selah-mpc-snoop.
+PROTOCOL_CONFIRMED = False
+
+# Interface and endpoint (set after snoop)
+USB_INTERFACE = 1
+EP_OUT = None   # Will be auto-detected from Interface 1 descriptor
+EP_IN  = None   # Will be auto-detected from Interface 1 descriptor
+
+# Packet format options (only one will be correct — determined by snoop)
+# Format A: used by MPC Live/One (HID-over-USB, 64-byte report)
+PACKET_FORMAT = "A"
+
+NUM_PADS = 16
+
+
+class MPCLEDDriver:
+    def __init__(self):
+        self.dev = None
+        self.ep_out = None
+        self.ep_in = None
+
+    def connect(self):
+        try:
+            import usb.core
+            import usb.util
+        except ImportError:
+            print("[selah-mpc-led] ERROR: python-pyusb not installed")
+            print("  Run: sudo pacman -S python-pyusb")
+            sys.exit(1)
+
+        self._usb = usb
+        dev = usb.core.find(idVendor=MPC_VID, idProduct=MPC_PID)
+        if dev is None:
+            dev = usb.core.find(idVendor=MPC_VID, idProduct=MPC_PID_LEGACY)
+        if dev is None:
+            print(f"[selah-mpc-led] MPC Studio 2 not found")
+            sys.exit(1)
+
+        self.dev = dev
+        cfg = dev.get_active_configuration()
+
+        # Find Interface 1 endpoints
+        intf1 = None
+        for intf in cfg:
+            if intf.bInterfaceNumber == USB_INTERFACE:
+                intf1 = intf
+                break
+
+        if intf1 is None:
+            print(f"[selah-mpc-led] Interface {USB_INTERFACE} not found")
+            sys.exit(1)
+
+        for ep in intf1:
+            if (ep.bEndpointAddress & 0x80) == 0 and self.ep_out is None:
+                self.ep_out = ep.bEndpointAddress
+            elif (ep.bEndpointAddress & 0x80) != 0 and self.ep_in is None:
+                self.ep_in = ep.bEndpointAddress
+
+        if self.ep_out is None:
+            print(f"[selah-mpc-led] No OUT endpoint found on Interface {USB_INTERFACE}")
+            sys.exit(1)
+
+        print(f"[selah-mpc-led] Connected: VID:{dev.idVendor:04x} PID:{dev.idProduct:04x}")
+        print(f"[selah-mpc-led] Interface {USB_INTERFACE}: EP_OUT={self.ep_out:#04x}"
+              + (f" EP_IN={self.ep_in:#04x}" if self.ep_in else ""))
+        if not PROTOCOL_CONFIRMED:
+            print("[selah-mpc-led] WARNING: Protocol not confirmed — run `selah-mpc-snoop probe` first")
+        print()
+
+        # Detach kernel driver if needed
+        for iface_num in [0, USB_INTERFACE]:
+            try:
+                if dev.is_kernel_driver_active(iface_num):
+                    dev.detach_kernel_driver(iface_num)
+            except Exception:
+                pass
+
+        try:
+            usb.util.claim_interface(dev, USB_INTERFACE)
+        except Exception as e:
+            print(f"[selah-mpc-led] Failed to claim Interface {USB_INTERFACE}: {e}")
+            print("  Try running with sudo or add yourself to the 'audio' group")
+            sys.exit(1)
+
+    def disconnect(self):
+        if self.dev:
+            try:
+                self._usb.util.release_interface(self.dev, USB_INTERFACE)
+            except Exception:
+                pass
+
+    def _build_packet(self, pad_colors: list) -> bytes:
+        """
+        Build the USB packet for pad LED colors.
+        pad_colors: list of (pad_index, r, g, b) tuples, values 0-127.
+
+        Format A (MPC Live/One style — HID 64-byte report):
+          Byte 0: Report ID = 0x00
+          Byte 1: Command  = 0x24 (SetPadColor)
+          Byte 2: Count    = number of pads in this packet
+          For each pad (5 bytes): pad_index, r, g, b, 0x00
+          Padded to 64 bytes with 0x00
+
+        Format B (raw bulk, compact):
+          Byte 0: Command  = 0x24
+          Byte 1: Count    = number of pads
+          For each pad (4 bytes): pad_index, r, g, b
+
+        Format C (control surface 8-byte header):
+          Bytes 0-3: 0x40 0x00 <len_lo> <len_hi>
+          Byte  4:   Command 0x24
+          Byte  5:   Count
+          For each pad: pad_index, r, g, b
+        """
+        if PACKET_FORMAT == "A":
+            buf = bytearray(64)
+            buf[0] = 0x00        # Report ID
+            buf[1] = 0x24        # SetPadColor command
+            buf[2] = len(pad_colors) & 0xFF
+            offset = 3
+            for pad, r, g, b in pad_colors:
+                if offset + 4 > 64:
+                    break
+                buf[offset]   = pad & 0x0F
+                buf[offset+1] = r & 0x7F
+                buf[offset+2] = g & 0x7F
+                buf[offset+3] = b & 0x7F
+                offset += 4
+            return bytes(buf)
+
+        elif PACKET_FORMAT == "B":
+            buf = bytearray()
+            buf.append(0x24)
+            buf.append(len(pad_colors) & 0xFF)
+            for pad, r, g, b in pad_colors:
+                buf.append(pad & 0x0F)
+                buf.append(r & 0x7F)
+                buf.append(g & 0x7F)
+                buf.append(b & 0x7F)
+            return bytes(buf)
+
+        elif PACKET_FORMAT == "C":
+            payload = bytearray()
+            payload.append(0x24)
+            payload.append(len(pad_colors) & 0xFF)
+            for pad, r, g, b in pad_colors:
+                payload.extend([pad & 0x0F, r & 0x7F, g & 0x7F, b & 0x7F])
+            hdr = struct.pack("<BBH", 0x40, 0x00, len(payload))
+            return bytes(hdr) + bytes(payload)
+
+        else:
+            raise ValueError(f"Unknown PACKET_FORMAT: {PACKET_FORMAT}")
+
+    def send_pad_colors(self, pad_colors: list):
+        """Send pad color data. pad_colors: list of (pad, r, g, b)."""
+        # Batch into packets of up to 14 pads (fits in 64 bytes for Format A)
+        batch_size = 14
+        for i in range(0, len(pad_colors), batch_size):
+            batch = pad_colors[i:i+batch_size]
+            pkt = self._build_packet(batch)
+            try:
+                self.dev.write(self.ep_out, pkt, timeout=500)
+            except Exception as e:
+                print(f"[selah-mpc-led] Write error: {e}")
+
+    def set_pad(self, pad: int, r: int, g: int, b: int):
+        self.send_pad_colors([(pad, r, g, b)])
+
+    def set_all(self, r: int, g: int, b: int):
+        self.send_pad_colors([(i, r, g, b) for i in range(NUM_PADS)])
+
+    def all_off(self):
+        self.set_all(0, 0, 0)
+
+
+# ── CLI commands ──────────────────────────────────────────────────────────────
+def cmd_pad(args):
+    drv = MPCLEDDriver()
+    drv.connect()
+    drv.set_pad(args.pad, args.r, args.g, args.b)
+    print(f"Pad {args.pad}: RGB({args.r}, {args.g}, {args.b})")
+    drv.disconnect()
+    return 0
+
+
+def cmd_all(args):
+    drv = MPCLEDDriver()
+    drv.connect()
+    drv.set_all(args.r, args.g, args.b)
+    print(f"All pads: RGB({args.r}, {args.g}, {args.b})")
+    drv.disconnect()
+    return 0
+
+
+def cmd_off(_args):
+    drv = MPCLEDDriver()
+    drv.connect()
+    drv.all_off()
+    print("All pads off")
+    drv.disconnect()
+    return 0
+
+
+def cmd_demo(_args):
+    drv = MPCLEDDriver()
+    drv.connect()
+    print("Running demo — Ctrl+C to stop")
+
+    COLORS = [
+        (127, 0, 0),    # red
+        (127, 64, 0),   # orange
+        (127, 127, 0),  # yellow
+        (0, 127, 0),    # green
+        (0, 64, 127),   # teal
+        (0, 0, 127),    # blue
+        (64, 0, 127),   # purple
+        (127, 0, 64),   # pink
+    ]
+
+    try:
+        while True:
+            # Rainbow sweep
+            for start in range(16):
+                pads = []
+                for pad in range(16):
+                    color_idx = (pad + start) % len(COLORS)
+                    pads.append((pad, *COLORS[color_idx]))
+                drv.send_pad_colors(pads)
+                time.sleep(0.08)
+    except KeyboardInterrupt:
+        drv.all_off()
+        print("\nDemo stopped")
+
+    drv.disconnect()
+    return 0
+
+
+def cmd_daemon(_args):
+    """
+    Read pad color commands from stdin, one per line.
+    Format: "pad <n> <r> <g> <b>" or "all <r> <g> <b>" or "off"
+    Useful for integration with selah-mpc-bridge.
+    """
+    drv = MPCLEDDriver()
+    drv.connect()
+    print("[selah-mpc-led] Daemon started — reading commands from stdin")
+
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split()
+            try:
+                if parts[0] == "pad" and len(parts) == 5:
+                    drv.set_pad(int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4]))
+                elif parts[0] == "all" and len(parts) == 4:
+                    drv.set_all(int(parts[1]), int(parts[2]), int(parts[3]))
+                elif parts[0] == "off":
+                    drv.all_off()
+                else:
+                    print(f"[selah-mpc-led] Unknown command: {line}", file=sys.stderr)
+            except (ValueError, IndexError) as e:
+                print(f"[selah-mpc-led] Parse error: {e}", file=sys.stderr)
+    except KeyboardInterrupt:
+        pass
+
+    drv.disconnect()
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="selah-mpc-led",
+        description="MPC Studio 2 Native LED Controller (USB Interface 1)"
+    )
+    sub = parser.add_subparsers(dest="cmd")
+
+    p_pad = sub.add_parser("pad", help="Set one pad color")
+    p_pad.add_argument("pad", type=int, metavar="N", help="Pad index 0-15")
+    p_pad.add_argument("r", type=int, help="Red 0-127")
+    p_pad.add_argument("g", type=int, help="Green 0-127")
+    p_pad.add_argument("b", type=int, help="Blue 0-127")
+
+    p_all = sub.add_parser("all", help="Set all pad colors")
+    p_all.add_argument("r", type=int)
+    p_all.add_argument("g", type=int)
+    p_all.add_argument("b", type=int)
+
+    sub.add_parser("off", help="Turn all pads off")
+    sub.add_parser("demo", help="Rainbow demo")
+    sub.add_parser("daemon", help="Read pad commands from stdin (for bridge integration)")
+
+    args = parser.parse_args()
+
+    if args.cmd == "pad":
+        return cmd_pad(args)
+    elif args.cmd == "all":
+        return cmd_all(args)
+    elif args.cmd == "off":
+        return cmd_off(args)
+    elif args.cmd == "demo":
+        return cmd_demo(args)
+    elif args.cmd == "daemon":
+        return cmd_daemon(args)
+    else:
+        parser.print_help()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)
