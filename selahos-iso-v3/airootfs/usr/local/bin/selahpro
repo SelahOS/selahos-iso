@@ -71,6 +71,10 @@ KNOWN_DAWS = {
     "pt":              {"name": "Pro Tools",          "exe": "Pro Tools.exe",             "profile": "protools"},
     "digitalperformer":{"name": "Digital Performer",  "exe": "DP.exe",                    "profile": "digitalperformer"},
     "dp":              {"name": "Digital Performer",  "exe": "DP.exe",                    "profile": "digitalperformer"},
+    "mpc":             {"name": "MPC Software",       "exe": "MPC.exe",                   "profile": "mpc"},
+    "mpcstudio":       {"name": "MPC Software",       "exe": "MPC.exe",                   "profile": "mpc"},
+    "mpc2":            {"name": "MPC Software",       "exe": "MPC.exe",                   "profile": "mpc"},
+    "mpc3":            {"name": "MPC Software",       "exe": "MPC.exe",                   "profile": "mpc"},
 }
 
 def ok(msg):    print(f"  {TEAL}✓{RESET} {PARCH}{msg}{RESET}")
@@ -297,6 +301,30 @@ def _scaffold_prefix(daw: dict, existing_prefix: str | None = None):
         else:
             warn("vcredist2022 install failed — DP may crash on launch")
             warn("Manual fix: WINEPREFIX=~/.wine-selah-digitalperformer winetricks vcredist2022")
+
+    # MPC Software: install VC++ 2019, .NET 4.8, and DirectX 9 components
+    if profile_key in ("mpc",):
+        info("Installing MPC Software dependencies...")
+        mpc_deps = [
+            ("vcredist2019", "VC++ 2019 Redistributable"),
+            ("dotnet48",     ".NET Framework 4.8"),
+            ("d3dx9",        "DirectX 9 (D3DX9)"),
+            ("directx9",     "DirectX 9 runtime"),
+        ]
+        for pkg, desc in mpc_deps:
+            r = subprocess.run(
+                ["winetricks", "-q", pkg],
+                env={**os.environ, **env}, check=False, capture_output=True, text=True
+            )
+            if r.returncode == 0:
+                ok(f"{desc} installed")
+            else:
+                warn(f"{desc} install failed — MPC Software may have issues")
+        # Trigger hidraw udev rules so Wine can reach display/LED HID interface
+        subprocess.run(["sudo", "udevadm", "trigger",
+                        "--action=add", "--subsystem-match=hidraw"],
+                       check=False, capture_output=True)
+        ok("HID passthrough rules triggered for MPC Studio 2 display/LEDs")
 
     # Install WineASIO into this prefix
     subprocess.run(["selah-asio-config", "--install"],
@@ -575,10 +603,11 @@ def cmd_midi_passthrough(device: str):
     _check_license()
 
     device_map = {
-        "akai-mpk-mini4":  ("09e8", "006b"),
-        "mpk":             ("09e8", "006b"),
-        "akai-mpc-studio2":("09e8", "0076"),
-        "mpc":             ("09e8", "0076"),
+        "akai-mpk-mini4":         ("09e8", "006b"),
+        "mpk":                    ("09e8", "006b"),
+        "akai-mpc-studio2":       ("09e8", "004a"),
+        "mpc":                    ("09e8", "004a"),
+        "akai-mpc-studio2-legacy":("09e8", "0076"),
     }
 
     dev_key = device.lower().replace(" ", "-")
@@ -617,9 +646,26 @@ def cmd_midi_passthrough(device: str):
         subprocess.run(["sudo", "modprobe", "snd-usb-audio"],
                        check=False, capture_output=True)
 
+    # Trigger hidraw rules so display/LED HID interface is accessible
+    subprocess.run(["sudo", "udevadm", "trigger",
+                    "--action=add", "--subsystem-match=hidraw"],
+                   check=False, capture_output=True)
+
+    # Confirm HID device is accessible
+    mpc_hid = Path("/dev/selah-mpc-hid")
+    hidraw_nodes = sorted(Path("/dev").glob("hidraw*"))
+    if mpc_hid.exists():
+        ok(f"MPC HID device: {mpc_hid} → {mpc_hid.resolve()}")
+    elif hidraw_nodes:
+        ok(f"HID raw nodes available: {', '.join(str(h) for h in hidraw_nodes[:4])}")
+        info("Run 'selah-mpc-bridge hid-monitor' to confirm display/LED access")
+    else:
+        warn("No hidraw nodes found — display and RGB LED control unavailable")
+        info("Check: /etc/udev/rules.d/99-selah-midi.rules")
+
     info("SysEx passthrough: enabled via hidraw (see udev rules)")
     info("Wine will see this device as a Windows MIDI device via WineASIO/ALSA")
-    ok("Passthrough configured. Launch your DAW with: selahpro launch <daw>")
+    ok("Passthrough configured. Launch MPC Software with: selahpro launch mpc")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -721,12 +767,15 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             f"  {GOLD}selahpro install flstudio{RESET}          Install + scaffold FL Studio prefix\n"
+            f"  {GOLD}selahpro install mpc{RESET}               Install + scaffold MPC Software prefix\n"
             f"  {GOLD}selahpro install{RESET}                   Install SelahBridgePro runtime only\n"
             f"  {GOLD}selahpro launch reaper{RESET}             Launch REAPER via SelahWine\n"
+            f"  {GOLD}selahpro launch mpc{RESET}                Launch MPC Software via SelahWine\n"
             f"  {GOLD}selahpro auth ableton{RESET}              Open Ableton authorization browser\n"
+            f"  {GOLD}selahpro auth mpc{RESET}                  Open Akai account portal\n"
             f"  {GOLD}selahpro diagnose{RESET}                  Full system readiness check\n"
             f"  {GOLD}selahpro midi list{RESET}                 List MIDI devices\n"
-            f"  {GOLD}selahpro midi passthrough mpk{RESET}      Activate Akai MPK Mini 4 passthrough\n"
+            f"  {GOLD}selahpro midi passthrough mpc{RESET}      Activate MPC Studio 2 HID passthrough\n"
             f"  {GOLD}selahpro audio config --buffer 128{RESET} Configure low-latency audio\n"
         )
     )

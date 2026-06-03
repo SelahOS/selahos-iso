@@ -39,11 +39,12 @@ except ImportError:
              "  # or: sudo pacman -S python-rtmidi")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-VERSION           = "1.0.0"
+VERSION           = "1.1.0"
 APP_NAME          = "selah-mpc-bridge"
 
 MPC_STUDIO2_VID   = 0x09E8
-MPC_STUDIO2_PID   = 0x0076
+MPC_STUDIO2_PID   = 0x0076   # legacy
+MPC_STUDIO2_PID2  = 0x004A   # primary (confirmed by user hardware)
 
 # Port name fragments to match (first match wins, case-insensitive)
 MPC_PORT_PATTERNS = ["MPC Studio MPC Public", "MPC Studio 2", "MPC Studio2",
@@ -88,6 +89,58 @@ VELOCITY_CURVES = {
     "hard":   _vel_hard,
     "fixed":  _vel_fixed,
 }
+
+# ── HID device finder ─────────────────────────────────────────────────────────
+
+def find_mpc_hidraw(vid: int = MPC_STUDIO2_VID,
+                    pid: int = MPC_STUDIO2_PID2) -> Optional[Path]:
+    """Return the /dev/hidrawN node for the MPC Studio 2, or None."""
+    hidraw_root = Path("/sys/class/hidraw")
+    if not hidraw_root.exists():
+        return None
+    for sys_path in sorted(hidraw_root.glob("hidraw*")):
+        uevent = sys_path / "device" / "uevent"
+        if not uevent.exists():
+            continue
+        text = uevent.read_text().upper()
+        if f"{vid:04X}" in text and f"{pid:04X}" in text:
+            dev = Path("/dev") / sys_path.name
+            if dev.exists():
+                return dev
+    # Fallback: check /dev/selah-mpc-hid symlink (created by udev rule)
+    sym = Path("/dev/selah-mpc-hid")
+    if sym.exists():
+        return sym.resolve()
+    return None
+
+
+# ── Akai SysEx RGB pad protocol ────────────────────────────────────────────────
+#
+# Akai Professional manufacturer ID: 0x47
+# Format (per-pad): F0 47 7F [device_id] 24 00 04 [pad] [R] [G] [B] F7
+#   device_id: 0x4A tentative for MPC Studio 2 — confirm with hid-monitor
+#   pad:       0–15 (pad 1 = index 0)
+#   R/G/B:     0–127  (7-bit; 127 = full brightness)
+#
+# To discover the correct device_id for your unit, run:
+#   selah-mpc-bridge hid-monitor
+# then send a pad color from Windows MPC Software and note the 4th SysEx byte.
+
+AKAI_MFR_ID         = 0x47
+MPC_SYSEX_DEVICE_ID = 0x4A  # tentative — set sysex_device_id in config to override
+
+
+def sysex_pad_color(pad: int, r: int, g: int, b: int,
+                    device_id: int = MPC_SYSEX_DEVICE_ID) -> List[int]:
+    """Build a SysEx message to set one pad's RGB color."""
+    return [0xF0, AKAI_MFR_ID, 0x7F, device_id,
+            0x24, 0x00, 0x04, pad & 0x0F,
+            r & 0x7F, g & 0x7F, b & 0x7F, 0xF7]
+
+
+def sysex_pad_off(pad: int, device_id: int = MPC_SYSEX_DEVICE_ID) -> List[int]:
+    return sysex_pad_color(pad, 0, 0, 0, device_id)
+
 
 # ── Default config (written to /etc/selah-mpc/mpc-studio2.conf if absent) ──────
 DEFAULT_CONFIG = """\
@@ -147,6 +200,14 @@ mirror_brightness = 80
 startup_flash = true
 # Startup flash brightness
 flash_brightness = 60
+# Send SysEx RGB color instead of plain Note On for pad LED feedback.
+# Requires MPC Studio 2 to support Akai RGB SysEx (confirm device_id first).
+# Use 'selah-mpc-bridge hid-monitor' with Windows MPC Software to verify.
+use_sysex_rgb = false
+# Default pad hit color when use_sysex_rgb = true (R G B, space-separated, 0-127)
+pad_hit_color = 127 64 0
+# SysEx device ID byte — confirm with hid-monitor (factory default assumed 74 = 0x4A)
+sysex_device_id = 74
 """
 
 
@@ -279,6 +340,14 @@ class MPCBridge:
         self._mirror_bright  = c.getint    ("leds", "mirror_brightness", fallback=80)
         self._startup_flash  = c.getboolean("leds", "startup_flash",     fallback=True)
         self._flash_bright   = c.getint    ("leds", "flash_brightness",  fallback=60)
+        self._use_sysex_rgb  = c.getboolean("leds", "use_sysex_rgb",     fallback=False)
+        self._sysex_dev_id   = c.getint    ("leds", "sysex_device_id",   fallback=MPC_SYSEX_DEVICE_ID)
+        color_str            = c.get       ("leds", "pad_hit_color",     fallback="127 64 0")
+        try:
+            rgb = [int(x) & 0x7F for x in color_str.split()]
+            self._pad_hit_rgb = (rgb[0], rgb[1], rgb[2]) if len(rgb) >= 3 else (127, 64, 0)
+        except (ValueError, IndexError):
+            self._pad_hit_rgb = (127, 64, 0)
 
         self._note_map = build_note_map(
             layout, self._input_root, root_note, scale, transpose)
@@ -370,11 +439,21 @@ class MPCBridge:
 
                 # Mirror LED: light up on hit, off on release
                 if self._mirror_pads and self._midiout_mpc:
-                    if msg_type == 0x90 and vel > 0:
-                        led_on(self._midiout_mpc, self._pad_ch, note,
-                               self._mirror_bright)
+                    pad_idx = note - self._input_root
+                    if self._use_sysex_rgb and 0 <= pad_idx < MPC_PAD_COUNT:
+                        if msg_type == 0x90 and vel > 0:
+                            r, g, b = self._pad_hit_rgb
+                            self._midiout_mpc.send_message(
+                                sysex_pad_color(pad_idx, r, g, b, self._sysex_dev_id))
+                        else:
+                            self._midiout_mpc.send_message(
+                                sysex_pad_off(pad_idx, self._sysex_dev_id))
                     else:
-                        led_off(self._midiout_mpc, self._pad_ch, note)
+                        if msg_type == 0x90 and vel > 0:
+                            led_on(self._midiout_mpc, self._pad_ch, note,
+                                   self._mirror_bright)
+                        else:
+                            led_off(self._midiout_mpc, self._pad_ch, note)
 
                 out_status = msg_type | (self._pad_ch - 1)
                 if self._midiout_daw:
@@ -512,6 +591,113 @@ def run_monitor(patterns: List[str]) -> int:
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("\nDone.")
+    return 0
+
+
+# ── HID monitor (Phase 2 — live HID traffic + protocol analysis) ──────────────
+
+def run_hid_monitor(vid: int = MPC_STUDIO2_VID,
+                    pid: int = MPC_STUDIO2_PID2) -> int:
+    """Stream raw HID reports from MPC Studio 2 to stdout for protocol analysis."""
+    dev = find_mpc_hidraw(vid, pid)
+    if dev is None:
+        print(f"MPC Studio 2 HID device ({vid:04x}:{pid:04x}) not found.")
+        print("Is the device connected? Check udev rules:")
+        print("  ls -la /dev/hidraw*  /dev/selah-mpc-hid")
+        print("  udevadm info /dev/hidraw0 | grep -E 'ID_VENDOR|ID_MODEL'")
+        print()
+        print("To capture USB traffic for protocol analysis (e.g. from Windows MPC Software):")
+        print("  sudo modprobe usbmon")
+        print("  sudo tshark -i usbmon1 -w /tmp/mpc-hid-capture.pcap")
+        return 1
+
+    print(f"HID monitor: {dev}  (Ctrl-C to stop)")
+    print()
+    print("To capture the SysEx device_id for RGB pad control:")
+    print("  1. Start Windows MPC Software in a VM or Wine")
+    print("  2. Change a pad color in MPC Software")
+    print("  3. Look for F0 47 7F [XX] 24 ... messages — [XX] is the device_id")
+    print(f"  4. Set 'sysex_device_id = <decimal>' in /etc/selah-mpc/mpc-studio2.conf")
+    print()
+    print(f"{'  TIME':>9}  {'LEN':>4}  HEX DUMP")
+    print("─" * 72)
+
+    start = time.monotonic()
+    try:
+        with open(dev, "rb") as f:
+            while True:
+                report = f.read(64)
+                if not report:
+                    break
+                t = time.monotonic() - start
+                hex_parts = [f"{b:02X}" for b in report]
+                # Print in rows of 16 bytes
+                first_row  = " ".join(hex_parts[:16])
+                print(f"  {t:7.3f}s  {len(report):>4}  {first_row}")
+                for offset in range(16, len(report), 16):
+                    row = " ".join(hex_parts[offset:offset + 16])
+                    print(f"  {'':>9}  {'':>4}  {row}")
+    except PermissionError:
+        print(f"\nPermission denied: {dev}")
+        print("Run as root, or ensure udev rules grant audio group access:")
+        print("  grep hidraw /etc/udev/rules.d/99-selah-midi.rules")
+        return 1
+    except KeyboardInterrupt:
+        print("\nDone.")
+    return 0
+
+
+def cmd_hid_info(_args) -> int:
+    """Show HID device info for all connected Akai devices."""
+    print("Scanning for Akai HID devices...\n")
+    found = False
+    for pid in (MPC_STUDIO2_PID2, MPC_STUDIO2_PID):
+        dev = find_mpc_hidraw(MPC_STUDIO2_VID, pid)
+        if dev:
+            print(f"  Found: {dev}  (VID:{MPC_STUDIO2_VID:04x} PID:{pid:04x})")
+            # Read uevent for model name
+            real = dev.resolve() if dev.is_symlink() else dev
+            node_name = real.name
+            uevent = Path(f"/sys/class/hidraw/{node_name}/device/uevent")
+            if uevent.exists():
+                for line in uevent.read_text().splitlines():
+                    if any(k in line for k in ("HID_NAME", "HID_PHYS", "HID_ID")):
+                        print(f"    {line}")
+            found = True
+
+    sym = Path("/dev/selah-mpc-hid")
+    if sym.exists():
+        print(f"\n  Symlink /dev/selah-mpc-hid → {sym.resolve()}")
+
+    if not found:
+        print("  No Akai HID devices found.")
+        print("  Check: ls /dev/hidraw*  and  lsusb -d 09e8:")
+    print()
+    return 0 if found else 1
+
+
+def cmd_pad_color(args) -> int:
+    """Send a SysEx RGB color to a specific MPC pad for testing."""
+    cfg = load_config(Path(args.config))
+    patterns = [n.strip() for n in cfg.get("device", "port_names").split(",")]
+
+    mo = rtmidi.MidiOut()
+    idx = find_port(mo, patterns)
+    if idx is None:
+        print("MPC Studio 2 MIDI output not found. Available ports:")
+        for i, p in enumerate(mo.get_ports()):
+            print(f"  [{i}] {p}")
+        return 1
+
+    mo.open_port(idx)
+    msg = sysex_pad_color(args.pad, args.red, args.green, args.blue,
+                          device_id=args.device_id)
+    mo.send_message(msg)
+    hex_str = " ".join(f"{b:02X}" for b in msg)
+    print(f"Pad {args.pad}  RGB({args.red}, {args.green}, {args.blue})")
+    print(f"SysEx: {hex_str}")
+    if args.red == 0 and args.green == 0 and args.blue == 0:
+        print("(pad LED off)")
     return 0
 
 
@@ -673,14 +859,28 @@ def main() -> int:
     sub.add_parser("reload",      help="Reload config without restart")
     sub.add_parser("list-ports",  help="List MIDI ports (marks MPC if found)")
     sub.add_parser("monitor",     help="Print raw MPC MIDI (no virtual port)")
+    sub.add_parser("hid-monitor", help="Stream raw HID reports from MPC (Phase 2 protocol analysis)")
+    sub.add_parser("hid-info",    help="Show HID device info for connected MPC Studio 2")
+
+    pc = sub.add_parser("pad-color", help="Set a pad's RGB LED color via SysEx (Phase 2 test)")
+    pc.add_argument("pad",   type=int, help="Pad index 0–15 (pad 1 = 0)")
+    pc.add_argument("red",   type=int, help="Red   0–127")
+    pc.add_argument("green", type=int, help="Green 0–127")
+    pc.add_argument("blue",  type=int, help="Blue  0–127")
+    pc.add_argument("--device-id", type=int, default=MPC_SYSEX_DEVICE_ID,
+                    metavar="ID",
+                    help=f"SysEx device ID (default: {MPC_SYSEX_DEVICE_ID} = 0x{MPC_SYSEX_DEVICE_ID:02X}); "
+                         "confirm with hid-monitor")
 
     args = parser.parse_args()
 
     dispatch = {
-        "status":     cmd_status,
-        "stop":       cmd_stop,
-        "reload":     cmd_reload,
-        "list-ports": cmd_list_ports,
+        "status":      cmd_status,
+        "stop":        cmd_stop,
+        "reload":      cmd_reload,
+        "list-ports":  cmd_list_ports,
+        "hid-info":    cmd_hid_info,
+        "pad-color":   cmd_pad_color,
     }
 
     if args.command in dispatch:
@@ -691,6 +891,9 @@ def main() -> int:
         patterns = [n.strip() for n in
                     cfg.get("device", "port_names").split(",")]
         return run_monitor(patterns)
+
+    if args.command == "hid-monitor":
+        return run_hid_monitor(MPC_STUDIO2_VID, MPC_STUDIO2_PID2)
 
     return cmd_run(args)
 

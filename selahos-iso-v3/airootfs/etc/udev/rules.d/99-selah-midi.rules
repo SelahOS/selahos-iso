@@ -16,10 +16,23 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="006b", \
 SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="006b", \
   GROUP="audio", MODE="0664", TAG+="uaccess"
 
-# ── Akai MPC Studio 2 ───────────────────────────────────────────
-SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0076", \
+# ── Akai MPC Studio 2 (VID:09e8 PID:004a) ──────────────────────
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="004a", \
   TAG+="uaccess", GROUP="audio", MODE="0664", \
   SYMLINK+="selah-midi/akai-mpc-studio2"
+
+SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="004a", \
+  GROUP="audio", MODE="0664", TAG+="uaccess"
+
+# HID interface — grants display + RGB LED access to Wine and selah-mpc-bridge
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="004a", \
+  TAG+="uaccess", GROUP="audio", MODE="0664", \
+  SYMLINK+="selah-mpc-hid"
+
+# ── Akai MPC Studio 2 legacy (VID:09e8 PID:0076) ────────────────
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0076", \
+  TAG+="uaccess", GROUP="audio", MODE="0664", \
+  SYMLINK+="selah-midi/akai-mpc-studio2-legacy"
 
 SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0076", \
   GROUP="audio", MODE="0664", TAG+="uaccess"
@@ -43,9 +56,8 @@ SUBSYSTEM=="sound", KERNEL=="seq", \
 SUBSYSTEM=="sound", KERNEL=="timer", \
   GROUP="audio", MODE="0664", TAG+="uaccess"
 
-# ── SysEx full HID passthrough ──────────────────────────────────
-# Allow hidraw access for SysEx-capable Akai devices so Wine
-# can send/receive SysEx via the raw HID interface when the MIDI
-# class driver is bound (needed for firmware/preset transfers).
+# ── SysEx / HID passthrough for all other Akai devices ──────────
+# Catch-all for any Akai hidraw interface not matched above
+# (covers legacy PIDs and future devices).
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="09e8", \
   TAG+="uaccess", GROUP="audio", MODE="0664"
