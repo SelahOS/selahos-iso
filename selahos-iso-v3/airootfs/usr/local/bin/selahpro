@@ -100,12 +100,16 @@ def _check_license() -> bool:
     import datetime
 
     if LIC_FILE.exists():
-        stored = LIC_FILE.read_text().strip()
+        try:
+            stored = LIC_FILE.read_text().strip()
+        except PermissionError:
+            warn("Cannot read license file — run: sudo selahpro --activate <KEY>")
+            stored = ""
         expected = _expected_key(_machine_id())
-        if stored == expected:
+        if stored and stored == expected:
             return True
-        # Key on disk doesn't match this machine — could be a copy
-        warn("License key does not match this machine.")
+        elif stored:
+            warn("License key does not match this machine.")
 
     # Trial logic
     now = datetime.date.today()
@@ -140,8 +144,17 @@ def cmd_activate(key: str):
     if key != expected:
         die(f"Invalid license key for this machine.\nExpected format: SELAHPRO-XXXX-XXXX-XXXX-XXXX\nYour Machine ID: {_machine_id()}")
     LIC_DIR.mkdir(parents=True, exist_ok=True)
-    LIC_FILE.write_text(key)
-    os.chmod(LIC_FILE, 0o600)
+    try:
+        LIC_FILE.write_text(key)
+    except PermissionError:
+        die(f"Permission denied writing license.\nRun: sudo selahpro --activate {key}")
+    os.chmod(LIC_FILE, 0o640)
+    try:
+        import grp
+        audio_gid = grp.getgrnam("audio").gr_gid
+        os.chown(LIC_FILE, 0, audio_gid)
+    except Exception:
+        pass
     ok(f"{PRODUCT} activated successfully!")
     ok("You have lifetime access on this machine.")
 
@@ -796,11 +809,16 @@ def main():
         # ── License ────────────────────────────────────────────────────────
         print(f"  {MUTED}Machine ID:{RESET}  {GOLD}{mid}{RESET}")
         if LIC_FILE.exists():
-            key = LIC_FILE.read_text().strip()
-            if key == _expected_key(mid):
+            try:
+                key = LIC_FILE.read_text().strip()
+            except PermissionError:
+                key = ""
+            if key and key == _expected_key(mid):
                 ok(f"Licensed — {PRODUCT} activated on this machine")
-            else:
+            elif key:
                 warn("License file present but key does not match this machine")
+            else:
+                warn("License file unreadable — run: sudo selahpro --activate <KEY>")
         elif TRIAL_FILE.exists():
             try:
                 first = datetime.date.fromisoformat(TRIAL_FILE.read_text().strip())
