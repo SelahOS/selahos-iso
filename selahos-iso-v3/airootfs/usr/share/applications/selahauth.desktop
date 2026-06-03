@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=SelahAuth
+GenericName=Authorization Browser
+Comment=Lightweight browser for DAW license and account authorization
+Exec=/usr/local/bin/selahauth %u
+Terminal=false
+Type=Application
+Icon=selahbridge
+Categories=Network;WebBrowser;AudioVideo;
+NoDisplay=true
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=SelahAuth

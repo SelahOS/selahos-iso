@@ -4,6 +4,13 @@ selahbridge-keygen
 */selahbridge-license.py
 */selahbridge-keygen
 *.secret
+
+# License runtime keys (deployed at ISO build time — NEVER commit these)
+**/.keydata
+selahos-iso-v3/airootfs/etc/selahbridgepro/.keydata
+selahos-iso-v3/airootfs/etc/selahbridge/.keydata
+
+# SelahBridge legacy license dir
 /airootfs/etc/selahbridge/
 
 # Build artifacts
@@ -18,5 +25,16 @@ selahos-iso-output/
 .DS_Store
 __pycache__/
 *.pyc
+# Selahbridge scripts excluded from tracking (proprietary internals)
 selahos-iso-v3/airootfs/usr/local/bin/selahbridge*
 selahos-iso-v3/airootfs/usr/share/applications/selahbridge*
+
+# Internal build + keygen tools — never commit
+selahpro-keygen-deploy.sh
+tools/selahpro-keygen-deploy.sh
+
+# Compiled binary installer (source kept in tools/src/, gitignored)
+install-selahbridgepro.sh
+
+# Source backups created by tools/build-protected.sh
+tools/src/

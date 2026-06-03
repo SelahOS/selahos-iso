@@ -1,0 +1,51 @@
+# ═══════════════════════════════════════════════════════════════
+#  SelahBridgePro — USB MIDI Passthrough Rules
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  Grants audio group + seat-local (uaccess) access to USB MIDI
+#  devices.  udev reloads automatically on ISO/package install.
+#  To reload manually: sudo udevadm control --reload-rules
+#                      sudo udevadm trigger --subsystem-match=usb
+# ═══════════════════════════════════════════════════════════════
+
+# ── Akai MPK Mini 4 ─────────────────────────────────────────────
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="006b", \
+  TAG+="uaccess", GROUP="audio", MODE="0664", \
+  SYMLINK+="selah-midi/akai-mpk-mini4"
+
+SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="006b", \
+  GROUP="audio", MODE="0664", TAG+="uaccess"
+
+# ── Akai MPC Studio 2 ───────────────────────────────────────────
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0076", \
+  TAG+="uaccess", GROUP="audio", MODE="0664", \
+  SYMLINK+="selah-midi/akai-mpc-studio2"
+
+SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0076", \
+  GROUP="audio", MODE="0664", TAG+="uaccess"
+
+# ── Generic USB MIDI class devices ──────────────────────────────
+# USB Audio class (bDeviceClass=0x00, interface class=0x01,
+# subclass=0x03 = MIDI Streaming).  Matches any class-compliant
+# USB MIDI controller not listed above.
+SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:010300:*", \
+  TAG+="uaccess", GROUP="audio", MODE="0664", \
+  SYMLINK+="selah-midi/usb-midi-%k"
+
+# ── ALSA raw MIDI nodes ─────────────────────────────────────────
+SUBSYSTEM=="sound", KERNEL=="midiC[0-9]D[0-9]", \
+  GROUP="audio", MODE="0664", TAG+="uaccess"
+
+# ── ALSA sequencer nodes ────────────────────────────────────────
+SUBSYSTEM=="sound", KERNEL=="seq", \
+  GROUP="audio", MODE="0664", TAG+="uaccess"
+
+SUBSYSTEM=="sound", KERNEL=="timer", \
+  GROUP="audio", MODE="0664", TAG+="uaccess"
+
+# ── SysEx full HID passthrough ──────────────────────────────────
+# Allow hidraw access for SysEx-capable Akai devices so Wine
+# can send/receive SysEx via the raw HID interface when the MIDI
+# class driver is bound (needed for firmware/preset transfers).
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="09e8", \
+  TAG+="uaccess", GROUP="audio", MODE="0664"

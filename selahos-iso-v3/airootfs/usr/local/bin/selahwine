@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selahwine — SelahWine v1 Runtime Wrapper
+#  Wine-staging fork layer for SelahBridgePro
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  Usage: selahwine [--profile <name>] <wine-args...>
+#         selahwine --list-profiles
+#         selahwine --version
+#
+#  Enables: Fsync + Esync, DXVK async, creator-optimized registry,
+#           PipeWire JACK bridge, disabled telemetry/crash reporting.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+# ── ANSI palette ──────────────────────────────────────────────────────────────
+GOLD=$'\033[38;2;214;168;90m'
+PARCH=$'\033[38;2;237;228;212m'
+TEAL=$'\033[38;2;142;195;184m'
+MUTED=$'\033[38;2;154;141;123m'
+RED=$'\033[38;2;185;122;111m'
+BOLD=$'\033[1m'
+RESET=$'\033[0m'
+
+SELAHWINE_VERSION="1.0.0"
+PROFILE_DIR="/etc/selahbridgepro/profiles"
+DEFAULT_PROFILE="${PROFILE_DIR}/default.profile"
+SELAHPRO_CONF="/etc/selahbridgepro/selahbridgepro.conf"
+
+info()  { printf '  %s→ %s%s\n' "$MUTED" "$1" "$RESET" >&2; }
+warn()  { printf '  %s⚠  %s%s\n' "$RED" "$1" "$RESET" >&2; }
+die()   { printf '\n%s✗  %s%s\n' "$RED" "$1" "$RESET" >&2; exit 1; }
+
+# ── Locate wine-staging binary ────────────────────────────────────────────────
+_find_wine() {
+    for candidate in /usr/bin/wine /usr/bin/wine-staging wine; do
+        if command -v "$candidate" &>/dev/null; then
+            echo "$candidate"; return
+        fi
+    done
+    die "wine-staging not found. Run: selahpro install --runtime"
+}
+
+# ── Load profile variables ────────────────────────────────────────────────────
+_load_profile() {
+    local profile_file="$1"
+    [[ -f "$profile_file" ]] || die "Profile not found: $profile_file"
+    # shellcheck disable=SC1090
+    source "$profile_file"
+}
+
+# ── Apply creator-optimized registry defaults ────────────────────────────────
+_apply_registry() {
+    local wineprefix="$1"
+    local reg_src="/usr/share/selahbridgepro/selahwine-defaults.reg"
+    local stamp="${wineprefix}/.selahwine-reg-applied"
+
+    [[ "${SELAH_REG_APPLY:-0}" == "1" ]] || return 0
+    [[ -f "$reg_src" ]] || return 0
+    [[ -f "$stamp" ]] && return 0
+
+    info "Applying SelahWine registry defaults..."
+    WINEPREFIX="$wineprefix" wine regedit "$reg_src" &>/dev/null || \
+        warn "Registry apply had issues (non-fatal)"
+    touch "$stamp"
+}
+
+# ── Configure PipeWire JACK for SelahASIO ────────────────────────────────────
+_configure_pipewire() {
+    local rate="${SELAH_AUDIO_RATE:-48000}"
+    local buffer="${SELAH_AUDIO_BUFFER:-256}"
+    local conf_dir="${XDG_CONFIG_HOME:-$HOME/.config}/pipewire/pipewire.conf.d"
+
+    mkdir -p "$conf_dir"
+    cat > "${conf_dir}/selahpro-rt.conf" << EOF
+context.properties = {
+    default.clock.rate          = ${rate}
+    default.clock.quantum       = ${buffer}
+    default.clock.min-quantum   = 32
+    default.clock.max-quantum   = 2048
+}
+context.modules = [
+    { name = libpipewire-module-rt
+      args = { nice.level = -11  rt.prio = 88  rt.time.soft = -1  rt.time.hard = -1 }
+    }
+]
+EOF
+    # Signal PipeWire to reload if running
+    if pidof pipewire &>/dev/null; then
+        systemctl --user reload pipewire 2>/dev/null || true
+    fi
+}
+
+# ── Build Wine environment ────────────────────────────────────────────────────
+_build_env() {
+    local rate="${SELAH_AUDIO_RATE:-48000}"
+    local buffer="${SELAH_AUDIO_BUFFER:-256}"
+
+    export WINEESYNC="${WINEESYNC:-1}"
+    export WINEFSYNC="${WINEFSYNC:-1}"
+    export WINE_LARGE_ADDRESS_AWARE="${WINE_LARGE_ADDRESS_AWARE:-1}"
+    export WINE_DISABLE_CRASH_REPORT=1
+    export WINEDEBUG="${WINEDEBUG:--all}"
+    export WINEARCH="${WINEARCH:-win64}"
+
+    # DXVK async shader compilation
+    export DXVK_ASYNC="${DXVK_ASYNC:-1}"
+    export DXVK_FRAME_RATE="${DXVK_FRAME_RATE:-0}"
+    export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
+    export DXVK_STATE_CACHE="${DXVK_STATE_CACHE:-1}"
+
+    # PipeWire JACK latency negotiation
+    export PIPEWIRE_LATENCY="${buffer}/${rate}"
+
+    # Route Wine's ShellExecute URL calls to selahauth instead of system browser.
+    # Wine's winebrowser binary checks $BROWSER before falling back to xdg-open.
+    export BROWSER="selahauth"
+
+    # DLL overrides
+    export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-wineasio=n,b}"
+
+    # Disable Wine telemetry (winemenubuilder, winedbg crash dialogs)
+    export WINEDLLOVERRIDES="${WINEDLLOVERRIDES};winemenubuilder.exe=d"
+    export WINE_DISABLE_CRASH_REPORT=1
+
+    # Realtime scheduling hint for Wine audio threads
+    export WINE_RT_PRIO="${WINE_RT_PRIO:-88}"
+}
+
+# ── Parse arguments ───────────────────────────────────────────────────────────
+PROFILE_FILE="$DEFAULT_PROFILE"
+WINE_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --profile)
+            shift
+            arg="$1"
+            if [[ -f "$arg" ]]; then
+                PROFILE_FILE="$arg"
+            elif [[ -f "${PROFILE_DIR}/${arg}.profile" ]]; then
+                PROFILE_FILE="${PROFILE_DIR}/${arg}.profile"
+            else
+                die "Unknown profile: $arg  (try: selahwine --list-profiles)"
+            fi
+            shift
+            ;;
+        --list-profiles)
+            printf '%s%sAvailable SelahWine profiles:%s\n' "$GOLD" "$BOLD" "$RESET"
+            for f in "${PROFILE_DIR}"/*.profile; do
+                base="$(basename "$f" .profile)"
+                printf '  %s%-14s%s %s%s%s\n' "$TEAL" "$base" "$RESET" "$MUTED" "$f" "$RESET"
+            done
+            exit 0
+            ;;
+        --version)
+            printf 'SelahWine %s (wine-staging runtime)\n' "$SELAHWINE_VERSION"
+            exit 0
+            ;;
+        *)
+            WINE_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# ── Main execution ────────────────────────────────────────────────────────────
+_load_profile "$PROFILE_FILE"
+_build_env
+_configure_pipewire
+
+WINEPREFIX="${WINEPREFIX:-$HOME/.wine-selah}"
+export WINEPREFIX
+
+# Create prefix if needed
+if [[ ! -d "$WINEPREFIX" ]]; then
+    info "Initializing SelahWine prefix at $WINEPREFIX..."
+    WINEPREFIX="$WINEPREFIX" wineboot --init &>/dev/null || true
+fi
+
+_apply_registry "$WINEPREFIX"
+
+WINE_BIN="$(_find_wine)"
+exec "$WINE_BIN" "${WINE_ARGS[@]}"

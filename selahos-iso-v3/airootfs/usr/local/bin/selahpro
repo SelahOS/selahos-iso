@@ -1,0 +1,838 @@
+#!/usr/bin/env python3
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selahpro — SelahBridgePro v1 CLI
+#  Creator DAW compatibility layer for SelahOS
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  selahpro install <daw>
+#  selahpro launch  <daw>
+#  selahpro diagnose
+#  selahpro midi list
+#  selahpro midi passthrough <device>
+#  selahpro audio config [--rate N] [--buffer N]
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import argparse
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+VERSION = "1.0.0"
+PRODUCT = "SelahBridgePro"
+SUPPORT = "support@selahtechnologies.com"
+
+PROFILE_DIR  = Path("/etc/selahbridgepro/profiles")
+LIC_DIR      = Path("/etc/selahbridgepro")
+LIC_FILE     = LIC_DIR / "license"
+TRIAL_FILE   = LIC_DIR / "trial.conf"
+TRIAL_DAYS   = 14
+
+# License secret loaded at runtime from /etc/selahbridgepro/.keydata
+# That file is NOT in source control — it is deployed at ISO build time.
+# Without .keydata the license system operates in trial-only mode.
+def _load_secret() -> str:
+    kf = Path("/etc/selahbridgepro/.keydata")
+    try:
+        return kf.read_text().strip() if kf.exists() else ""
+    except OSError:
+        return ""
+
+_SECRET = _load_secret()
+
+# ── ANSI palette ──────────────────────────────────────────────────────────────
+GOLD  = "\033[38;2;214;168;90m"
+PARCH = "\033[38;2;237;228;212m"
+TEAL  = "\033[38;2;142;195;184m"
+MUTED = "\033[38;2;154;141;123m"
+RED   = "\033[38;2;185;122;111m"
+BOLD  = "\033[1m"
+DIM   = "\033[2m"
+RESET = "\033[0m"
+
+BANNER = f"""\
+{GOLD}{BOLD}
+  ╔══════════════════════════════════════════════════════════════╗
+  ║        SelahBridgePro™  v{VERSION}  —  Creator DAW Layer         ║
+  ║   Wine · DXVK · SelahASIO · USB MIDI · for SelahOS           ║
+  ╚══════════════════════════════════════════════════════════════╝
+{RESET}"""
+
+KNOWN_DAWS = {
+    "flstudio":        {"name": "FL Studio",          "exe": "FL64.exe",                  "profile": "flstudio"},
+    "fl":              {"name": "FL Studio",          "exe": "FL64.exe",                  "profile": "flstudio"},
+    "ableton":         {"name": "Ableton Live",       "exe": "Ableton Live 12 Suite.exe", "profile": "ableton"},
+    "live":            {"name": "Ableton Live",       "exe": "Ableton Live 12 Suite.exe", "profile": "ableton"},
+    "reaper":          {"name": "REAPER",             "exe": "reaper.exe",                "profile": "reaper"},
+    "protools":        {"name": "Pro Tools",          "exe": "Pro Tools.exe",             "profile": "protools"},
+    "pt":              {"name": "Pro Tools",          "exe": "Pro Tools.exe",             "profile": "protools"},
+    "digitalperformer":{"name": "Digital Performer",  "exe": "DP.exe",                    "profile": "digitalperformer"},
+    "dp":              {"name": "Digital Performer",  "exe": "DP.exe",                    "profile": "digitalperformer"},
+}
+
+def ok(msg):    print(f"  {TEAL}✓{RESET} {PARCH}{msg}{RESET}")
+def info(msg):  print(f"  {MUTED}→ {msg}{RESET}")
+def warn(msg):  print(f"  {RED}⚠  {PARCH}{msg}{RESET}")
+def die(msg):   print(f"\n{RED}✗  {msg}{RESET}", file=sys.stderr); sys.exit(1)
+def hdr(msg):   print(f"\n{GOLD}{BOLD}══  {msg}  ══{RESET}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LICENSE SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _machine_id() -> str:
+    for p in [Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")]:
+        if p.exists():
+            return p.read_text().strip()
+    import socket
+    return hashlib.sha256(socket.gethostname().encode()).hexdigest()[:32]
+
+def _expected_key(mid: str) -> str:
+    raw = hashlib.sha256((mid + _SECRET).encode()).hexdigest()[:16].upper()
+    return f"SELAHPRO-{raw[0:4]}-{raw[4:8]}-{raw[8:12]}-{raw[12:16]}"
+
+def _check_license() -> bool:
+    """Return True if licensed or in valid trial. Die if expired."""
+    import datetime
+
+    if LIC_FILE.exists():
+        stored = LIC_FILE.read_text().strip()
+        expected = _expected_key(_machine_id())
+        if stored == expected:
+            return True
+        # Key on disk doesn't match this machine — could be a copy
+        warn("License key does not match this machine.")
+
+    # Trial logic
+    now = datetime.date.today()
+    if TRIAL_FILE.exists():
+        try:
+            first_run = datetime.date.fromisoformat(TRIAL_FILE.read_text().strip())
+            days_used = (now - first_run).days
+            remaining = TRIAL_DAYS - days_used
+            if remaining > 0:
+                info(f"Trial: {remaining} day(s) remaining")
+                return True
+            else:
+                print(f"\n{RED}{BOLD}SelahBridgePro trial has expired.{RESET}")
+                print(f"  Get your Machine ID:  {GOLD}selahpro --machine-id{RESET}")
+                print(f"  Email it to:          {GOLD}{SUPPORT}{RESET}")
+                print(f"  Activate:             {GOLD}selahpro --activate <KEY>{RESET}\n")
+                sys.exit(1)
+        except (ValueError, OSError):
+            pass
+
+    # First run — write trial start
+    LIC_DIR.mkdir(parents=True, exist_ok=True)
+    TRIAL_FILE.write_text(now.isoformat())
+    os.chmod(TRIAL_FILE, 0o600)
+    info(f"Trial started — {TRIAL_DAYS} days free. Machine ID: {_machine_id()}")
+    return True
+
+def cmd_activate(key: str):
+    """Activate SelahBridgePro with a license key."""
+    key = key.strip().upper()
+    expected = _expected_key(_machine_id())
+    if key != expected:
+        die(f"Invalid license key for this machine.\nExpected format: SELAHPRO-XXXX-XXXX-XXXX-XXXX\nYour Machine ID: {_machine_id()}")
+    LIC_DIR.mkdir(parents=True, exist_ok=True)
+    LIC_FILE.write_text(key)
+    os.chmod(LIC_FILE, 0o600)
+    ok(f"{PRODUCT} activated successfully!")
+    ok("You have lifetime access on this machine.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  INSTALL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _run_cmd(desc: str, *args, check=True, capture=False):
+    info(desc)
+    kwargs = {"check": check}
+    if capture:
+        kwargs["capture_output"] = True
+        kwargs["text"] = True
+    return subprocess.run(list(args), **kwargs)
+
+def cmd_install(daw_name: str | None, existing_prefix: str | None = None):
+    """Install SelahBridgePro runtime and optionally scaffold a DAW Wine prefix."""
+    hdr("SelahBridgePro Install")
+    _check_license()
+
+    # 1. Ensure wine-staging is present
+    if not shutil.which("wine"):
+        warn("wine-staging not found — installing via pacman...")
+        _run_cmd("Installing wine-staging", "sudo", "pacman", "-S", "--noconfirm",
+                 "wine-staging", "wine-mono", "wine-gecko", "winetricks",
+                 "dxvk-async-git", "wineasio",
+                 "lib32-pipewire-jack", "pipewire-jack", check=False)
+
+    # selahauth browser dependency
+    if not _pyqt6_webengine_available():
+        _run_cmd("Installing selahauth dependency (python-pyqt6-webengine)",
+                 "sudo", "pacman", "-S", "--noconfirm",
+                 "python-pyqt6-webengine", check=False)
+    else:
+        ok("wine-staging present")
+
+    # 2. Register WineASIO
+    _run_cmd("Configuring SelahASIO", "selah-asio-config", "--install", check=False)
+
+    # 3. Apply udev rules (reload)
+    if Path("/etc/udev/rules.d/99-selah-midi.rules").exists():
+        _run_cmd("Reloading udev MIDI rules",
+                 "sudo", "udevadm", "control", "--reload-rules", check=False)
+        _run_cmd("Triggering USB subsystem",
+                 "sudo", "udevadm", "trigger", "--subsystem-match=usb", check=False)
+        ok("USB MIDI udev rules active")
+    else:
+        warn("udev rules not found at /etc/udev/rules.d/99-selah-midi.rules")
+
+    # 4. Realtime privileges
+    limits_line = "@audio  -  rtprio   88\n@audio  -  memlock  unlimited\n"
+    limits_path = Path("/etc/security/limits.conf")
+    if limits_path.exists():
+        content = limits_path.read_text()
+        if "@audio" not in content:
+            try:
+                with limits_path.open("a") as f:
+                    f.write(limits_line)
+                ok("Realtime limits written")
+            except PermissionError:
+                warn("Cannot write limits.conf — run as root or add manually")
+    groups_result = subprocess.run(["groups"], capture_output=True, text=True)
+    if "audio" not in groups_result.stdout and "realtime" not in groups_result.stdout:
+        real_user = os.environ.get("SUDO_USER", os.environ.get("USER", ""))
+        if real_user:
+            _run_cmd("Adding user to audio/realtime groups",
+                     "sudo", "usermod", "-aG", "audio,realtime", real_user, check=False)
+            info("Re-login required for group changes to take effect")
+
+    # 5. DAW-specific prefix scaffold
+    if daw_name:
+        daw_key = daw_name.lower()
+        daw = KNOWN_DAWS.get(daw_key)
+        if not daw:
+            warn(f"Unknown DAW '{daw_name}'. Known: {', '.join(KNOWN_DAWS)}")
+        else:
+            _scaffold_prefix(daw, existing_prefix=existing_prefix)
+
+    ok("SelahBridgePro installation complete")
+    info("Launch a DAW: selahpro launch <daw>")
+    info("Diagnose issues: selahpro diagnose")
+
+def _scaffold_prefix(daw: dict, existing_prefix: str | None = None):
+    """Create or patch a DAW-specific Wine prefix with the correct profile applied."""
+    name = daw["name"]
+    profile_key = daw["profile"]
+
+    if existing_prefix:
+        prefix_path = Path(existing_prefix).expanduser().resolve()
+        if not prefix_path.exists():
+            die(f"Prefix path does not exist: {prefix_path}")
+        hdr(f"Applying {name} Fixes to Existing Prefix")
+        info(f"Prefix: {prefix_path}  (existing)")
+    else:
+        prefix_path = Path.home() / f".wine-selah-{profile_key}"
+        hdr(f"Scaffolding {name} Wine Prefix")
+        info(f"Prefix: {prefix_path}")
+
+    profile_file = PROFILE_DIR / f"{profile_key}.profile"
+    if not profile_file.exists():
+        warn(f"Profile not found: {profile_file}")
+        return
+
+    env = _load_profile(profile_file)
+    env["WINEPREFIX"] = str(prefix_path)
+    env["WINEARCH"] = env.get("WINEARCH", "win64")
+
+    if not prefix_path.exists():
+        info(f"Initializing {name} Wine prefix...")
+        subprocess.run(["wineboot", "--init"], env={**os.environ, **env},
+                       check=False, capture_output=True)
+    else:
+        ok(f"Using existing prefix at {prefix_path}")
+
+    # Apply registry defaults
+    reg = Path("/usr/share/selahbridgepro/selahwine-defaults.reg")
+    if reg.exists():
+        subprocess.run(["wine", "regedit", str(reg)],
+                       env={**os.environ, **env}, check=False, capture_output=True)
+        ok(f"Registry defaults applied for {name}")
+
+    # Apply DAW-specific registry fixes
+    extra_reg_path = env.get("SELAH_REG_EXTRA", "")
+    if extra_reg_path and Path(extra_reg_path).exists():
+        subprocess.run(["wine", "regedit", extra_reg_path],
+                       env={**os.environ, **env}, check=False, capture_output=True)
+        ok(f"DAW-specific registry fixes applied for {name}")
+
+    # Digital Performer: install native VC++ 2022 redistributable
+    # This fixes the msvcp140 null vtable crash (motucorelibs ABI mismatch)
+    if profile_key in ("digitalperformer",):
+        info("Installing VC++ 2022 Redistributable (required for Digital Performer)...")
+        result = subprocess.run(
+            ["winetricks", "-q", "vcredist2022"],
+            env={**os.environ, **env}, check=False, capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            ok("vcredist2022 installed — native msvcp140/vcruntime140 active")
+        else:
+            warn("vcredist2022 install failed — DP may crash on launch")
+            warn("Manual fix: WINEPREFIX=~/.wine-selah-digitalperformer winetricks vcredist2022")
+
+    # Install WineASIO into this prefix
+    subprocess.run(["selah-asio-config", "--install"],
+                   env={**os.environ, **env}, check=False)
+
+    ok(f"{name} prefix ready at {prefix_path}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LAUNCH
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _load_profile(profile_file: Path) -> dict:
+    """Source a shell profile file and return its exported variables."""
+    env = {}
+    for line in profile_file.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if re.match(r'^[A-Z_][A-Z0-9_]*$', key):
+            env[key] = val
+    return env
+
+def cmd_launch(daw_name: str, exe_override: str | None = None):
+    """Launch a DAW under SelahWine with its profile."""
+    _check_license()
+
+    daw_key = daw_name.lower()
+    daw = KNOWN_DAWS.get(daw_key)
+    if not daw:
+        die(f"Unknown DAW '{daw_name}'. Known: {', '.join(KNOWN_DAWS)}")
+
+    hdr(f"Launching {daw['name']}")
+
+    profile_file = PROFILE_DIR / f"{daw['profile']}.profile"
+    if not profile_file.exists():
+        warn(f"Profile not found: {profile_file} — using defaults")
+        profile_file = PROFILE_DIR / "default.profile"
+
+    profile_env = _load_profile(profile_file) if profile_file.exists() else {}
+
+    # Build runtime environment
+    rate   = int(profile_env.get("SELAH_AUDIO_RATE",   "48000"))
+    buffer = int(profile_env.get("SELAH_AUDIO_BUFFER", "256"))
+    latency_ms = (buffer / rate) * 1000
+
+    prefix = Path.home() / f".wine-selah-{daw['profile']}"
+    if not prefix.exists():
+        prefix = Path.home() / ".wine-selah"
+
+    launch_env = {
+        **os.environ,
+        **profile_env,
+        "WINEPREFIX":            str(prefix),
+        "PIPEWIRE_LATENCY":      f"{buffer}/{rate}",
+        "WINEESYNC":             profile_env.get("WINEESYNC", "1"),
+        "WINEFSYNC":             profile_env.get("WINEFSYNC", "1"),
+        "WINE_DISABLE_CRASH_REPORT": "1",
+        "WINEDEBUG":             profile_env.get("WINEDEBUG", "-all"),
+        "DXVK_ASYNC":            profile_env.get("DXVK_ASYNC", "1"),
+        "DXVK_LOG_LEVEL":        profile_env.get("DXVK_LOG_LEVEL", "none"),
+        # Route DAW ShellExecute URL calls to selahauth
+        "BROWSER":               "selahauth",
+    }
+    if "WINEDLLOVERRIDES" in profile_env:
+        launch_env["WINEDLLOVERRIDES"] = (
+            profile_env["WINEDLLOVERRIDES"] + ";winemenubuilder.exe=d"
+        )
+
+    exe = exe_override or daw["exe"]
+    info(f"Profile:  {daw['profile']}.profile")
+    info(f"Prefix:   {prefix}")
+    info(f"Latency:  {latency_ms:.1f} ms  ({buffer} samples @ {rate} Hz)")
+    info(f"Exe:      {exe}")
+
+    # Reconfigure PipeWire for this session
+    subprocess.run(["selah-asio-config", "--rate", str(rate), "--buffer", str(buffer)],
+                   env=launch_env, check=False, capture_output=True)
+
+    # Apply extra per-DAW registry file if the profile specifies one
+    extra_reg = profile_env.get("SELAH_REG_EXTRA", "")
+    if extra_reg and Path(extra_reg).exists():
+        info(f"Applying DAW-specific registry fixes...")
+        subprocess.run(
+            ["wine", "regedit", extra_reg],
+            env=launch_env, check=False, capture_output=True
+        )
+
+    # Pre-launch background services (e.g. LDSvc.exe for Digital Performer)
+    prelaunches = profile_env.get("SELAH_PRELAUNCHES", "").split()
+    prelaunch_wait = int(profile_env.get("SELAH_PRELAUNCH_WAIT", "0"))
+    if prelaunches:
+        selahwine_bin = shutil.which("selahwine") or "selahwine"
+        for svc_exe in prelaunches:
+            info(f"Pre-launching service: {svc_exe}")
+            subprocess.Popen(
+                [selahwine_bin, "--profile", daw["profile"],
+                 "start", "/b", svc_exe],
+                env=launch_env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        if prelaunch_wait > 0:
+            import time
+            info(f"Waiting {prelaunch_wait}s for services to register COM servers...")
+            time.sleep(prelaunch_wait)
+
+    # Launch via selahwine (which wraps wine-staging)
+    selahwine = shutil.which("selahwine") or "selahwine"
+    cmd = [selahwine, "--profile", daw["profile"], exe]
+    info(f"Running: {' '.join(cmd)}")
+    try:
+        os.execve(selahwine, cmd, launch_env)
+    except FileNotFoundError:
+        die("selahwine not found. Run: selahpro install")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DIAGNOSE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_diagnose():
+    """Run a system readiness check for DAW production."""
+    hdr("SelahBridgePro System Diagnosis")
+
+    checks = []
+
+    def chk(label, ok_cond, ok_msg, fail_msg, fix=""):
+        passed = ok_cond()
+        sym = f"{TEAL}✓{RESET}" if passed else f"{RED}✗{RESET}"
+        msg = ok_msg if passed else fail_msg
+        print(f"  {sym} {PARCH}{label:<28}{RESET} {MUTED}{msg}{RESET}")
+        if not passed and fix:
+            print(f"    {DIM}fix: {fix}{RESET}")
+        checks.append(passed)
+        return passed
+
+    # Wine
+    chk("wine-staging",
+        lambda: bool(shutil.which("wine")),
+        "found", "NOT FOUND",
+        "selahpro install")
+
+    # WineASIO
+    chk("wineasio",
+        lambda: bool(subprocess.run(
+            ["find", "/usr/lib", "/usr/lib32", "-name", "wineasio.dll.so"],
+            capture_output=True).stdout.strip()),
+        "installed", "not installed",
+        "sudo pacman -S wineasio")
+
+    # PipeWire
+    chk("PipeWire",
+        lambda: bool(shutil.which("pipewire")),
+        "found", "NOT FOUND",
+        "sudo pacman -S pipewire pipewire-pulse")
+
+    # pipewire-jack
+    chk("pipewire-jack bridge",
+        lambda: bool(subprocess.run(
+            ["find", "/usr/lib", "/usr/lib32", "-name", "libjack*.so*"],
+            capture_output=True).stdout.strip()),
+        "found", "not found",
+        "sudo pacman -S pipewire-jack lib32-pipewire-jack")
+
+    # PipeWire running
+    chk("PipeWire running",
+        lambda: subprocess.run(["pgrep", "pipewire"],
+                                capture_output=True).returncode == 0,
+        "active", "not running",
+        "systemctl --user start pipewire pipewire-pulse")
+
+    # DXVK
+    chk("DXVK / dxvk-async",
+        lambda: bool(subprocess.run(
+            ["find", "/usr/share", "-name", "dxgi.dll", "-o", "-name", "d3d11.dll"],
+            capture_output=True).stdout.strip()),
+        "found", "not found",
+        "sudo pacman -S dxvk-async-git")
+
+    # Realtime limits
+    chk("realtime audio limits",
+        lambda: (Path("/etc/security/limits.conf").exists() and
+                 "@audio" in Path("/etc/security/limits.conf").read_text()),
+        "configured", "not set",
+        "selahpro audio config")
+
+    # audio group
+    user = os.environ.get("USER", "")
+    chk(f"user in audio group",
+        lambda: "audio" in subprocess.run(
+            ["groups", user], capture_output=True, text=True).stdout,
+        "yes", "no",
+        f"sudo usermod -aG audio {user}")
+
+    # udev MIDI rules
+    chk("MIDI udev rules",
+        lambda: Path("/etc/udev/rules.d/99-selah-midi.rules").exists(),
+        "present", "missing",
+        "selahpro install")
+
+    # linux-zen kernel
+    chk("linux-zen kernel",
+        lambda: "zen" in subprocess.run(
+            ["uname", "-r"], capture_output=True, text=True).stdout,
+        "active", "not active (recommended for low latency)")
+
+    # fsync kernel support
+    chk("fsync support",
+        lambda: Path("/proc/sys/kernel/ngroups_max").exists(),
+        "available", "may not be available")
+
+    passed = sum(checks)
+    total  = len(checks)
+    color  = TEAL if passed == total else (GOLD if passed >= total * 0.7 else RED)
+    print(f"\n  {color}{BOLD}{passed}/{total}{RESET} checks passed\n")
+
+    if passed < total:
+        info(f"Run 'selahpro install' to fix most issues")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MIDI
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_midi_list():
+    """List USB MIDI devices and ALSA sequencer ports."""
+    hdr("MIDI Devices")
+
+    # USB MIDI via /dev/selah-midi symlinks
+    midi_links = list(Path("/dev/selah-midi").glob("*")) if Path("/dev/selah-midi").exists() else []
+    if midi_links:
+        ok("SelahBridgePro MIDI devices:")
+        for link in sorted(midi_links):
+            target = link.resolve() if link.is_symlink() else link
+            print(f"    {TEAL}{link.name:<24}{RESET} → {MUTED}{target}{RESET}")
+    else:
+        info("No SelahBridgePro MIDI symlinks found (connect a device)")
+
+    # Raw USB devices — Akai VID
+    print()
+    usb_result = subprocess.run(
+        ["find", "/dev/bus/usb", "-type", "c"],
+        capture_output=True, text=True, check=False)
+
+    akai_result = subprocess.run(
+        ["lsusb", "-d", "09e8:"],
+        capture_output=True, text=True, check=False)
+    if akai_result.stdout.strip():
+        ok("Akai USB devices found:")
+        for line in akai_result.stdout.strip().splitlines():
+            print(f"    {PARCH}{line}{RESET}")
+    else:
+        info("No Akai devices connected")
+
+    # ALSA sequencer ports
+    print()
+    aconnect = subprocess.run(["aconnect", "-l"],
+                               capture_output=True, text=True, check=False)
+    if aconnect.returncode == 0 and aconnect.stdout.strip():
+        ok("ALSA MIDI sequencer ports:")
+        for line in aconnect.stdout.strip().splitlines():
+            print(f"    {PARCH}{line}{RESET}")
+    else:
+        info("No ALSA MIDI ports — install alsa-utils or connect a device")
+
+def cmd_midi_passthrough(device: str):
+    """Set up USB passthrough for a named MIDI device."""
+    hdr(f"USB MIDI Passthrough: {device}")
+    _check_license()
+
+    device_map = {
+        "akai-mpk-mini4":  ("09e8", "006b"),
+        "mpk":             ("09e8", "006b"),
+        "akai-mpc-studio2":("09e8", "0076"),
+        "mpc":             ("09e8", "0076"),
+    }
+
+    dev_key = device.lower().replace(" ", "-")
+    if dev_key not in device_map:
+        # Try by lsusb name
+        lsusb = subprocess.run(["lsusb"], capture_output=True, text=True, check=False)
+        info(f"Connected USB devices:\n{lsusb.stdout}")
+        info(f"Known device IDs: {', '.join(device_map.keys())}")
+        die(f"Unknown device '{device}'. Pass the key from the list above.")
+
+    vid, pid = device_map[dev_key]
+    info(f"VID:PID = {vid}:{pid}")
+
+    # Find the USB device path
+    result = subprocess.run(["lsusb", "-d", f"{vid}:{pid}"],
+                             capture_output=True, text=True, check=False)
+    if not result.stdout.strip():
+        die(f"Device {vid}:{pid} not connected. Plug it in and retry.")
+
+    ok(f"Device found: {result.stdout.strip()}")
+
+    # Reload udev to ensure rules are applied
+    subprocess.run(["sudo", "udevadm", "control", "--reload-rules"],
+                   check=False, capture_output=True)
+    subprocess.run(["sudo", "udevadm", "trigger",
+                    "--action=add", "--subsystem-match=usb"],
+                   check=False, capture_output=True)
+    ok("udev rules reloaded")
+
+    # Check ALSA MIDI node
+    alsa_nodes = list(Path("/dev/snd").glob("midiC*D*"))
+    if alsa_nodes:
+        ok(f"ALSA MIDI nodes: {', '.join(str(n) for n in alsa_nodes)}")
+    else:
+        warn("No ALSA MIDI nodes — device may need snd-usb-audio loaded")
+        subprocess.run(["sudo", "modprobe", "snd-usb-audio"],
+                       check=False, capture_output=True)
+
+    info("SysEx passthrough: enabled via hidraw (see udev rules)")
+    info("Wine will see this device as a Windows MIDI device via WineASIO/ALSA")
+    ok("Passthrough configured. Launch your DAW with: selahpro launch <daw>")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AUTH BROWSER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _pyqt6_webengine_available() -> bool:
+    try:
+        import importlib.util
+        return importlib.util.find_spec("PyQt6.QtWebEngineWidgets") is not None
+    except Exception:
+        return False
+
+def cmd_auth(daw_name: str | None, url: str | None = None):
+    """Open the authorization browser for a DAW or a specific URL."""
+    _check_license()
+
+    selahauth = shutil.which("selahauth")
+    if not selahauth:
+        die("selahauth not found. Run: selahpro install")
+
+    if not _pyqt6_webengine_available():
+        warn("python-pyqt6-webengine not installed — selahauth will open system browser")
+        info("Install: sudo pacman -S python-pyqt6-webengine")
+
+    if url:
+        hdr("SelahBridgePro Authorization")
+        info(f"URL: {url}")
+        os.execvp(selahauth, [selahauth, url])
+    elif daw_name:
+        daw_key = daw_name.lower()
+        if daw_key not in KNOWN_DAWS:
+            die(f"Unknown DAW '{daw_name}'. Known: {', '.join(KNOWN_DAWS)}")
+        hdr(f"{KNOWN_DAWS[daw_key]['name']} Authorization")
+        os.execvp(selahauth, [selahauth, "--daw", daw_key])
+    else:
+        hdr("SelahBridgePro Authorization Browser")
+        info("Usage: selahpro auth <daw>  or  selahpro auth --url <url>")
+        info("Known DAWs: " + ", ".join(KNOWN_DAWS))
+        subprocess.run([selahauth, "--list"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AUDIO CONFIG
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cmd_audio_config(rate: int, buffer: int):
+    """Configure PipeWire + SelahASIO for low-latency audio production."""
+    hdr("SelahASIO Audio Configuration")
+    _check_license()
+
+    latency_ms = (buffer / rate) * 1000
+    info(f"Sample rate:  {rate} Hz")
+    info(f"Buffer size:  {buffer} samples")
+    info(f"Latency:      {latency_ms:.2f} ms")
+
+    if latency_ms > 10:
+        warn(f"{latency_ms:.1f} ms exceeds 10ms — for studio work, try --buffer 128 or --buffer 256")
+    elif latency_ms <= 5:
+        ok(f"{latency_ms:.2f} ms — sub-5ms target achieved")
+
+    subprocess.run(["selah-asio-config",
+                    "--rate", str(rate), "--buffer", str(buffer)],
+                   check=False)
+
+    # Ensure realtime limits exist
+    limits_path = Path("/etc/security/limits.conf")
+    if limits_path.exists():
+        content = limits_path.read_text()
+        if "@audio" not in content:
+            try:
+                with limits_path.open("a") as f:
+                    f.write("\n# SelahBridgePro realtime audio\n"
+                            "@audio  -  rtprio   88\n"
+                            "@audio  -  memlock  unlimited\n")
+                ok("Realtime limits added to /etc/security/limits.conf")
+            except PermissionError:
+                warn("Cannot write limits.conf — run as root")
+        else:
+            ok("Realtime limits already configured")
+
+    # Restart PipeWire to pick up new quantum
+    info("Restarting PipeWire...")
+    subprocess.run(["systemctl", "--user", "restart",
+                    "pipewire", "pipewire-pulse"],
+                   check=False, capture_output=True)
+    ok("PipeWire restarted with new audio settings")
+    info("Run 'selahpro diagnose' to verify the full stack")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ARGUMENT PARSER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="selahpro",
+        description=f"SelahBridgePro v{VERSION} — Creator DAW compatibility for SelahOS",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            f"  {GOLD}selahpro install flstudio{RESET}          Install + scaffold FL Studio prefix\n"
+            f"  {GOLD}selahpro install{RESET}                   Install SelahBridgePro runtime only\n"
+            f"  {GOLD}selahpro launch reaper{RESET}             Launch REAPER via SelahWine\n"
+            f"  {GOLD}selahpro auth ableton{RESET}              Open Ableton authorization browser\n"
+            f"  {GOLD}selahpro diagnose{RESET}                  Full system readiness check\n"
+            f"  {GOLD}selahpro midi list{RESET}                 List MIDI devices\n"
+            f"  {GOLD}selahpro midi passthrough mpk{RESET}      Activate Akai MPK Mini 4 passthrough\n"
+            f"  {GOLD}selahpro audio config --buffer 128{RESET} Configure low-latency audio\n"
+        )
+    )
+    p.add_argument("--version", action="version", version=f"selahpro {VERSION}")
+    p.add_argument("--machine-id", action="store_true",
+                   help="Print machine ID (send to support for licensing)")
+    p.add_argument("--activate", metavar="KEY",
+                   help="Activate with a license key")
+    p.add_argument("--status", action="store_true",
+                   help="Show license / trial status")
+
+    sub = p.add_subparsers(dest="command")
+
+    # install
+    ins = sub.add_parser("install", help="Install SelahBridgePro runtime [+ DAW scaffold]")
+    ins.add_argument("daw", nargs="?",
+                     help="DAW to scaffold (flstudio/ableton/reaper/protools/dp)")
+    ins.add_argument("--prefix", metavar="PATH",
+                     help="Apply fixes to an existing Wine prefix instead of creating a new one")
+
+    # launch
+    launch = sub.add_parser("launch", help="Launch a DAW via SelahWine")
+    launch.add_argument("daw", help="DAW to launch")
+    launch.add_argument("--exe", help="Override executable path")
+
+    # diagnose
+    sub.add_parser("diagnose", help="Run system readiness checks")
+
+    # auth
+    auth = sub.add_parser("auth", help="Open DAW authorization browser")
+    auth.add_argument("daw", nargs="?",
+                      help="DAW to authorize (flstudio/ableton/reaper/protools)")
+    auth.add_argument("--url", metavar="URL", help="Open a specific authorization URL")
+
+    # midi
+    midi = sub.add_parser("midi", help="MIDI device management")
+    midi_sub = midi.add_subparsers(dest="midi_cmd")
+    midi_sub.add_parser("list", help="List MIDI devices")
+    midi_pt = midi_sub.add_parser("passthrough", help="Enable USB passthrough for a device")
+    midi_pt.add_argument("device", help="Device name (e.g. mpk, mpc, akai-mpk-mini4)")
+
+    # audio
+    audio = sub.add_parser("audio", help="Audio configuration")
+    audio_sub = audio.add_subparsers(dest="audio_cmd")
+    audio_cfg = audio_sub.add_parser("config", help="Configure PipeWire + SelahASIO")
+    audio_cfg.add_argument("--rate", type=int, default=48000,
+                           help="Sample rate in Hz (default: 48000)")
+    audio_cfg.add_argument("--buffer", type=int, default=256,
+                           help="Buffer size in samples (default: 256)")
+
+    return p
+
+
+def main():
+    # No-arg: print banner + help
+    if len(sys.argv) == 1:
+        print(BANNER)
+        build_parser().print_help()
+        sys.exit(0)
+
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.machine_id:
+        print(f"Machine ID: {GOLD}{_machine_id()}{RESET}")
+        print(f"Email to:   {MUTED}{SUPPORT}{RESET}")
+        sys.exit(0)
+
+    if args.activate:
+        cmd_activate(args.activate)
+        sys.exit(0)
+
+    if args.status:
+        import datetime
+        mid = _machine_id()
+        print(f"  Machine ID:  {GOLD}{mid}{RESET}")
+        if LIC_FILE.exists():
+            key = LIC_FILE.read_text().strip()
+            if key == _expected_key(mid):
+                ok(f"Licensed — {PRODUCT} activated on this machine")
+            else:
+                warn("License file present but key does not match this machine")
+        elif TRIAL_FILE.exists():
+            try:
+                first = datetime.date.fromisoformat(TRIAL_FILE.read_text().strip())
+                used = (datetime.date.today() - first).days
+                rem  = TRIAL_DAYS - used
+                if rem > 0:
+                    info(f"Trial: {rem} day(s) remaining (started {first})")
+                else:
+                    warn(f"Trial EXPIRED ({used} days ago)")
+            except ValueError:
+                warn("Corrupt trial file")
+        else:
+            info("No trial started yet — run any selahpro command to begin")
+        sys.exit(0)
+
+    cmd = args.command
+    if cmd == "install":
+        cmd_install(getattr(args, "daw", None), getattr(args, "prefix", None))
+    elif cmd == "launch":
+        cmd_launch(args.daw, getattr(args, "exe", None))
+    elif cmd == "auth":
+        cmd_auth(getattr(args, "daw", None), getattr(args, "url", None))
+    elif cmd == "diagnose":
+        cmd_diagnose()
+    elif cmd == "midi":
+        if args.midi_cmd == "list":
+            cmd_midi_list()
+        elif args.midi_cmd == "passthrough":
+            cmd_midi_passthrough(args.device)
+        else:
+            build_parser().parse_args(["midi", "--help"])
+    elif cmd == "audio":
+        if args.audio_cmd == "config":
+            cmd_audio_config(args.rate, args.buffer)
+        else:
+            build_parser().parse_args(["audio", "--help"])
+    else:
+        print(BANNER)
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
