@@ -1,124 +1,152 @@
 #!/usr/bin/env python3
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SelahBridgePro License Key Server
-#  Serves the activation portal at selahos.io/activate (or keys.selahos.io)
+#  SelahBridgePro License Key Server — stdlib only, no dependencies
+#  Handles POST /keygen  (HTML served statically by nginx)
 #
-#  Secret is read from env var SELAHPRO_SECRET — never hardcoded.
-#  Set via /etc/selahpro-keygen/secret.env on the web server.
-#
-#  Run:   gunicorn -w 2 -b 127.0.0.1:5050 app:app
-#  Dev:   SELAHPRO_SECRET=xxx flask run --port 5050
+#  Config via environment variables:
+#    SELAHPRO_SECRET   — required, the license signing secret
+#    KEYGEN_PORT       — port to listen on (default 5050)
+#    KEYGEN_LOG        — log file path (default ~/logs/selahpro-keygen.log)
+#    RATE_LIMIT        — max requests per IP per hour (default 10)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+import hashlib
+import json
+import logging
 import os
 import re
-import hashlib
-import logging
+import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from functools import wraps
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-
-from flask import Flask, request, jsonify, render_template
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 SECRET = os.environ.get("SELAHPRO_SECRET", "").strip()
 if not SECRET:
-    raise RuntimeError(
-        "SELAHPRO_SECRET environment variable not set.\n"
-        "Set it in /etc/selahpro-keygen/secret.env and restart the service."
-    )
+    sys.exit("SELAHPRO_SECRET env var not set — aborting")
 
-LOG_FILE   = Path(os.environ.get("KEYGEN_LOG", "/var/log/selahpro-keygen.log"))
-RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "10"))   # requests per window
-RATE_WIN   = int(os.environ.get("RATE_WINDOW", "3600")) # seconds (1 hour)
+PORT        = int(os.environ.get("KEYGEN_PORT", "5050"))
+RATE_LIMIT  = int(os.environ.get("RATE_LIMIT", "10"))
+RATE_WINDOW = 3600
 
-# ── App ────────────────────────────────────────────────────────────────────────
-app = Flask(__name__)
-app.config["JSON_SORT_KEYS"] = False
+LOG_PATH = Path(os.environ.get(
+    "KEYGEN_LOG",
+    Path.home() / "logs" / "selahpro-keygen.log"
+))
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
-    filename=str(LOG_FILE),
+    handlers=[
+        logging.FileHandler(LOG_PATH),
+        logging.StreamHandler(sys.stdout),
+    ],
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%SZ",
 )
-log = logging.getLogger("selahpro-keygen")
+log = logging.getLogger("keygen")
 
-# Also log to stdout so journalctl picks it up
-_stdout_handler = logging.StreamHandler()
-_stdout_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-log.addHandler(_stdout_handler)
-
-# ── Rate limiter (in-memory, per IP) ──────────────────────────────────────────
+# ── Rate limiter ───────────────────────────────────────────────────────────────
 _hits: dict[str, list[float]] = defaultdict(list)
 
-def _check_rate(ip: str) -> bool:
-    now = time.monotonic()
-    hits = [t for t in _hits[ip] if now - t < RATE_WIN]
-    _hits[ip] = hits
-    if len(hits) >= RATE_LIMIT:
+def _rate_ok(ip: str) -> bool:
+    now   = time.monotonic()
+    valid = [t for t in _hits[ip] if now - t < RATE_WINDOW]
+    _hits[ip] = valid
+    if len(valid) >= RATE_LIMIT:
         return False
     _hits[ip].append(now)
     return True
 
-def rate_limited(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
-        if not _check_rate(ip):
-            log.warning("RATE_LIMIT ip=%s", ip)
-            return jsonify({"error": "Too many requests — try again later."}), 429
-        return f(*args, **kwargs)
-    return wrapper
-
 # ── Key generation ─────────────────────────────────────────────────────────────
 MACHINE_ID_RE = re.compile(r'^[0-9a-f]{32}$')
 
-def _generate_key(machine_id: str) -> str:
+def _make_key(machine_id: str) -> str:
     raw = hashlib.sha256((machine_id + SECRET).encode()).hexdigest()[:16].upper()
     return f"SELAHPRO-{raw[0:4]}-{raw[4:8]}-{raw[8:12]}-{raw[12:16]}"
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+# ── HTTP handler ───────────────────────────────────────────────────────────────
 
-@app.route("/")
-@app.route("/activate")
-@app.route("/activate/")
-def index():
-    return render_template("index.html")
+class KeygenHandler(BaseHTTPRequestHandler):
 
-@app.route("/api/keygen", methods=["POST"])
-@rate_limited
-def api_keygen():
-    data       = request.get_json(silent=True) or {}
-    machine_id = (data.get("machine_id") or "").strip().lower()
-    ip         = request.headers.get("X-Forwarded-For", request.remote_addr or "")
+    def log_message(self, fmt, *args):
+        pass  # suppress default per-request stderr noise
 
-    if not machine_id:
-        return jsonify({"error": "Machine ID is required."}), 400
+    def _json(self, code: int, data: dict) -> None:
+        body = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
 
-    if not MACHINE_ID_RE.match(machine_id):
-        return jsonify({
-            "error": "Invalid Machine ID format. Run 'selahpro --machine-id' on your SelahOS machine."
-        }), 400
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
 
-    key = _generate_key(machine_id)
-    ts  = datetime.now(timezone.utc).isoformat()
+    def do_GET(self):
+        if self.path in ("/health", "/health/"):
+            self._json(200, {"status": "ok"})
+        else:
+            self._json(404, {"error": "not found"})
 
-    log.info("KEYGEN machine_id=%s key=%s ip=%s ts=%s", machine_id, key, ip, ts)
+    def do_POST(self):
+        if self.path not in ("/keygen", "/keygen/"):
+            self._json(404, {"error": "not found"})
+            return
 
-    return jsonify({
-        "key":        key,
-        "machine_id": machine_id,
-        "product":    "SelahBridgePro",
-        "issued":     ts,
-    })
+        ip = (
+            self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or self.client_address[0]
+        )
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok", "product": "SelahBridgePro Keygen"}), 200
+        if not _rate_ok(ip):
+            log.warning("RATE_LIMIT ip=%s", ip)
+            self._json(429, {"error": "Too many requests — try again later."})
+            return
+
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+        except json.JSONDecodeError:
+            self._json(400, {"error": "Invalid JSON"})
+            return
+
+        machine_id = (body.get("machine_id") or "").strip().lower()
+
+        if not machine_id:
+            self._json(400, {"error": "machine_id is required"})
+            return
+
+        if not MACHINE_ID_RE.match(machine_id):
+            self._json(400, {
+                "error": "Invalid Machine ID. Run: selahpro --machine-id"
+            })
+            return
+
+        key = _make_key(machine_id)
+        ts  = datetime.now(timezone.utc).isoformat()
+        log.info("KEYGEN machine_id=%s key=%s ip=%s ts=%s", machine_id, key, ip, ts)
+
+        self._json(200, {
+            "key":        key,
+            "machine_id": machine_id,
+            "product":    "SelahBridgePro",
+            "issued":     ts,
+        })
 
 # ── Entry point ────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5050, debug=False)
+    server = HTTPServer(("127.0.0.1", PORT), KeygenHandler)
+    log.info("SelahBridgePro keygen listening on 127.0.0.1:%d", PORT)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log.info("Stopped")
