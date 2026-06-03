@@ -1,0 +1,21 @@
+[Unit]
+Description=SelahBridgePro License Key Server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/selahpro-keygen
+EnvironmentFile=/etc/selahpro-keygen/secret.env
+ExecStart=/var/www/selahpro-keygen/venv/bin/gunicorn \
+    --workers 2 \
+    --bind 127.0.0.1:5050 \
+    --access-logfile /var/log/selahpro-keygen-access.log \
+    --error-logfile /var/log/selahpro-keygen-error.log \
+    app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

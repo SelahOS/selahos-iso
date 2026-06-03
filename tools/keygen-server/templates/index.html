@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SelahBridgePro — Activate</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --gold:    #D6A85A;
+      --gold-dim:#A07C3C;
+      --parch:   #EDE4D4;
+      --teal:    #8EC3B8;
+      --muted:   #9A8D7B;
+      --bg:      #18150F;
+      --surface: #211D16;
+      --border:  #2E2820;
+      --error:   #B97A6F;
+      --radius:  10px;
+      --mono:    'SF Mono', 'Fira Code', 'Consolas', monospace;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--parch);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    /* ── Logo ── */
+    .logo {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 2.5rem;
+      gap: 0.5rem;
+    }
+
+    .logo-wordmark {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    .logo-sub {
+      font-size: 0.78rem;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* ── Card ── */
+    .card {
+      width: 100%;
+      max-width: 480px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2.5rem 2rem;
+    }
+
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--parch);
+      margin-bottom: 0.35rem;
+    }
+
+    .card-desc {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+      line-height: 1.5;
+    }
+
+    /* ── Form ── */
+    label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--parch);
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      padding: 0.65rem 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]::placeholder { color: var(--muted); opacity: 0.6; }
+    input[type="text"]:focus { border-color: var(--gold-dim); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.65rem 1.1rem;
+      transition: opacity 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--gold);
+      color: #18150F;
+      width: 100%;
+      justify-content: center;
+      padding: 0.75rem;
+      font-size: 0.92rem;
+      letter-spacing: 0.04em;
+    }
+
+    .btn-primary:hover:not(:disabled) { opacity: 0.88; }
+
+    .btn-ghost {
+      background: var(--border);
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .btn-ghost:hover:not(:disabled) { background: #3a3226; color: var(--parch); }
+
+    /* ── Result ── */
+    #result { display: none; margin-top: 1.75rem; }
+
+    .result-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .key-display {
+      background: var(--bg);
+      border: 1px solid var(--gold-dim);
+      border-radius: 6px;
+      padding: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .key-text {
+      font-family: var(--mono);
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--gold);
+      letter-spacing: 0.06em;
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.78rem;
+      padding: 0.3rem 0.6rem;
+      transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .copy-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
+    .copy-btn.copied { border-color: var(--teal); color: var(--teal); }
+
+    /* ── Instructions ── */
+    .instructions {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.1rem;
+      font-size: 0.82rem;
+    }
+
+    .instructions p {
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+    }
+
+    .instructions ol {
+      color: var(--muted);
+      padding-left: 1.2rem;
+      line-height: 1.8;
+    }
+
+    .instructions code {
+      background: var(--border);
+      border-radius: 3px;
+      color: var(--parch);
+      font-family: var(--mono);
+      font-size: 0.85em;
+      padding: 0.1em 0.4em;
+    }
+
+    /* ── Error ── */
+    #error-msg {
+      display: none;
+      background: #2a1a18;
+      border: 1px solid var(--error);
+      border-radius: 6px;
+      color: var(--error);
+      font-size: 0.85rem;
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 1.5rem 0;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 2rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.7;
+    }
+
+    .footer a { color: var(--gold-dim); text-decoration: none; }
+    .footer a:hover { color: var(--gold); }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(24,21,15,0.3);
+      border-top-color: #18150F;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div class="logo">
+    <div class="logo-wordmark">Selah Technologies</div>
+    <div class="logo-sub">SelahBridgePro — License Activation</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Activate SelahBridgePro</div>
+    <div class="card-desc">
+      Enter the Machine ID from your SelahOS installation to generate your permanent license key.
+    </div>
+
+    <label for="machine-id">Machine ID</label>
+    <div class="input-row">
+      <input
+        type="text"
+        id="machine-id"
+        placeholder="e.g. 9322ed2685f74065a739c4afe3be7f0f"
+        maxlength="32"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      >
+      <button class="btn btn-ghost" id="paste-btn" title="Paste from clipboard">Paste</button>
+    </div>
+
+    <button class="btn btn-primary" id="generate-btn">
+      Generate License Key
+    </button>
+
+    <div id="error-msg"></div>
+
+    <div id="result">
+      <hr class="divider">
+      <div class="result-label">Your License Key</div>
+      <div class="key-display">
+        <span class="key-text" id="key-output"></span>
+        <button class="copy-btn" id="copy-btn">Copy</button>
+      </div>
+
+      <div class="instructions">
+        <p>Activate on your SelahOS machine:</p>
+        <ol>
+          <li>Open a terminal on SelahOS</li>
+          <li>Run: <code id="activate-cmd"></code></li>
+          <li>Verify: <code>selahpro --status</code></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Need help? <a href="mailto:support@selahtechnologies.com">support@selahtechnologies.com</a><br>
+    © 2026 Selah Technologies LLC
+  </div>
+
+  <script>
+    const machineInput = document.getElementById('machine-id');
+    const generateBtn  = document.getElementById('generate-btn');
+    const pasteBtn     = document.getElementById('paste-btn');
+    const resultDiv    = document.getElementById('result');
+    const keyOutput    = document.getElementById('key-output');
+    const activateCmd  = document.getElementById('activate-cmd');
+    const copyBtn      = document.getElementById('copy-btn');
+    const errorMsg     = document.getElementById('error-msg');
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.style.display = 'block';
+      resultDiv.style.display = 'none';
+    }
+
+    function clearError() {
+      errorMsg.style.display = 'none';
+    }
+
+    // Paste button
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        machineInput.value = text.trim().toLowerCase();
+        clearError();
+      } catch {
+        machineInput.focus();
+      }
+    });
+
+    // Auto-lowercase and strip spaces on input
+    machineInput.addEventListener('input', () => {
+      const pos = machineInput.selectionStart;
+      machineInput.value = machineInput.value.replace(/\s/g, '').toLowerCase();
+      machineInput.setSelectionRange(pos, pos);
+      clearError();
+    });
+
+    // Generate
+    generateBtn.addEventListener('click', async () => {
+      const machineId = machineInput.value.trim().toLowerCase();
+
+      if (!machineId) {
+        showError('Please enter your Machine ID.');
+        return;
+      }
+
+      if (!/^[0-9a-f]{32}$/.test(machineId)) {
+        showError('Invalid Machine ID — must be 32 hex characters. Run selahpro --machine-id on your SelahOS machine.');
+        return;
+      }
+
+      clearError();
+      generateBtn.disabled = true;
+      generateBtn.innerHTML = '<span class="spinner"></span> Generating…';
+
+      try {
+        const resp = await fetch('/api/keygen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ machine_id: machineId }),
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          showError(data.error || 'Server error — please try again.');
+          return;
+        }
+
+        keyOutput.textContent  = data.key;
+        activateCmd.textContent = `sudo selahpro --activate ${data.key}`;
+        resultDiv.style.display = 'block';
+        resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+      } catch {
+        showError('Network error — please check your connection and try again.');
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = 'Generate License Key';
+      }
+    });
+
+    // Enter key submits
+    machineInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') generateBtn.click();
+    });
+
+    // Copy key
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(keyOutput.textContent);
+        copyBtn.textContent = 'Copied!';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy';
+          copyBtn.classList.remove('copied');
+        }, 2000);
+      } catch {
+        copyBtn.textContent = 'Copy failed';
+      }
+    });
+  </script>
+</body>
+</html>
