@@ -83,15 +83,15 @@ fi
 # ── Step 2: Copy executables ──────────────────────────────────────────────────
 hdr "Installing executables"
 
-install -Dm700 "$SRC/usr/local/bin/selahpro"          /usr/local/bin/selahpro
+install -Dm755 "$SRC/usr/local/bin/selahpro"          /usr/local/bin/selahpro
 ok "selahpro"
-install -Dm700 "$SRC/usr/local/bin/selahbridgepro"    /usr/local/bin/selahbridgepro
+install -Dm755 "$SRC/usr/local/bin/selahbridgepro"    /usr/local/bin/selahbridgepro
 ok "selahbridgepro"
-install -Dm700 "$SRC/usr/local/bin/selahwine"         /usr/local/bin/selahwine
+install -Dm755 "$SRC/usr/local/bin/selahwine"         /usr/local/bin/selahwine
 ok "selahwine"
-install -Dm700 "$SRC/usr/local/bin/selah-asio-config" /usr/local/bin/selah-asio-config
+install -Dm755 "$SRC/usr/local/bin/selah-asio-config" /usr/local/bin/selah-asio-config
 ok "selah-asio-config"
-install -Dm700 "$SRC/usr/local/bin/selahauth"         /usr/local/bin/selahauth
+install -Dm755 "$SRC/usr/local/bin/selahauth"         /usr/local/bin/selahauth
 ok "selahauth"
 install -Dm755 "$SRC/usr/local/bin/selah-mpc-bridge" /usr/local/bin/selah-mpc-bridge
 ok "selah-mpc-bridge"

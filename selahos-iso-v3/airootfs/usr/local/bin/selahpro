@@ -127,9 +127,9 @@ def _check_license() -> bool:
             pass
 
     # First run — write trial start
-    LIC_DIR.mkdir(parents=True, exist_ok=True)
+    LIC_DIR.mkdir(parents=True, exist_ok=True, mode=0o755)
     TRIAL_FILE.write_text(now.isoformat())
-    os.chmod(TRIAL_FILE, 0o600)
+    os.chmod(TRIAL_FILE, 0o644)
     info(f"Trial started — {TRIAL_DAYS} days free. Machine ID: {_machine_id()}")
     return True
 
@@ -791,7 +791,10 @@ def main():
     if args.status:
         import datetime
         mid = _machine_id()
-        print(f"  Machine ID:  {GOLD}{mid}{RESET}")
+        hdr("SelahBridgePro Status")
+
+        # ── License ────────────────────────────────────────────────────────
+        print(f"  {MUTED}Machine ID:{RESET}  {GOLD}{mid}{RESET}")
         if LIC_FILE.exists():
             key = LIC_FILE.read_text().strip()
             if key == _expected_key(mid):
@@ -811,6 +814,37 @@ def main():
                 warn("Corrupt trial file")
         else:
             info("No trial started yet — run any selahpro command to begin")
+
+        # ── Devices ────────────────────────────────────────────────────────
+        print()
+        akai = subprocess.run(["lsusb", "-d", "09e8:"],
+                              capture_output=True, text=True, check=False)
+        akai_lines = [l.strip() for l in akai.stdout.splitlines() if l.strip()]
+        dev_color = TEAL if akai_lines else MUTED
+        print(f"  {MUTED}Devices:{RESET}     {dev_color}{len(akai_lines)} Akai device(s) connected{RESET}")
+        for line in akai_lines:
+            print(f"    {DIM}{line}{RESET}")
+
+        # ── DAW prefixes ───────────────────────────────────────────────────
+        prefixes = sorted(p for p in Path.home().glob(".wine-selah-*") if p.is_dir())
+        pfx_color = TEAL if prefixes else MUTED
+        print(f"  {MUTED}DAW prefixes:{RESET} {pfx_color}{len(prefixes)} installed{RESET}")
+        for p in prefixes:
+            daw_label = p.name.replace(".wine-selah-", "")
+            print(f"    {DIM}{daw_label:<20} {p}{RESET}")
+
+        # ── Audio stack ────────────────────────────────────────────────────
+        pw = subprocess.run(["pgrep", "-x", "pipewire"],
+                            capture_output=True).returncode == 0
+        mpc = subprocess.run(["pgrep", "-f", "selah-mpc-bridge"],
+                             capture_output=True).returncode == 0
+        print()
+        pw_sym  = f"{TEAL}✓{RESET}" if pw  else f"{RED}✗{RESET}"
+        mpc_sym = f"{TEAL}✓{RESET}" if mpc else f"{MUTED}–{RESET}"
+        print(f"  {pw_sym} PipeWire      {'running' if pw  else 'not running'}")
+        print(f"  {mpc_sym} MPC bridge   {'running' if mpc else 'not started'}")
+        print()
+
         sys.exit(0)
 
     cmd = args.command
