@@ -54,7 +54,7 @@ MPC_PORT_PATTERNS = ["MPC Studio MPC Public", "MPC Studio 2", "MPC Studio2",
 VIRTUAL_PORT_DAW  = "SelahMPC"           # DAW reads pads/knobs from here
 VIRTUAL_PORT_LEDS = "SelahMPC Feedback"  # DAW writes LED commands here
 
-PID_FILE      = Path("/run/selah-mpc-bridge.pid")
+PID_FILE      = Path("/tmp/selah-mpc-bridge.pid")
 DEFAULT_CFG   = Path("/etc/selah-mpc/mpc-studio2.conf")
 LOG_FILE      = Path("/var/log/selah-mpc-bridge.log")
 
