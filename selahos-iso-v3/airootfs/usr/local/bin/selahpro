@@ -408,7 +408,7 @@ def cmd_launch(daw_name: str, exe_override: str | None = None):
 #  DIAGNOSE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def cmd_diagnose():
+def cmd_diagnose(verbose=False):
     """Run a system readiness check for DAW production."""
     hdr("SelahBridgePro System Diagnosis")
 
@@ -419,7 +419,7 @@ def cmd_diagnose():
         sym = f"{TEAL}✓{RESET}" if passed else f"{RED}✗{RESET}"
         msg = ok_msg if passed else fail_msg
         print(f"  {sym} {PARCH}{label:<28}{RESET} {MUTED}{msg}{RESET}")
-        if not passed and fix:
+        if not passed and fix and verbose:
             print(f"    {DIM}fix: {fix}{RESET}")
         checks.append(passed)
         return passed
@@ -505,7 +505,10 @@ def cmd_diagnose():
     print(f"\n  {color}{BOLD}{passed}/{total}{RESET} checks passed\n")
 
     if passed < total:
-        info(f"Run 'selahpro install' to fix most issues")
+        if verbose:
+            info(f"Run 'selahpro install' to fix most issues")
+        else:
+            info(f"Run 'selahpro diagnose --verbose' to see fix commands")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -737,7 +740,9 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--exe", help="Override executable path")
 
     # diagnose
-    sub.add_parser("diagnose", help="Run system readiness checks")
+    diag = sub.add_parser("diagnose", help="Run system readiness checks")
+    diag.add_argument("--verbose", "-v", action="store_true",
+                      help="Show fix commands for failed checks")
 
     # auth
     auth = sub.add_parser("auth", help="Open DAW authorization browser")
@@ -816,7 +821,7 @@ def main():
     elif cmd == "auth":
         cmd_auth(getattr(args, "daw", None), getattr(args, "url", None))
     elif cmd == "diagnose":
-        cmd_diagnose()
+        cmd_diagnose(verbose=getattr(args, "verbose", False))
     elif cmd == "midi":
         if args.midi_cmd == "list":
             cmd_midi_list()
