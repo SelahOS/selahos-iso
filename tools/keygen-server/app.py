@@ -97,7 +97,7 @@ class KeygenHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path not in ("/keygen", "/keygen/"):
+        if self.path not in ("/license", "/license/"):
             self._json(404, {"error": "not found"})
             return
 

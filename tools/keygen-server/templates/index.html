@@ -394,7 +394,7 @@
       generateBtn.innerHTML = '<span class="spinner"></span> Generating…';
 
       try {
-        const resp = await fetch('/keygen', {
+        const resp = await fetch('/license', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ machine_id: machineId }),
