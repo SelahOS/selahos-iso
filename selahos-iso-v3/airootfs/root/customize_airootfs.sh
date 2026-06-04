@@ -181,11 +181,16 @@ fi
 
 echo "customize_airootfs.sh complete — SelahOS v1.0-beta"
 
-# SelahSeedCore services
-systemctl enable selah-wifi-wake.service
-systemctl enable bluetooth-init-delay.service
-systemctl enable mbpfan
-systemctl enable tlp
-systemctl enable thermald
-systemctl enable irqbalance
-systemctl enable bluetooth
+# SelahSeedCore — only enable on Apple hardware
+if dmidecode -s system-manufacturer 2>/dev/null | grep -qi "apple"; then
+    systemctl enable selah-wifi-wake.service
+    systemctl enable bluetooth-init-delay.service
+    systemctl enable mbpfan
+    systemctl enable tlp
+    systemctl enable thermald
+    systemctl enable irqbalance
+    systemctl enable bluetooth
+    echo "SelahSeedCore: Apple hardware detected — services enabled"
+else
+    echo "SelahSeedCore: Non-Apple hardware — skipping Mac-specific services"
+fi
