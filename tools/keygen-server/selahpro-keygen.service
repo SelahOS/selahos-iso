@@ -1,0 +1,13 @@
+[Unit]
+Description=SelahBridgePro License Key Server
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/selahpro-keygen/secret.env
+ExecStart=/usr/bin/python3 /var/www/selahos/keygen/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -83,15 +83,15 @@ fi
 # ── Step 2: Copy executables ──────────────────────────────────────────────────
 hdr "Installing executables"
 
-install -Dm700 "$SRC/usr/local/bin/selahpro"          /usr/local/bin/selahpro
+install -Dm755 "$SRC/usr/local/bin/selahpro"          /usr/local/bin/selahpro
 ok "selahpro"
-install -Dm700 "$SRC/usr/local/bin/selahbridgepro"    /usr/local/bin/selahbridgepro
+install -Dm755 "$SRC/usr/local/bin/selahbridgepro"    /usr/local/bin/selahbridgepro
 ok "selahbridgepro"
-install -Dm700 "$SRC/usr/local/bin/selahwine"         /usr/local/bin/selahwine
+install -Dm755 "$SRC/usr/local/bin/selahwine"         /usr/local/bin/selahwine
 ok "selahwine"
-install -Dm700 "$SRC/usr/local/bin/selah-asio-config" /usr/local/bin/selah-asio-config
+install -Dm755 "$SRC/usr/local/bin/selah-asio-config" /usr/local/bin/selah-asio-config
 ok "selah-asio-config"
-install -Dm700 "$SRC/usr/local/bin/selahauth"         /usr/local/bin/selahauth
+install -Dm755 "$SRC/usr/local/bin/selahauth"         /usr/local/bin/selahauth
 ok "selahauth"
 install -Dm755 "$SRC/usr/local/bin/selah-mpc-bridge" /usr/local/bin/selah-mpc-bridge
 ok "selah-mpc-bridge"
@@ -208,13 +208,17 @@ if [[ ! -f /etc/selahbridgepro/.keydata ]]; then
     # To activate: run tools/selahpro-keygen-deploy.sh on the build machine,
     # then scp the resulting /etc/selahbridgepro/.keydata to this machine.
     touch /etc/selahbridgepro/.keydata
-    chmod 600 /etc/selahbridgepro/.keydata
+    chown root:audio /etc/selahbridgepro/.keydata
+    chmod 640 /etc/selahbridgepro/.keydata
     info ".keydata created (trial mode — 14 days free)"
     info "To activate: scp the .keydata from your build machine after running"
     info "  bash tools/selahpro-keygen-deploy.sh"
 else
     ok ".keydata already present"
 fi
+# Ensure correct permissions regardless of how .keydata was created
+chown root:audio /etc/selahbridgepro/.keydata
+chmod 640 /etc/selahbridgepro/.keydata
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 printf '\n%s%s══════════════════════════════════════════════════════%s\n' \
