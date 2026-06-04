@@ -1,0 +1,145 @@
+
+⏺ Bash(python3 -c "
+      import hashlib…)
+  ⎿  SELAHPRO-1719-4074-6326-576D
+
+⏺ On the SelahOS machine, run these two commands in order:
+
+  1. Install the secret:
+  echo -n "c9f771de82246b5eef4054f2e1375db60754338293a9525e5e61ef3add50542b" | sudo tee /etc/selahbridgepro/.keydata &&
+  sudo chmod 600 /etc/selahbridgepro/.keydata
+
+  2. Activate:
+  selahpro --activate SELAHPRO-1719-4074-6326-576D
+
+  3. Verify:
+  selahpro --status
+
+  Should show "Licensed — SelahBridgePro activated on this machine" alongside your device count. Also log this in the
+  keygen tool for reference:
+
+⏺ Bash(bash /Users/d.b.noble/SelahOS-Dev/selahos-iso/tools/selahpro-keygen-deploy.sh --keygen
+      9322ed2685f74065a739c4afe3be7f0f)
+  ⎿    Machine ID : 9322ed2685f74065a739c4afe3be7f0f
+       License key: SELAHPRO-1719-4074-6326-576D
+     … +2 lines (ctrl+o to expand)
+
+⏺ Keygen tool confirms it. The key is tied to your machine ID — it won't activate on any other machine
+
+
+[dbnoble@SelahOS SelahOS-Dev]$ 1. Install the secret:
+  echo -n "c9f771de82246b5eef4054f2e1375db60754338293a9525e5e61ef3add50542b" | sudo tee /etc/selahbridgepro/.keydata &&
+  sudo chmod 600 /etc/selahbridgepro/.keydata
+bash: 1.: command not found
+[sudo] password for dbnoble:
+c9f771de82246b5eef4054f2e1375db60754338293a9525e5e61ef3add50542b[dbnoble@SelahOS SelahOS-Dev]$
+[dbnoble@SelahOS SelahOS-Dev]$  2. Activate:
+  selahpro --activate SELAHPRO-1719-4074-6326-576D
+bash: 2.: command not found
+
+✗  Invalid license key for this machine.
+Expected format: SELAHPRO-XXXX-XXXX-XXXX-XXXX
+Your Machine ID: 9322ed2685f74065a739c4afe3be7f0f
+[dbnoble@SelahOS SelahOS-Dev]$ selahpro --activate SELAHPRO-1719-4074-6326-576D
+
+✗  Invalid license key for this machine.
+Expected format: SELAHPRO-XXXX-XXXX-XXXX-XXXX
+Your Machine ID: 9322ed2685f74065a739c4afe3be7f0f
+[dbnoble@SelahOS SelahOS-Dev]$ selahpro --status
+  Machine ID:  9322ed2685f74065a739c4afe3be7f0f
+  → Trial: 13 day(s) remaining (started 2026-06-02)
+[dbnoble@SelahOS SelahOS-Dev]$
+
+
+
+Update
+
+
+[dbnoble@SelahOS SelahOS-Dev]$ selahpro --status
+  Machine ID:  9322ed2685f74065a739c4afe3be7f0f
+  → Trial: 13 day(s) remaining (started 2026-06-02)
+[dbnoble@SelahOS SelahOS-Dev]$ sudo chmod 640 /etc/selahbridgepro/.keydata
+  sudo chown root:audio /etc/selahbridgepro/.keydata
+  selahpro --activate SELAHPRO-1719-4074-6326-576D
+[sudo] password for dbnoble:
+Traceback (most recent call last):
+  File "/usr/local/bin/selahpro", line 838, in <module>
+    main()
+    ~~~~^^
+  File "/usr/local/bin/selahpro", line 783, in main
+    cmd_activate(args.activate)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/local/bin/selahpro", line 143, in cmd_activate
+    LIC_FILE.write_text(key)
+    ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 809, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/etc/selahbridgepro/license'
+[dbnoble@SelahOS SelahOS-Dev]$
+
+
+
+update 2
+
+[dbnoble@SelahOS SelahOS-Dev]$ sudo chmod 640 /etc/selahbridgepro/.keydata
+  sudo chown root:audio /etc/selahbridgepro/.keydata
+  selahpro --activate SELAHPRO-1719-4074-6326-576D
+[sudo] password for dbnoble:
+Traceback (most recent call last):
+  File "/usr/local/bin/selahpro", line 838, in <module>
+    main()
+    ~~~~^^
+  File "/usr/local/bin/selahpro", line 783, in main
+    cmd_activate(args.activate)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/local/bin/selahpro", line 143, in cmd_activate
+    LIC_FILE.write_text(key)
+    ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 809, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/etc/selahbridgepro/license'
+[dbnoble@SelahOS SelahOS-Dev]$ sudo chown root:audio /etc/selahbridgepro/.keydata && sudo chmod 640 /etc/selahbridgepro/.keydata
+  selahpro --activate SELAHPRO-1719-4074-6326-576D
+  selahpro --status
+Traceback (most recent call last):
+  File "/usr/local/bin/selahpro", line 838, in <module>
+    main()
+    ~~~~^^
+  File "/usr/local/bin/selahpro", line 783, in main
+    cmd_activate(args.activate)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/usr/local/bin/selahpro", line 143, in cmd_activate
+    LIC_FILE.write_text(key)
+    ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 809, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/etc/selahbridgepro/license'
+  Machine ID:  9322ed2685f74065a739c4afe3be7f0f
+  → Trial: 13 day(s) remaining (started 2026-06-02)
+[dbnoble@SelahOS SelahOS-Dev]$
+
+
+
+Update 3
+
+[dbnoble@SelahOS SelahOS-Dev]$ sudo selahpro --activate SELAHPRO-1719-4074-6326-576D
+  sudo chown root:audio /etc/selahbridgepro/license
+  sudo chmod 640 /etc/selahbridgepro/license
+  selahpro --status
+  ✓ SelahBridgePro activated successfully!
+  ✓ You have lifetime access on this machine.
+  Machine ID:  9322ed2685f74065a739c4afe3be7f0f
+  ✓ Licensed — SelahBridgePro activated on this machine
+[dbnoble@SelahOS SelahOS-Dev]$
