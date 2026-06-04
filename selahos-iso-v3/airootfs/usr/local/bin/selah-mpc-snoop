@@ -1,0 +1,408 @@
+#!/usr/bin/env python3
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selah-mpc-snoop — MPC Studio 2 USB Protocol Analyzer
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  Usage:
+#    selah-mpc-snoop info          — Dump full USB descriptor for the MPC
+#    selah-mpc-snoop capture       — Start usbmon capture (requires sudo)
+#    selah-mpc-snoop probe         — Send test packets to Interface 1, log responses
+#    selah-mpc-snoop replay <file> — Replay a packet log
+#
+#  Dependencies: python3-pyusb (pacman -S python-pyusb)
+#  usbmon capture requires root: sudo selah-mpc-snoop capture
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import sys
+import os
+import argparse
+import struct
+import time
+import subprocess
+import tempfile
+from pathlib import Path
+
+MPC_VID = 0x09E8
+MPC_PID = 0x004A   # MPC Studio 2
+MPC_PID2 = 0x0076  # MPC Studio 2 legacy
+
+SNOOP_DIR = Path("/tmp/selah-mpc-snoop")
+
+
+def find_device():
+    try:
+        import usb.core
+    except ImportError:
+        print("[selah-mpc-snoop] ERROR: python-pyusb not installed")
+        print("  Run: sudo pacman -S python-pyusb")
+        sys.exit(1)
+    dev = usb.core.find(idVendor=MPC_VID, idProduct=MPC_PID)
+    if dev is None:
+        dev = usb.core.find(idVendor=MPC_VID, idProduct=MPC_PID2)
+    if dev is None:
+        print(f"[selah-mpc-snoop] ERROR: MPC Studio 2 not found (VID:{MPC_VID:04x})")
+        print("  Make sure the device is connected and powered on.")
+        sys.exit(1)
+    return dev
+
+
+# ── info: dump full USB descriptor ────────────────────────────────────────────
+def cmd_info(_args):
+    import usb.core
+    dev = find_device()
+    print(f"MPC Studio 2 — VID:{dev.idVendor:04x} PID:{dev.idProduct:04x}")
+    print(f"  Bus: {dev.bus:03d}  Device: {dev.address:03d}")
+    print(f"  Manufacturer: {dev.manufacturer}")
+    print(f"  Product:      {dev.product}")
+    print(f"  Serial:       {dev.serial_number}")
+    print(f"  bcdUSB:       {dev.bcdUSB:#06x}")
+    print(f"  bDeviceClass: {dev.bDeviceClass:#04x}")
+    print()
+
+    cfg = dev.get_active_configuration()
+    print(f"Active configuration: {cfg.bConfigurationValue}")
+    print(f"  bNumInterfaces: {cfg.bNumInterfaces}")
+    print()
+
+    for intf in cfg:
+        print(f"  Interface {intf.bInterfaceNumber}:{intf.bAlternateSetting}")
+        print(f"    bInterfaceClass:    {intf.bInterfaceClass:#04x}  "
+              f"({'Audio' if intf.bInterfaceClass==1 else 'Vendor' if intf.bInterfaceClass==255 else 'Other'})")
+        print(f"    bInterfaceSubClass: {intf.bInterfaceSubClass:#04x}")
+        print(f"    bInterfaceProtocol: {intf.bInterfaceProtocol:#04x}")
+        print(f"    bNumEndpoints:      {intf.bNumEndpoints}")
+        for ep in intf:
+            ep_type = {0: "Control", 1: "Isochronous", 2: "Bulk", 3: "Interrupt"}
+            t = ep.bmAttributes & 0x03
+            direction = "IN" if (ep.bEndpointAddress & 0x80) else "OUT"
+            print(f"    Endpoint {ep.bEndpointAddress:#04x} ({direction})")
+            print(f"      bmAttributes:  {ep.bmAttributes:#04x}  ({ep_type.get(t,'?')})")
+            print(f"      wMaxPacketSize: {ep.wMaxPacketSize}")
+            print(f"      bInterval:      {ep.bInterval}")
+        print()
+
+    # also show kernel driver bindings
+    print("Kernel driver bindings:")
+    for intf in cfg:
+        try:
+            if dev.is_kernel_driver_active(intf.bInterfaceNumber):
+                drv = "kernel driver active"
+            else:
+                drv = "no kernel driver"
+        except Exception as e:
+            drv = f"? ({e})"
+        print(f"  Interface {intf.bInterfaceNumber}: {drv}")
+    return 0
+
+
+# ── capture: use usbmon to capture MPC USB traffic ────────────────────────────
+def cmd_capture(args):
+    if os.geteuid() != 0:
+        print("[selah-mpc-snoop] usbmon capture requires root.")
+        print("  Run: sudo selah-mpc-snoop capture")
+        sys.exit(1)
+
+    import usb.core
+    dev = find_device()
+    bus = dev.bus
+
+    SNOOP_DIR.mkdir(exist_ok=True)
+    cap_file = SNOOP_DIR / f"mpc-capture-{int(time.time())}.pcap"
+
+    # Load usbmon if not loaded
+    subprocess.run(["modprobe", "usbmon"], check=False)
+
+    usbmon_iface = f"usbmon{bus}"
+    print(f"[selah-mpc-snoop] Capturing on {usbmon_iface} (bus {bus})")
+    print(f"[selah-mpc-snoop] MPC Studio 2 is device {dev.address:03d} on bus {bus:03d}")
+    print(f"[selah-mpc-snoop] Output: {cap_file}")
+    print()
+    print("  1. Press ENTER to start capture")
+    print("  2. Launch MPC Software: selahpro launch mpc")
+    print("  3. Wait for pads to light up")
+    print("  4. Press some pads, change patterns, etc.")
+    print("  5. Press Ctrl+C to stop")
+    print()
+    input("Press ENTER to start capture...")
+
+    # Filter by device address
+    bpf_filter = f"usb and host {bus}.{dev.address}.0"
+    try:
+        proc = subprocess.Popen(
+            ["tcpdump", "-i", usbmon_iface, "-w", str(cap_file), bpf_filter],
+            stderr=subprocess.PIPE
+        )
+        print(f"[selah-mpc-snoop] Capturing... (Ctrl+C to stop)")
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+        print(f"\n[selah-mpc-snoop] Capture saved to: {cap_file}")
+        print(f"[selah-mpc-snoop] Analyze with: selah-mpc-snoop analyze {cap_file}")
+    except FileNotFoundError:
+        print("[selah-mpc-snoop] tcpdump not found. Install with: sudo pacman -S tcpdump")
+        # Fallback: use usbmon text interface
+        _capture_usbmon_text(bus, dev.address, cap_file.with_suffix('.txt'))
+    return 0
+
+
+def _capture_usbmon_text(bus, dev_addr, out_file):
+    """Fallback: read from /sys/kernel/debug/usb/usbmon/<bus>u text interface."""
+    mon_path = f"/sys/kernel/debug/usb/usbmon/{bus}u"
+    if not Path(mon_path).exists():
+        # Try mounting debugfs
+        subprocess.run(["mount", "-t", "debugfs", "none", "/sys/kernel/debug"], check=False)
+    if not Path(mon_path).exists():
+        print(f"[selah-mpc-snoop] usbmon text interface not available at {mon_path}")
+        return
+
+    print(f"[selah-mpc-snoop] Using text interface: {mon_path}")
+    print(f"[selah-mpc-snoop] Writing to: {out_file}")
+    print("Launch MPC Software now. Ctrl+C to stop.")
+
+    with open(mon_path, 'r') as mon, open(out_file, 'w') as out:
+        try:
+            for line in mon:
+                # Filter for our device
+                parts = line.split()
+                if len(parts) >= 3:
+                    # usbmon format: <URB tag> <timestamp> <event type> <address> ...
+                    # Address format: bus/device/endpoint
+                    addr_field = parts[3] if len(parts) > 3 else ""
+                    if f"{bus:03d}/{dev_addr:03d}" in addr_field or f"{bus}/{dev_addr}" in addr_field:
+                        out.write(line)
+                        sys.stdout.write(line)
+        except KeyboardInterrupt:
+            pass
+    print(f"\n[selah-mpc-snoop] Saved to {out_file}")
+
+
+# ── probe: send test packets to Interface 1, enumerate what works ─────────────
+def cmd_probe(args):
+    """
+    Claim USB Interface 1 (vendor class) and send test packets.
+    Logs all successful transfers and device responses.
+    """
+    try:
+        import usb.core
+        import usb.util
+    except ImportError:
+        print("[selah-mpc-snoop] ERROR: python-pyusb not installed")
+        sys.exit(1)
+
+    dev = find_device()
+
+    if os.geteuid() != 0:
+        print("[selah-mpc-snoop] probe needs root to claim Interface 1")
+        print("  Run: sudo selah-mpc-snoop probe")
+        sys.exit(1)
+
+    SNOOP_DIR.mkdir(exist_ok=True)
+    log_file = SNOOP_DIR / f"probe-{int(time.time())}.log"
+
+    print(f"[selah-mpc-snoop] Probing Interface 1 on MPC Studio 2")
+    print(f"[selah-mpc-snoop] Log: {log_file}")
+    print()
+
+    cfg = dev.get_active_configuration()
+
+    # Find Interface 1
+    intf1 = None
+    for intf in cfg:
+        if intf.bInterfaceNumber == 1:
+            intf1 = intf
+            break
+
+    if intf1 is None:
+        print("[selah-mpc-snoop] ERROR: Interface 1 not found in device configuration")
+        print("  Interfaces found:", [i.bInterfaceNumber for i in cfg])
+        return 1
+
+    print(f"Interface 1: class={intf1.bInterfaceClass:#04x} sub={intf1.bInterfaceSubClass:#04x} "
+          f"proto={intf1.bInterfaceProtocol:#04x}")
+
+    # Find endpoints
+    out_eps = []
+    in_eps = []
+    for ep in intf1:
+        if (ep.bEndpointAddress & 0x80) == 0:
+            out_eps.append(ep)
+        else:
+            in_eps.append(ep)
+
+    print(f"  OUT endpoints: {[f'{ep.bEndpointAddress:#04x}' for ep in out_eps]}")
+    print(f"  IN  endpoints: {[f'{ep.bEndpointAddress:#04x}' for ep in in_eps]}")
+    print()
+
+    # Detach kernel driver if active
+    for iface_num in [0, 1]:
+        try:
+            if dev.is_kernel_driver_active(iface_num):
+                print(f"  Detaching kernel driver from Interface {iface_num}")
+                dev.detach_kernel_driver(iface_num)
+        except Exception as e:
+            print(f"  Interface {iface_num}: {e}")
+
+    # Claim Interface 1
+    try:
+        usb.util.claim_interface(dev, 1)
+        print("  Claimed Interface 1")
+    except Exception as e:
+        print(f"  ERROR claiming Interface 1: {e}")
+        return 1
+
+    results = []
+
+    def log(msg, data=None):
+        line = f"[{time.monotonic():.3f}] {msg}"
+        if data:
+            line += f"  data={data.hex()}"
+        print(line)
+        results.append(line)
+
+    # ── Test 1: USB control transfer (vendor request type) ──────────────────
+    log("=== Testing USB control transfers (vendor class) ===")
+    vendor_requests = [0x01, 0x02, 0x03, 0x04, 0x0A, 0x0B, 0x0C, 0x10, 0x20, 0x30, 0x40]
+    for req in vendor_requests:
+        try:
+            result = dev.ctrl_transfer(
+                bmRequestType=0xC0,  # Vendor | Device | IN
+                bRequest=req,
+                wValue=0, wIndex=0,
+                data_or_wLength=64,
+                timeout=100
+            )
+            log(f"  ctrl IN req={req:#04x} -> OK ({len(result)} bytes)", bytes(result))
+        except Exception:
+            pass  # Most will fail, that's expected
+
+    # ── Test 2: Try reading from Interface 1 IN endpoint ───────────────────
+    if in_eps:
+        ep_in = in_eps[0]
+        log(f"=== Reading from IN endpoint {ep_in.bEndpointAddress:#04x} ===")
+        for attempt in range(5):
+            try:
+                data = dev.read(ep_in.bEndpointAddress, 64, timeout=500)
+                log(f"  read attempt {attempt}: {len(data)} bytes", bytes(data))
+            except Exception as e:
+                log(f"  read attempt {attempt}: timeout/error ({e})")
+
+    # ── Test 3: Send known Akai MPC LED packet formats to OUT endpoint ──────
+    if out_eps:
+        ep_out = out_eps[0]
+        log(f"=== Probing OUT endpoint {ep_out.bEndpointAddress:#04x} with LED command candidates ===")
+        log("  Watch pads for any color changes!")
+
+        # Format candidates based on common Akai USB protocols:
+        # [command, pad_index, r, g, b, ...]
+        test_packets = [
+            # Format A: simple 5-byte (cmd, pad, r, g, b)
+            *[bytes([0x24, pad, 127, 0, 0]) for pad in range(16)],
+            # Format B: with channel prefix
+            *[bytes([0x00, 0x24, pad, 127, 0, 0]) for pad in range(4)],
+            # Format C: MPC Live/One style (longer)
+            bytes([0x24, 0x00, 0x10, 0x00] + [0x24, p, 127, 0, 0] + [0]*55 for p in range(1)),
+            # Format D: 8-byte header + LED data
+            bytes([0x40, 0x00, 0x05, 0x24, 0x00, 0x04, 0x00, 127, 0, 0]),
+            # Format E: Windows HID-over-USB report (64-byte with report ID)
+            bytes([0x00, 0x24, 0x04] + [0x00, 0x04, 0x7F, 0x00, 0x00] + [0]*55),
+            # Format F: Pure bulk, Akai-style header 0x24 (SetPadColor opcode seen in symbols)
+            bytes([0x24, 0x04, 0x00, 0x04, 0x7F, 0x00, 0x00]),
+            # Format G: All pads at once with header
+            bytes([0x24, 0x00, 0x10, 0x00] + sum([[i, 127, 0, 0] for i in range(16)], [])),
+            # Format H: MPC Software startup handshake patterns
+            bytes([0x28, 0x00, 0x05, 0x00, 0x00, 0x00, 0x01]),
+            bytes([0x10, 0x00, 0x01]),
+            bytes([0x04, 0x00, 0x01]),
+        ]
+
+        for i, pkt in enumerate(test_packets):
+            if not isinstance(pkt, (bytes, bytearray)):
+                continue
+            try:
+                written = dev.write(ep_out.bEndpointAddress, pkt, timeout=200)
+                log(f"  pkt[{i}] sent {written}/{len(pkt)} bytes  {pkt.hex()}")
+                time.sleep(0.1)
+                # Try to read response
+                if in_eps:
+                    try:
+                        resp = dev.read(in_eps[0].bEndpointAddress, 64, timeout=200)
+                        log(f"  pkt[{i}] response", bytes(resp))
+                    except Exception:
+                        pass
+            except Exception as e:
+                log(f"  pkt[{i}] FAIL ({type(e).__name__}): {pkt.hex()}")
+
+    # Save log
+    with open(log_file, 'w') as f:
+        f.write('\n'.join(results))
+    print(f"\n[selah-mpc-snoop] Probe log saved to: {log_file}")
+
+    usb.util.release_interface(dev, 1)
+    return 0
+
+
+# ── analyze: parse a usbmon text capture ──────────────────────────────────────
+def cmd_analyze(args):
+    """Parse usbmon text output and extract OUT transfers to Interface 1."""
+    if not args.file:
+        print("Usage: selah-mpc-snoop analyze <capture_file>")
+        return 1
+
+    path = Path(args.file)
+    if not path.exists():
+        print(f"File not found: {path}")
+        return 1
+
+    print(f"[selah-mpc-snoop] Analyzing: {path}")
+    print()
+
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            # usbmon text format:
+            # <URB> <ts> S Bo:bus/dev/ep <status> <len> = <hex data>
+            # S = submission, C = completion
+            if line.startswith('#'):
+                continue
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+            # Look for OUT bulk/interrupt submissions with data
+            if 'Bo' in parts or 'Bi' in parts or 'Io' in parts or 'Ii' in parts:
+                print(line)
+    return 0
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
+def main():
+    parser = argparse.ArgumentParser(
+        prog="selah-mpc-snoop",
+        description="MPC Studio 2 USB Protocol Analyzer"
+    )
+    sub = parser.add_subparsers(dest="cmd")
+
+    sub.add_parser("info", help="Dump USB descriptor for MPC Studio 2")
+    sub.add_parser("capture", help="Capture USB traffic with usbmon (requires sudo)")
+    sub.add_parser("probe", help="Probe Interface 1 with test LED packets (requires sudo)")
+    p_analyze = sub.add_parser("analyze", help="Analyze a usbmon capture file")
+    p_analyze.add_argument("file", nargs="?")
+
+    args = parser.parse_args()
+
+    if args.cmd == "info":
+        return cmd_info(args)
+    elif args.cmd == "capture":
+        return cmd_capture(args)
+    elif args.cmd == "probe":
+        return cmd_probe(args)
+    elif args.cmd == "analyze":
+        return cmd_analyze(args)
+    else:
+        parser.print_help()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

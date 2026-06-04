@@ -41,10 +41,14 @@ DAW_PORTALS = {
     "pt":               ("https://my.avid.com",                      "Pro Tools / Avid Account"),
     "digitalperformer": ("https://motu.com/en-us/store/account/",    "Digital Performer / MOTU Account"),
     "dp":               ("https://motu.com/en-us/store/account/",    "Digital Performer / MOTU Account"),
+    "mpc":              ("https://account.akai.com",                 "Akai / MPC Software Account"),
+    "mpcstudio":        ("https://account.akai.com",                 "Akai / MPC Software Account"),
+    "mpc2":             ("https://account.akai.com",                 "Akai / MPC Software Account"),
+    "mpc3":             ("https://account.akai.com",                 "Akai / MPC Software Account"),
 }
 
 # Vendor schemes that signal auth completion (auto-close triggers)
-COMPLETION_SCHEMES = {"ablton", "ilok", "image-line", "reaper", "avid", "fl-auth", "motu"}
+COMPLETION_SCHEMES = {"ablton", "ilok", "image-line", "reaper", "avid", "fl-auth", "motu", "akai"}
 
 COOKIE_DIR = Path.home() / ".local" / "share" / "selahbridgepro" / "auth"
 
