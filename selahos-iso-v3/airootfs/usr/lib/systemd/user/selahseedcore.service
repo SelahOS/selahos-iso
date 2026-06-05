@@ -1,0 +1,13 @@
+[Unit]
+Description=SelahSeedCore Hardware Initialization
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/local/bin/selahseedcore-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical-session.target

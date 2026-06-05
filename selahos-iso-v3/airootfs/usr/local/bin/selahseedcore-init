@@ -1,0 +1,21 @@
+#!/bin/bash
+# SelahSeedCore Post-Desktop Hardware Init
+# Runs after KDE Plasma is fully loaded
+
+sleep 10
+
+MANUFACTURER=$(dmidecode -s system-manufacturer 2>/dev/null)
+if echo "$MANUFACTURER" | grep -qi "apple"; then
+    logger "SelahSeedCore: Apple hardware detected"
+    systemctl start selah-wifi-wake.service 2>/dev/null
+    systemctl start bluetooth-init-delay.service 2>/dev/null
+    systemctl start mbpfan 2>/dev/null
+    systemctl start tlp 2>/dev/null
+    systemctl start thermald 2>/dev/null
+    if ! lsmod | grep -q snd_hda_macbookpro; then
+        modprobe snd_hda_macbookpro 2>/dev/null
+    fi
+    logger "SelahSeedCore: Initialization complete"
+else
+    logger "SelahSeedCore: Non-Apple hardware, skipping"
+fi
