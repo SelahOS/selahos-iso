@@ -1,0 +1,1411 @@
+#!/usr/bin/env python3
+# ============================================================
+# Selah Setup — Native SelahOS Installer
+# Screen-by-screen PyQt6 installer for SelahOS
+#
+# Screens: Welcome → Drive → User → Hardware → Install → Done
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+
+import sys
+import os
+import re
+import subprocess
+import time
+import json
+import socket
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QComboBox, QStackedWidget,
+    QFrame, QProgressBar, QSizePolicy, QScrollArea, QButtonGroup,
+    QRadioButton, QListWidget, QListWidgetItem, QAbstractItemView
+)
+from PyQt6.QtCore import (
+    Qt, QTimer, QThread, pyqtSignal, QSize, QPropertyAnimation,
+    QEasingCurve, QRect
+)
+from PyQt6.QtGui import (
+    QFont, QColor, QPalette, QPixmap, QPainter, QLinearGradient,
+    QBrush, QPen, QFontDatabase, QIcon, QRadialGradient
+)
+
+# ── Design Tokens ─────────────────────────────────────────────
+C = {
+    'bg':       '#171C2A',
+    'bg2':      '#1D2333',
+    'bg3':      '#2A3042',
+    'gold':     '#D6A85A',
+    'gold_lt':  '#E6C27A',
+    'gold_dk':  '#BD8B3C',
+    'gold_sub': 'rgba(230,194,122,0.20)',
+    'white':    '#FFFFFF',
+    'text2':    'rgba(255,255,255,0.7)',
+    'muted':    'rgba(255,255,255,0.4)',
+    'cyan':     '#7EC8E3',
+    'red':      '#E07A5F',
+    'green':    '#81B29A',
+    'border':   'rgba(230,194,122,0.15)',
+}
+
+QSS = f"""
+* {{ font-family: 'Inter', 'Noto Sans', sans-serif; }}
+QMainWindow, QWidget {{ background: {C['bg']}; color: {C['white']}; }}
+QLabel {{ background: transparent; color: {C['white']}; }}
+QLineEdit {{
+    background: {C['bg3']}; border: 1px solid {C['border']};
+    border-radius: 10px; color: {C['white']}; padding: 12px 16px;
+    font-size: 14px; selection-background-color: {C['gold']};
+}}
+QLineEdit:focus {{ border-color: {C['gold']}; }}
+QPushButton {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {C['gold_lt']}, stop:0.5 {C['gold']}, stop:1 {C['gold_dk']});
+    color: {C['bg']}; border: none; border-radius: 12px;
+    padding: 14px 32px; font-size: 15px; font-weight: bold;
+}}
+QPushButton:hover {{ background: {C['gold_lt']}; color: {C['bg']}; }}
+QPushButton:disabled {{ background: {C['bg3']}; color: {C['muted']}; }}
+QPushButton#ghost {{
+    background: transparent; color: {C['text2']};
+    border: 1px solid {C['border']};
+}}
+QPushButton#ghost:hover {{ border-color: {C['gold']}; color: {C['gold_lt']}; }}
+QComboBox {{
+    background: {C['bg3']}; border: 1px solid {C['border']};
+    border-radius: 10px; color: {C['white']}; padding: 10px 14px; font-size: 14px;
+}}
+QComboBox:focus {{ border-color: {C['gold']}; }}
+QComboBox::drop-down {{ border: none; padding-right: 12px; }}
+QComboBox QAbstractItemView {{
+    background: {C['bg2']}; color: {C['white']};
+    border: 1px solid {C['border']}; selection-background-color: {C['bg3']};
+}}
+QProgressBar {{
+    background: {C['bg3']}; border: none; border-radius: 4px; height: 8px;
+}}
+QProgressBar::chunk {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {C['gold_lt']}, stop:1 {C['gold_dk']});
+    border-radius: 4px;
+}}
+QRadioButton {{ color: {C['white']}; font-size: 14px; spacing: 10px; }}
+QRadioButton::indicator {{
+    width: 20px; height: 20px;
+    background: {C['bg3']}; border: 2px solid {C['border']}; border-radius: 10px;
+}}
+QRadioButton::indicator:checked {{
+    background: {C['gold']}; border-color: {C['gold_lt']};
+}}
+QScrollBar:vertical {{
+    background: {C['bg2']}; width: 6px; border-radius: 3px;
+}}
+QScrollBar::handle:vertical {{
+    background: {C['bg3']}; border-radius: 3px; min-height: 20px;
+}}
+"""
+
+APPLE_MODELS = {
+    'MacBookPro14,1': 'MacBook Pro (13-inch, 2017)',
+    'MacBookPro14,2': 'MacBook Pro (13-inch, 2017, Touch Bar)',
+    'MacBookPro14,3': 'MacBook Pro (15-inch, 2017)',
+    'MacBookPro15,1': 'MacBook Pro (15-inch, 2018)',
+    'MacBookPro15,2': 'MacBook Pro (13-inch, 2018, Touch Bar)',
+    'MacBookPro16,1': 'MacBook Pro (16-inch, 2019)',
+    'MacBookPro11,1': 'MacBook Pro (13-inch, Late 2013)',
+    'MacBookPro11,4': 'MacBook Pro (15-inch, Mid 2015)',
+    'MacBookPro9,2':  'MacBook Pro (13-inch, Mid 2012)',
+    'MacBookAir7,2':  'MacBook Air (13-inch, 2015)',
+    'MacBookAir8,1':  'MacBook Air (13-inch, 2018)',
+    'iMac16,2':       'iMac (21.5-inch, Late 2015)',
+    'iMac17,1':       'iMac (27-inch, Late 2015)',
+    'iMac18,3':       'iMac (27-inch, 2017)',
+    'MacPro5,1':      'Mac Pro (Mid 2010)',
+}
+
+INSTALL_STEPS = [
+    (5,  'Partitioning drive'),
+    (10, 'Formatting filesystems'),
+    (15, 'Mounting partitions'),
+    (25, 'Installing base system'),
+    (42, 'Installing KDE Plasma'),
+    (54, 'Installing audio stack'),
+    (62, 'Installing Wine/SelahBridge dependencies'),
+    (66, 'Generating fstab'),
+    (72, 'Configuring system'),
+    (80, 'Applying SelahSeedCore'),
+    (85, 'Installing SelahBridgePro'),
+    (89, 'Installing bootloader'),
+    (93, 'Applying desktop theme'),
+    (96, 'Running final cleanup'),
+    (100,'Installation complete'),
+]
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def detect_live_usb():
+    """Return the device backing the live ISO (to prevent installing to it)."""
+    try:
+        r = run(['findmnt', '-n', '-o', 'SOURCE', '/run/archiso/airootfs'])
+        src = r.stdout.strip()
+        if src:
+            # strip partition number to get disk
+            return re.sub(r'p?\d+$', '', src)
+    except Exception:
+        pass
+    try:
+        r = run(['lsblk', '-rno', 'NAME,MOUNTPOINT'])
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and 'archiso' in parts[1]:
+                name = '/dev/' + re.sub(r'p?\d+$', '', parts[0])
+                return name
+    except Exception:
+        pass
+    return None
+
+
+def get_disks():
+    """Return list of dicts for all block devices suitable for installation."""
+    live = detect_live_usb()
+    result = run(['lsblk', '-dpno', 'NAME,SIZE,MODEL,TYPE,TRAN'])
+    disks = []
+    for line in result.stdout.strip().splitlines():
+        parts = line.split(None, 4)
+        if len(parts) < 2:
+            continue
+        name, size = parts[0], parts[1]
+        model = parts[2] if len(parts) > 2 else ''
+        tran  = parts[4].strip() if len(parts) > 4 else ''
+        if name.startswith('/dev/loop') or name.startswith('/dev/sr'):
+            continue
+        # Skip small devices (< 8 GiB)
+        if 'M' in size and not size.endswith('G'):
+            continue
+        is_live = (live and name == live)
+        is_small = False
+        try:
+            num = float(re.sub(r'[^0-9.]', '', size))
+            unit = re.sub(r'[0-9.]', '', size)
+            if unit in ('G', 'GB') and num < 20:
+                is_small = True
+            if unit in ('M', 'MB'):
+                is_small = True
+        except Exception:
+            pass
+        disk_type = 'NVMe SSD' if 'nvme' in name else ('USB Drive' if tran == 'usb' else 'SSD/HDD')
+        disks.append({
+            'name': name, 'size': size, 'model': model.strip(),
+            'type': disk_type, 'is_live': is_live, 'is_small': is_small,
+        })
+    return disks
+
+
+def get_timezones():
+    try:
+        r = run(['timedatectl', 'list-timezones'])
+        return r.stdout.strip().splitlines()
+    except Exception:
+        return ['UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London']
+
+
+def detect_timezone():
+    try:
+        r = run(['timedatectl', 'show', '--property=Timezone', '--value'])
+        tz = r.stdout.strip()
+        if tz:
+            return tz
+    except Exception:
+        pass
+    return 'America/New_York'
+
+
+def detect_hardware():
+    info = {'manufacturer': '', 'product': '', 'cpu': '', 'gpu': '', 'ram': ''}
+    try:
+        info['manufacturer'] = run(['dmidecode', '-s', 'system-manufacturer']).stdout.strip()
+        info['product']      = run(['dmidecode', '-s', 'system-product-name']).stdout.strip()
+    except Exception:
+        pass
+    try:
+        for line in run(['lscpu']).stdout.splitlines():
+            if 'Model name' in line:
+                info['cpu'] = line.split(':', 1)[1].strip()
+                break
+    except Exception:
+        pass
+    try:
+        for line in run(['lspci']).stdout.splitlines():
+            if 'VGA' in line or 'Display' in line or '3D' in line:
+                info['gpu'] = line.split(':', 2)[-1].strip()
+                break
+    except Exception:
+        pass
+    try:
+        for line in run(['free', '-h']).stdout.splitlines():
+            if line.startswith('Mem'):
+                info['ram'] = line.split()[1]
+                break
+    except Exception:
+        pass
+    return info
+
+
+def glass_frame(parent=None, radius=18):
+    f = QFrame(parent)
+    f.setStyleSheet(
+        f"QFrame {{ background: rgba(42,48,66,0.85); "
+        f"border: 1px solid rgba(230,194,122,0.15); "
+        f"border-radius: {radius}px; }}"
+    )
+    return f
+
+
+def gold_label(text, size=14, weight=QFont.Weight.Normal):
+    lbl = QLabel(text)
+    lbl.setFont(QFont('Inter', size, weight))
+    lbl.setStyleSheet(f"color: {C['gold_lt']}; background: transparent;")
+    return lbl
+
+
+def muted_label(text, size=13):
+    lbl = QLabel(text)
+    lbl.setFont(QFont('Inter', size))
+    lbl.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+    return lbl
+
+
+def separator():
+    line = QFrame()
+    line.setFixedHeight(1)
+    line.setStyleSheet(f"background: rgba(230,194,122,0.12); border: none;")
+    return line
+
+
+# ── Screen 1: Welcome ─────────────────────────────────────────
+class WelcomeScreen(QWidget):
+    proceed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(80, 60, 80, 60)
+        layout.setSpacing(0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        # Logo / brand mark
+        logo = QLabel()
+        logo.setText('◈')
+        logo.setFont(QFont('Inter', 80, QFont.Weight.Thin))
+        logo.setStyleSheet(f"color: {C['gold']}; background: transparent;")
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(logo)
+
+        layout.addSpacing(8)
+
+        name = QLabel('SelahOS™ v1.0-beta')
+        name.setFont(QFont('Inter', 28, QFont.Weight.Light))
+        name.setStyleSheet(f"color: {C['white']}; background: transparent; letter-spacing: 2px;")
+        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(name)
+
+        tagline = QLabel('Pause. Reflect. Create.')
+        tagline.setFont(QFont('Inter', 16))
+        tagline.setStyleSheet(f"color: {C['gold']}; background: transparent; font-style: italic;")
+        tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(tagline)
+
+        layout.addSpacing(40)
+        layout.addWidget(separator())
+        layout.addSpacing(32)
+
+        desc = QLabel(
+            'Technology should work for people,\nnot the other way around.'
+        )
+        desc.setFont(QFont('Inter', 16))
+        desc.setStyleSheet(f"color: {C['text2']}; background: transparent; line-height: 1.6;")
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(desc)
+
+        layout.addSpacing(48)
+
+        btn = QPushButton('Begin Installation')
+        btn.setFixedSize(260, 56)
+        btn.setFont(QFont('Inter', 16, QFont.Weight.Bold))
+        btn.clicked.connect(self.proceed)
+        layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addStretch()
+
+        verse = muted_label(
+            '"Exodus 31:3 — filled with the Spirit of God, with wisdom,\n'
+            'understanding, knowledge and all kinds of skills"',
+            11
+        )
+        verse.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        verse.setStyleSheet(
+            f"color: rgba(255,255,255,0.25); background: transparent; font-style: italic;"
+        )
+        layout.addWidget(verse)
+
+
+# ── Screen 2: Drive Selection ─────────────────────────────────
+class DriveScreen(QWidget):
+    proceed = pyqtSignal(dict)
+    back    = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.disks = []
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(72, 48, 72, 48)
+        layout.setSpacing(20)
+
+        layout.addWidget(gold_label('Select Installation Drive', 24, QFont.Weight.Light))
+        layout.addWidget(muted_label('SelahOS will be installed on the selected drive. All data will be erased.'))
+        layout.addSpacing(8)
+
+        # Disk list
+        self.disk_list = QListWidget()
+        self.disk_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.disk_list.setStyleSheet(
+            f"QListWidget {{ background: {C['bg2']}; border: 1px solid {C['border']}; "
+            f"border-radius: 14px; color: {C['white']}; font-size: 14px; padding: 6px; }}"
+            f"QListWidget::item {{ padding: 14px 16px; border-radius: 10px; }}"
+            f"QListWidget::item:selected {{ background: {C['bg3']}; border: 1px solid {C['gold']}; }}"
+        )
+        self.disk_list.setMinimumHeight(160)
+        layout.addWidget(self.disk_list)
+
+        self.disk_warn = QLabel('')
+        self.disk_warn.setStyleSheet(f"color: {C['red']}; background: transparent; font-size: 13px;")
+        layout.addWidget(self.disk_warn)
+
+        layout.addWidget(separator())
+
+        # Partition mode
+        layout.addWidget(gold_label('Partition Mode', 15, QFont.Weight.Medium))
+
+        self.mode_group = QButtonGroup(self)
+        modes = [
+            ('clean',  'Clean Install (recommended)', 'Erase entire disk and install SelahOS'),
+            ('dual',   'Dual Boot', 'Install alongside existing OS'),
+            ('manual', 'Manual Partitioning', 'Advanced: create your own layout'),
+        ]
+        self.mode_btns = {}
+        for key, label, desc in modes:
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rb = QRadioButton(label)
+            rb.setFont(QFont('Inter', 14, QFont.Weight.Medium))
+            if key == 'clean':
+                rb.setChecked(True)
+            self.mode_group.addButton(rb)
+            self.mode_btns[key] = rb
+            d = muted_label(desc, 12)
+            rl.addWidget(rb)
+            rl.addSpacing(8)
+            rl.addWidget(d)
+            rl.addStretch()
+            layout.addWidget(row)
+
+        layout.addStretch()
+
+        warn_frame = glass_frame()
+        warn_frame.setStyleSheet(
+            f"QFrame {{ background: rgba(224,122,95,0.12); border: 1px solid rgba(224,122,95,0.3); "
+            f"border-radius: 12px; }}"
+        )
+        wl = QVBoxLayout(warn_frame)
+        wl.setContentsMargins(16, 12, 16, 12)
+        wl.addWidget(QLabel('⚠  This will permanently erase all data on the selected drive.'))
+        layout.addWidget(warn_frame)
+
+        layout.addSpacing(16)
+
+        btn_row = QHBoxLayout()
+        back_btn = QPushButton('Back')
+        back_btn.setObjectName('ghost')
+        back_btn.setFixedSize(120, 48)
+        back_btn.clicked.connect(self.back)
+
+        self.next_btn = QPushButton('Continue')
+        self.next_btn.setFixedSize(160, 48)
+        self.next_btn.clicked.connect(self._proceed)
+
+        btn_row.addWidget(back_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self.next_btn)
+        layout.addLayout(btn_row)
+
+        self.disk_list.itemSelectionChanged.connect(self._on_select)
+
+    def refresh(self):
+        self.disk_list.clear()
+        self.disks = get_disks()
+        for d in self.disks:
+            icon = '💿' if not d['is_live'] else '🔌'
+            warn = '  ⚠ Live USB — cannot install here' if d['is_live'] else ''
+            small_warn = '  ⚠ Drive too small (<20 GB)' if d['is_small'] else ''
+            text = f"{icon}  {d['name']}  —  {d['size']}  {d['type']}"
+            if d['model']:
+                text += f"\n    {d['model']}{warn}{small_warn}"
+            item = QListWidgetItem(text)
+            item.setFont(QFont('Inter', 13))
+            if d['is_live'] or d['is_small']:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                item.setForeground(QColor(C['muted']))
+            self.disk_list.addItem(item)
+        if self.disk_list.count():
+            self.disk_list.setCurrentRow(0)
+
+    def _on_select(self):
+        items = self.disk_list.selectedItems()
+        if items:
+            idx = self.disk_list.row(items[0])
+            if idx < len(self.disks):
+                d = self.disks[idx]
+                if d['is_live']:
+                    self.disk_warn.setText('Cannot install to the live USB drive.')
+                elif d['is_small']:
+                    self.disk_warn.setText('Drive is too small. Minimum 20 GB required.')
+                else:
+                    self.disk_warn.setText('')
+
+    def _get_mode(self):
+        for key, btn in self.mode_btns.items():
+            if btn.isChecked():
+                return key
+        return 'clean'
+
+    def _proceed(self):
+        items = self.disk_list.selectedItems()
+        if not items:
+            self.disk_warn.setText('Please select a drive.')
+            return
+        idx = self.disk_list.row(items[0])
+        if idx >= len(self.disks):
+            return
+        d = self.disks[idx]
+        if d['is_live']:
+            self.disk_warn.setText('Cannot install to the live USB drive.')
+            return
+        if d['is_small']:
+            self.disk_warn.setText('Drive is too small. Minimum 20 GB required.')
+            return
+        self.proceed.emit({'disk': d['name'], 'mode': self._get_mode()})
+
+
+# ── Screen 3: User Setup ──────────────────────────────────────
+class UserScreen(QWidget):
+    proceed = pyqtSignal(dict)
+    back    = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self._timezones = []
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(72, 48, 72, 48)
+        layout.setSpacing(16)
+
+        layout.addWidget(gold_label('Create Your Account', 24, QFont.Weight.Light))
+        layout.addWidget(muted_label('Set up your profile and system settings.'))
+        layout.addSpacing(12)
+
+        def field_row(label, placeholder='', echo=False, readonly=False):
+            lbl = muted_label(label, 12)
+            inp = QLineEdit()
+            inp.setFixedHeight(48)
+            inp.setPlaceholderText(placeholder)
+            if echo:
+                inp.setEchoMode(QLineEdit.EchoMode.Password)
+            if readonly:
+                inp.setReadOnly(True)
+                inp.setStyleSheet(
+                    f"QLineEdit {{ background: {C['bg2']}; border: 1px solid {C['border']}; "
+                    f"border-radius: 10px; color: {C['text2']}; padding: 12px 16px; }}"
+                )
+            return lbl, inp
+
+        lbl_fn, self.full_name = field_row('Full Name', 'e.g. Dane Noble')
+        layout.addWidget(lbl_fn)
+        layout.addWidget(self.full_name)
+        self.full_name.textChanged.connect(self._autofill_username)
+
+        lbl_un, self.username = field_row('Username (auto-generated)', readonly=False)
+        layout.addWidget(lbl_un)
+        layout.addWidget(self.username)
+
+        lbl_pw, self.password = field_row('Password', 'Choose a strong password', echo=True)
+        layout.addWidget(lbl_pw)
+        layout.addWidget(self.password)
+
+        # Password strength bar
+        self.pw_strength = QProgressBar()
+        self.pw_strength.setFixedHeight(4)
+        self.pw_strength.setRange(0, 4)
+        self.pw_strength.setValue(0)
+        self.pw_strength.setTextVisible(False)
+        layout.addWidget(self.pw_strength)
+        self.pw_strength_label = muted_label('', 11)
+        layout.addWidget(self.pw_strength_label)
+        self.password.textChanged.connect(self._update_pw_strength)
+
+        lbl_cp, self.confirm = field_row('Confirm Password', 'Repeat your password', echo=True)
+        layout.addWidget(lbl_cp)
+        layout.addWidget(self.confirm)
+
+        row = QHBoxLayout()
+        row.setSpacing(16)
+
+        col1 = QVBoxLayout()
+        col1.addWidget(muted_label('Hostname', 12))
+        self.hostname = QLineEdit()
+        self.hostname.setFixedHeight(48)
+        self.hostname.setText('SelahOS')
+        col1.addWidget(self.hostname)
+
+        col2 = QVBoxLayout()
+        col2.addWidget(muted_label('Timezone', 12))
+        self.timezone = QComboBox()
+        self.timezone.setFixedHeight(48)
+        self.timezone.setEditable(True)
+        col2.addWidget(self.timezone)
+
+        row.addLayout(col1)
+        row.addLayout(col2)
+        layout.addLayout(row)
+
+        self.error_label = QLabel('')
+        self.error_label.setStyleSheet(f"color: {C['red']}; background: transparent; font-size: 13px;")
+        self.error_label.setWordWrap(True)
+        layout.addWidget(self.error_label)
+
+        layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        back_btn = QPushButton('Back')
+        back_btn.setObjectName('ghost')
+        back_btn.setFixedSize(120, 48)
+        back_btn.clicked.connect(self.back)
+
+        next_btn = QPushButton('Continue')
+        next_btn.setFixedSize(160, 48)
+        next_btn.clicked.connect(self._proceed)
+
+        btn_row.addWidget(back_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(next_btn)
+        layout.addLayout(btn_row)
+
+    def refresh(self):
+        if not self._timezones:
+            self._timezones = get_timezones()
+            self.timezone.addItems(self._timezones)
+        tz = detect_timezone()
+        idx = self.timezone.findText(tz)
+        if idx >= 0:
+            self.timezone.setCurrentIndex(idx)
+
+    def _autofill_username(self, text):
+        slug = re.sub(r'[^a-z0-9]', '', text.lower().split()[0] if text.split() else text.lower())
+        self.username.setText(slug[:32])
+
+    def _update_pw_strength(self, pw):
+        score = 0
+        if len(pw) >= 8:   score += 1
+        if len(pw) >= 12:  score += 1
+        if re.search(r'[A-Z]', pw): score += 1
+        if re.search(r'[0-9!@#$%^&*]', pw): score += 1
+        labels = ['', 'Weak', 'Fair', 'Good', 'Strong']
+        colors = [C['bg3'], C['red'], '#D6A85A', '#E6C27A', C['green']]
+        self.pw_strength.setValue(score)
+        self.pw_strength.setStyleSheet(
+            f"QProgressBar {{ background: {C['bg3']}; border: none; border-radius: 2px; }}"
+            f"QProgressBar::chunk {{ background: {colors[score]}; border-radius: 2px; }}"
+        )
+        self.pw_strength_label.setText(labels[score] if pw else '')
+
+    def _proceed(self):
+        fn   = self.full_name.text().strip()
+        user = self.username.text().strip().lower()
+        pw   = self.password.text()
+        pw2  = self.confirm.text()
+        host = self.hostname.text().strip()
+        tz   = self.timezone.currentText().strip()
+
+        user = re.sub(r'[^a-z0-9_-]', '', user)
+        if not fn:
+            self.error_label.setText('Full name is required.')
+            return
+        if not user or len(user) < 2:
+            self.error_label.setText('Username must be at least 2 characters (letters/numbers).')
+            return
+        if not pw or len(pw) < 6:
+            self.error_label.setText('Password must be at least 6 characters.')
+            return
+        if pw != pw2:
+            self.error_label.setText('Passwords do not match.')
+            return
+        if not host:
+            self.error_label.setText('Hostname is required.')
+            return
+
+        self.error_label.setText('')
+        self.proceed.emit({
+            'full_name': fn, 'username': user,
+            'password': pw, 'hostname': host, 'timezone': tz,
+        })
+
+
+# ── Screen 4: Hardware Detection ──────────────────────────────
+class HardwareScreen(QWidget):
+    proceed = pyqtSignal(dict)
+    back    = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.hw = {}
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(72, 48, 72, 48)
+        layout.setSpacing(20)
+
+        layout.addWidget(gold_label('Hardware Detection', 24, QFont.Weight.Light))
+        layout.addWidget(muted_label('SelahSeedCore will configure your hardware automatically.'))
+        layout.addSpacing(12)
+
+        # Machine card
+        self.hw_frame = glass_frame()
+        hw_layout = QVBoxLayout(self.hw_frame)
+        hw_layout.setContentsMargins(24, 20, 24, 20)
+        hw_layout.setSpacing(8)
+
+        self.machine_name = gold_label('Detecting hardware...', 18, QFont.Weight.Medium)
+        self.machine_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hw_layout.addWidget(self.machine_name)
+
+        self.machine_id = muted_label('', 12)
+        self.machine_id.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hw_layout.addWidget(self.machine_id)
+
+        hw_layout.addWidget(separator())
+
+        grid = QHBoxLayout()
+        self.cpu_lbl  = self._hw_row('CPU',    '—')
+        self.gpu_lbl  = self._hw_row('GPU',    '—')
+        self.ram_lbl  = self._hw_row('Memory', '—')
+        for pair in [(self.cpu_lbl, 'CPU'), (self.gpu_lbl, 'GPU'), (self.ram_lbl, 'RAM')]:
+            pass
+        col = QVBoxLayout()
+        col.addLayout(self.cpu_lbl)
+        col.addLayout(self.gpu_lbl)
+        col.addLayout(self.ram_lbl)
+        hw_layout.addLayout(col)
+
+        layout.addWidget(self.hw_frame)
+
+        # SelahSeedCore config list
+        layout.addWidget(gold_label('SelahSeedCore will configure:', 14, QFont.Weight.Medium))
+
+        self.config_scroll = QScrollArea()
+        self.config_scroll.setWidgetResizable(True)
+        self.config_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.config_scroll.setStyleSheet("background: transparent;")
+        self.config_scroll.setMinimumHeight(120)
+
+        self.config_widget = QWidget()
+        self.config_layout = QVBoxLayout(self.config_widget)
+        self.config_layout.setSpacing(6)
+        self.config_layout.setContentsMargins(0, 0, 0, 0)
+        self.config_scroll.setWidget(self.config_widget)
+        layout.addWidget(self.config_scroll)
+
+        layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        back_btn = QPushButton('Back')
+        back_btn.setObjectName('ghost')
+        back_btn.setFixedSize(120, 48)
+        back_btn.clicked.connect(self.back)
+
+        self.next_btn = QPushButton('Begin Installation')
+        self.next_btn.setFixedSize(200, 48)
+        self.next_btn.clicked.connect(lambda: self.proceed.emit(self.hw))
+
+        btn_row.addWidget(back_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(self.next_btn)
+        layout.addLayout(btn_row)
+
+    def _hw_row(self, label, value):
+        row = QHBoxLayout()
+        lbl = muted_label(f"{label}:", 12)
+        lbl.setFixedWidth(70)
+        val = QLabel(value)
+        val.setStyleSheet(f"color: {C['white']}; background: transparent; font-size: 13px;")
+        val.setWordWrap(True)
+        row.addWidget(lbl)
+        row.addWidget(val)
+        row.setattr = val  # store ref
+        setattr(row, '_val', val)
+        return row
+
+    def _add_config_item(self, text, checked=True):
+        row = QHBoxLayout()
+        icon = QLabel('✓' if checked else '○')
+        icon.setStyleSheet(
+            f"color: {C['green'] if checked else C['muted']}; "
+            f"background: transparent; font-size: 14px; font-weight: bold;"
+        )
+        icon.setFixedWidth(24)
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            f"color: {C['text2'] if checked else C['muted']}; "
+            f"background: transparent; font-size: 13px;"
+        )
+        row.addWidget(icon)
+        row.addWidget(lbl)
+        row.addStretch()
+        self.config_layout.addLayout(row)
+
+    def refresh(self):
+        self.hw = detect_hardware()
+        mfr  = self.hw.get('manufacturer', '')
+        prod = self.hw.get('product', '')
+
+        is_apple = 'apple' in mfr.lower()
+        friendly = APPLE_MODELS.get(prod, None) if is_apple else None
+
+        if friendly:
+            self.machine_name.setText(friendly)
+            self.machine_id.setText(f"Model: {prod}")
+        elif mfr:
+            self.machine_name.setText(f"{mfr} {prod}".strip())
+            self.machine_id.setText('')
+        else:
+            self.machine_name.setText('Generic PC')
+            self.machine_id.setText('Standard configuration')
+
+        self.cpu_lbl._val.setText(self.hw.get('cpu', '—')[:60])
+        self.gpu_lbl._val.setText(self.hw.get('gpu', '—')[:60])
+        self.ram_lbl._val.setText(self.hw.get('ram', '—'))
+
+        # Clear and repopulate config list
+        while self.config_layout.count():
+            item = self.config_layout.takeAt(0)
+            if item.layout():
+                while item.layout().count():
+                    item.layout().takeAt(0)
+
+        if is_apple:
+            self._add_config_item('BCM4350 WiFi — PCIe rescan driver')
+            self._add_config_item('CS8409 Audio — HDA patch applied')
+            self._add_config_item('Thunderbolt 3 — Alpine Ridge enabled')
+            self._add_config_item('FaceTime HD Camera — firmware loaded')
+            self._add_config_item('Fan Control — smart thermal curves')
+            self._add_config_item('Battery Management — power optimization')
+            self._add_config_item('T2 / SSD — NVMe power management')
+        else:
+            self._add_config_item('CPU microcode — intel-ucode / amd-ucode')
+            self._add_config_item('GPU drivers — Mesa / Intel / AMDGPU / NVIDIA')
+            self._add_config_item('WiFi / Ethernet — NetworkManager')
+            self._add_config_item('Audio — PipeWire + WirePlumber')
+            self._add_config_item('Power Management — TLP / thermald')
+
+        self.config_layout.addStretch()
+        self.hw['is_apple'] = is_apple
+
+
+# ── Screen 5: Installation Progress ──────────────────────────
+class InstallScreen(QWidget):
+    done = pyqtSignal(bool, str)
+
+    def __init__(self):
+        super().__init__()
+        self.config = {}
+        self._step_labels = []
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(72, 48, 72, 48)
+        layout.setSpacing(20)
+
+        layout.addWidget(gold_label('Installing SelahOS', 24, QFont.Weight.Light))
+
+        self.current_step = QLabel('Preparing...')
+        self.current_step.setFont(QFont('Inter', 14))
+        self.current_step.setStyleSheet(f"color: {C['gold']}; background: transparent;")
+        layout.addWidget(self.current_step)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setFixedHeight(10)
+        layout.addWidget(self.progress)
+
+        self.pct_label = muted_label('0%')
+        layout.addWidget(self.pct_label)
+
+        layout.addWidget(separator())
+
+        # Scrolling checklist
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background: {C['bg2']}; border: 1px solid {C['border']}; "
+            f"border-radius: 14px; }}"
+        )
+        scroll.setMinimumHeight(220)
+
+        self.checklist_widget = QWidget()
+        self.checklist_widget.setStyleSheet(f"background: transparent;")
+        self.checklist_layout = QVBoxLayout(self.checklist_widget)
+        self.checklist_layout.setContentsMargins(20, 16, 20, 16)
+        self.checklist_layout.setSpacing(8)
+
+        for _, label in INSTALL_STEPS:
+            row = QHBoxLayout()
+            icon = QLabel('○')
+            icon.setStyleSheet(f"color: {C['muted']}; background: transparent; font-size: 13px;")
+            icon.setFixedWidth(24)
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"color: {C['muted']}; background: transparent; font-size: 13px;")
+            row.addWidget(icon)
+            row.addWidget(lbl)
+            row.addStretch()
+            self.checklist_layout.addLayout(row)
+            self._step_labels.append((icon, lbl))
+
+        self.checklist_layout.addStretch()
+        scroll.setWidget(self.checklist_widget)
+        layout.addWidget(scroll)
+
+        layout.addStretch()
+
+        notice = muted_label('Do not remove the USB drive or power off during installation.', 12)
+        notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(notice)
+
+    def start(self, config):
+        self.config = config
+        self.thread = InstallThread(config)
+        self.thread.step_update.connect(self._on_step)
+        self.thread.pct_update.connect(self._on_pct)
+        self.thread.done_signal.connect(self.done)
+        self.thread.start()
+
+    def _on_step(self, step_idx, msg):
+        self.current_step.setText(msg)
+        for i, (icon, lbl) in enumerate(self._step_labels):
+            if i < step_idx:
+                icon.setText('✓')
+                icon.setStyleSheet(f"color: {C['green']}; background: transparent; font-size: 13px; font-weight: bold;")
+                lbl.setStyleSheet(f"color: {C['text2']}; background: transparent; font-size: 13px;")
+            elif i == step_idx:
+                icon.setText('→')
+                icon.setStyleSheet(f"color: {C['gold']}; background: transparent; font-size: 13px; font-weight: bold;")
+                lbl.setStyleSheet(f"color: {C['gold_lt']}; background: transparent; font-size: 13px; font-weight: bold;")
+            else:
+                icon.setText('○')
+                icon.setStyleSheet(f"color: {C['muted']}; background: transparent; font-size: 13px;")
+                lbl.setStyleSheet(f"color: {C['muted']}; background: transparent; font-size: 13px;")
+
+    def _on_pct(self, pct):
+        self.progress.setValue(pct)
+        self.pct_label.setText(f"{pct}%")
+
+
+# ── Installation Thread ───────────────────────────────────────
+class InstallThread(QThread):
+    step_update  = pyqtSignal(int, str)
+    pct_update   = pyqtSignal(int)
+    done_signal  = pyqtSignal(bool, str)
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+    def _step(self, idx):
+        pct, label = INSTALL_STEPS[idx]
+        self.step_update.emit(idx, label)
+        self.pct_update.emit(pct)
+
+    def run(self):
+        try:
+            self._install()
+        except Exception as e:
+            import traceback
+            self.done_signal.emit(False, traceback.format_exc())
+
+    def _install(self):
+        cfg      = self.config
+        disk     = cfg['disk']
+        username = cfg['username']
+        password = cfg['password']
+        hostname = cfg['hostname']
+        timezone = cfg.get('timezone', 'UTC')
+        is_apple = cfg.get('is_apple', False)
+
+        log = open('/tmp/selah-setup.log', 'w')
+
+        def sh(cmd, **kw):
+            log.write(f"$ {' '.join(cmd) if isinstance(cmd, list) else cmd}\n")
+            log.flush()
+            r = subprocess.run(cmd, stdout=log, stderr=log, **kw)
+            if r.returncode != 0 and not kw.get('check', False):
+                pass
+            return r
+
+        def chroot(cmd):
+            return sh(['arch-chroot', '/mnt'] + (cmd if isinstance(cmd, list) else ['bash', '-c', cmd]))
+
+        # Check network
+        self.step_update.emit(0, 'Checking network connectivity...')
+        if subprocess.run(['ping', '-c1', '-W3', '1.1.1.1'], capture_output=True).returncode != 0:
+            self.done_signal.emit(False,
+                'No internet connection detected.\n\n'
+                'Connect to WiFi first:\n'
+                '  1. Open Konsole\n'
+                '  2. Run: nmtui\n'
+                '  3. Choose your WiFi network\n'
+                '  4. Then relaunch Selah Setup'
+            )
+            return
+
+        # Step 0: Partition
+        self._step(0)
+        sh(['sgdisk', '--zap-all', disk])
+        sh(['sgdisk', '--new=1:0:+512M', '--typecode=1:ef00', '--change-name=1:EFI', disk])
+        sh(['sgdisk', '--new=2:0:0',    '--typecode=2:8300', '--change-name=2:ROOT', disk])
+        sh(['partprobe', disk])
+        time.sleep(2)
+
+        # Determine partition paths
+        if 'nvme' in disk:
+            efi, root = disk + 'p1', disk + 'p2'
+        else:
+            efi, root = disk + '1', disk + '2'
+
+        # Step 1: Format
+        self._step(1)
+        sh(['mkfs.fat', '-F32', efi])
+        sh(['mkfs.ext4', '-F', root])
+
+        # Step 2: Mount
+        self._step(2)
+        sh(['mount', root, '/mnt'])
+        sh(['mkdir', '-p', '/mnt/boot/efi'])
+        sh(['mount', efi, '/mnt/boot/efi'])
+
+        # Step 3: Base system
+        self._step(3)
+        sh(['pacman-key', '--init'])
+        sh(['pacman-key', '--populate', 'archlinux'])
+        # Ensure mirrorlist has servers
+        import os as _os
+        mirrorlist = '/etc/pacman.d/mirrorlist'
+        with open(mirrorlist) as f:
+            content = f.read()
+        if not any(line.strip().startswith('Server') for line in content.splitlines()):
+            with open(mirrorlist, 'w') as f:
+                f.write('Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n')
+                f.write('Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\n')
+        sh(['pacstrap', '-K', '/mnt',
+            'base', 'base-devel', 'linux-zen', 'linux-zen-headers', 'linux-firmware',
+            'networkmanager', 'sudo', 'grub', 'efibootmgr', 'os-prober',
+            'intel-ucode', 'amd-ucode',
+            'nano', 'vim', 'git', 'wget', 'curl', 'python', 'python-pip',
+        ])
+
+        # Step 4: KDE Plasma
+        self._step(4)
+        sh(['pacstrap', '-K', '/mnt',
+            'plasma-desktop', 'plasma-workspace', 'plasma-pa', 'plasma-nm',
+            'sddm', 'sddm-kcm', 'kwin', 'breeze', 'breeze-gtk',
+            'konsole', 'dolphin', 'kate', 'ark', 'gwenview', 'spectacle',
+            'kscreen', 'kinfocenter', 'firefox', 'xdg-user-dirs',
+        ])
+
+        # Step 5: Audio
+        self._step(5)
+        sh(['pacstrap', '-K', '/mnt',
+            'pipewire', 'pipewire-alsa', 'pipewire-audio', 'pipewire-jack',
+            'pipewire-pulse', 'wireplumber',
+            'alsa-utils', 'alsa-firmware', 'sof-firmware',
+        ])
+
+        # Step 6: Wine/SelahBridge deps
+        self._step(6)
+        sh(['pacstrap', '-K', '/mnt',
+            'wine-staging', 'winetricks', 'wine-mono', 'wine-gecko',
+            'python-pyqt6',
+        ])
+
+        # Step 7: fstab
+        self._step(7)
+        with open('/mnt/etc/fstab', 'a') as f:
+            r = subprocess.run(['genfstab', '-U', '/mnt'], capture_output=True, text=True)
+            f.write(r.stdout)
+
+        # Step 8: Configure system
+        self._step(8)
+        chroot(['ln', '-sf', f'/usr/share/zoneinfo/{timezone}', '/etc/localtime'])
+        chroot(['hwclock', '--systohc'])
+        with open('/mnt/etc/locale.gen', 'a') as f:
+            f.write('en_US.UTF-8 UTF-8\n')
+        chroot(['locale-gen'])
+        with open('/mnt/etc/locale.conf', 'w') as f:
+            f.write('LANG=en_US.UTF-8\n')
+        with open('/mnt/etc/hostname', 'w') as f:
+            f.write(hostname + '\n')
+        with open('/mnt/etc/hosts', 'w') as f:
+            f.write(f'127.0.0.1 localhost\n::1 localhost\n127.0.1.1 {hostname}.localdomain {hostname}\n')
+        for grp in ['wheel', 'audio', 'video', 'storage', 'network', 'input', 'bluetooth', 'realtime']:
+            chroot(['groupadd', '-f', grp])
+        chroot(['useradd', '-m', '-G', 'wheel,audio,video,storage,network,input', '-s', '/bin/bash', username])
+        chroot(['usermod', '-aG', 'realtime,bluetooth', username])
+        subprocess.run(['arch-chroot', '/mnt', 'bash', '-c',
+            f'echo "{username}:{password}" | chpasswd'], capture_output=True)
+        subprocess.run(['arch-chroot', '/mnt', 'bash', '-c',
+            f'echo "root:{password}" | chpasswd'], capture_output=True)
+        with open('/mnt/etc/sudoers', 'a') as f:
+            f.write('%wheel ALL=(ALL:ALL) ALL\n')
+        for svc in ['NetworkManager', 'sddm', 'bluetooth', 'fstrim.timer']:
+            chroot(['systemctl', 'enable', svc])
+
+        # Write SelahOS os-release
+        with open('/mnt/etc/os-release', 'w') as f:
+            f.write('NAME="SelahOS"\nPRETTY_NAME="SelahOS v1.0-beta"\n'
+                    'ID=selahos\nID_LIKE=arch\nBUILD_ID=rolling\n'
+                    'HOME_URL="https://selahos.io"\n'
+                    'VENDOR_NAME="Selah Technologies LLC"\n')
+
+        # Step 9: SelahSeedCore (Apple only)
+        self._step(9)
+        if is_apple:
+            self._apply_seedcore(chroot, sh)
+
+        # Step 10: SelahBridgePro
+        self._step(10)
+        # Copy files from live ISO if present
+        _sbp = '/usr/local/bin/selahbridgepro'
+        if _os.path.exists(_sbp):
+            sh(['cp', '-r', '/usr/local/bin/selah*', '/mnt/usr/local/bin/'], shell=False)
+            sh(['cp', '-r', '/usr/share/selahbridgepro', '/mnt/usr/share/'])
+            sh(['cp', '-r', '/etc/selahbridgepro', '/mnt/etc/'])
+            sh(['cp', '-r', '/usr/share/applications/selahbridgepro.desktop',
+                '/mnt/usr/share/applications/'])
+
+        # Step 11: Bootloader
+        self._step(11)
+        chroot(['grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi',
+                '--bootloader-id=SelahOS', '--removable', '--recheck'])
+        sh(['sed', '-i', 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/', '/mnt/etc/default/grub'])
+        # Remove Arch Linux references from GRUB config
+        chroot(['grub-mkconfig', '-o', '/boot/grub/grub.cfg'])
+        sh(['sed', '-i', 's/Arch Linux/SelahOS/g', '/mnt/boot/grub/grub.cfg'])
+
+        # Step 12: Desktop theme
+        self._step(12)
+        self._apply_theme(sh)
+
+        # Step 13: Cleanup
+        self._step(13)
+        chroot(['mkinitcpio', '-P'])
+        sh(['sync'])
+        sh(['umount', '-R', '/mnt'])
+
+        # Step 14: Done
+        self._step(14)
+        self.pct_update.emit(100)
+        time.sleep(0.5)
+        self.done_signal.emit(True, '')
+
+    def _apply_seedcore(self, chroot, sh):
+        import shutil, os as _os
+        seed_files = [
+            ('/etc/modprobe.d/selah-broadcom.conf', '/mnt/etc/modprobe.d/'),
+            ('/etc/modules-load.d/selah-wifi.conf', '/mnt/etc/modules-load.d/'),
+            ('/etc/modules-load.d/selah-thunderbolt.conf', '/mnt/etc/modules-load.d/'),
+            ('/etc/mbpfan.conf', '/mnt/etc/'),
+            ('/etc/tlp.conf', '/mnt/etc/'),
+            ('/etc/systemd/system/selah-wifi-wake.service',
+             '/mnt/etc/systemd/system/'),
+        ]
+        for src, dst in seed_files:
+            if _os.path.exists(src):
+                sh(['cp', src, dst])
+        for svc in ['selah-wifi-wake', 'tlp', 'thermald', 'irqbalance', 'acpid']:
+            chroot(['systemctl', 'enable', svc])
+        # GRUB params for Apple
+        grub_cfg = '/mnt/etc/default/grub'
+        if _os.path.exists(grub_cfg):
+            with open(grub_cfg) as f:
+                content = f.read()
+            if 'GRUB_CMDLINE_LINUX_DEFAULT' in content:
+                import re as _re
+                params = 'quiet splash pcie_aspm=off acpi_osi=Darwin i915.enable_guc=2 mem_sleep_default=deep'
+                content = _re.sub(
+                    r'GRUB_CMDLINE_LINUX_DEFAULT=.*',
+                    f'GRUB_CMDLINE_LINUX_DEFAULT="{params}"',
+                    content
+                )
+                with open(grub_cfg, 'w') as f:
+                    f.write(content)
+
+    def _apply_theme(self, sh):
+        import os as _os
+        theme_dirs = [
+            '/usr/share/icons/selahos',
+            '/usr/share/color-schemes',
+            '/usr/share/konsole',
+            '/usr/share/sddm/themes/selahos',
+            '/usr/share/plymouth/themes/selahos',
+            '/usr/share/wallpapers/selahos',
+            '/usr/share/selahos',
+            '/etc/skel/.config',
+        ]
+        for d in theme_dirs:
+            if _os.path.exists(d):
+                sh(['cp', '-r', d, f'/mnt{d}'])
+        # SDDM config
+        sddm_conf = '/mnt/etc/sddm.conf.d/10-selah-theme.conf'
+        _os.makedirs(_os.path.dirname(sddm_conf), exist_ok=True)
+        with open(sddm_conf, 'w') as f:
+            f.write('[Theme]\nCurrent=selahos\n')
+
+
+# ── Screen 6: Complete ────────────────────────────────────────
+class DoneScreen(QWidget):
+    def __init__(self, success, message=''):
+        super().__init__()
+        self.success = success
+        self.message = message
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(80, 80, 80, 80)
+        layout.setSpacing(24)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        if self.success:
+            check = QLabel('✓')
+            check.setFont(QFont('Inter', 72, QFont.Weight.Thin))
+            check.setStyleSheet(f"color: {C['green']}; background: transparent;")
+            check.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(check)
+
+            title = gold_label('SelahOS is installed.', 28, QFont.Weight.Light)
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(title)
+
+            inst1 = QLabel('Remove your USB drive and restart.')
+            inst1.setFont(QFont('Inter', 16))
+            inst1.setStyleSheet(f"color: {C['text2']}; background: transparent;")
+            inst1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(inst1)
+
+            inst2 = muted_label('After restart, perform a full shutdown (not reboot)\nto initialize audio.', 13)
+            inst2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(inst2)
+
+            layout.addSpacing(32)
+
+            btn = QPushButton('Restart Now')
+            btn.setFixedSize(200, 56)
+            btn.setFont(QFont('Inter', 16, QFont.Weight.Bold))
+            btn.clicked.connect(lambda: subprocess.run(['reboot']))
+            layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+            layout.addStretch()
+
+            verse = muted_label(
+                '"Psalm 33:3 — Sing to Him a new song;\nplay skillfully, and shout for joy."', 11
+            )
+            verse.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            verse.setStyleSheet(
+                f"color: rgba(255,255,255,0.25); background: transparent; font-style: italic;"
+            )
+            layout.addWidget(verse)
+
+        else:
+            warn = QLabel('⚠')
+            warn.setFont(QFont('Inter', 72))
+            warn.setStyleSheet(f"color: {C['red']}; background: transparent;")
+            warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(warn)
+
+            title = gold_label('Installation Failed', 28, QFont.Weight.Light)
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(title)
+
+            msg = QLabel(self.message[:500] or 'An error occurred. Check /tmp/selah-setup.log')
+            msg.setFont(QFont('JetBrains Mono', 11))
+            msg.setStyleSheet(f"color: {C['red']}; background: {C['bg2']}; padding: 12px; border-radius: 8px;")
+            msg.setWordWrap(True)
+            layout.addWidget(msg)
+
+            note = muted_label('Log: /tmp/selah-setup.log', 12)
+            note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(note)
+
+
+# ── Main Window ───────────────────────────────────────────────
+STEPS = ['Welcome', 'Drive', 'Account', 'Hardware', 'Installing', 'Done']
+
+class SelahSetup(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.install_config = {}
+        self._setup_window()
+        self._build()
+        self._goto(0)
+
+    def _setup_window(self):
+        self.setWindowTitle('Selah Setup')
+        self.setMinimumSize(900, 640)
+        self.resize(960, 700)
+        screen = QApplication.primaryScreen().geometry()
+        self.move((screen.width() - self.width()) // 2, (screen.height() - self.height()) // 2)
+
+    def _build(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        vbox = QVBoxLayout(root)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+
+        # Header
+        header = QFrame()
+        header.setFixedHeight(52)
+        header.setStyleSheet(
+            f"background: {C['bg2']}; border-bottom: 1px solid rgba(230,194,122,0.12);"
+        )
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(28, 0, 28, 0)
+
+        logo = QLabel('SelahOS')
+        logo.setFont(QFont('Inter', 15, QFont.Weight.Bold))
+        logo.setStyleSheet(f"color: {C['gold_lt']}; background: transparent; letter-spacing: 2px;")
+        hl.addWidget(logo)
+        hl.addStretch()
+
+        self.step_label = QLabel('')
+        self.step_label.setFont(QFont('Inter', 12))
+        self.step_label.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+        hl.addWidget(self.step_label)
+
+        vbox.addWidget(header)
+
+        # Step indicator dots
+        dots_frame = QFrame()
+        dots_frame.setFixedHeight(32)
+        dots_frame.setStyleSheet(f"background: {C['bg2']}; border: none;")
+        dl = QHBoxLayout(dots_frame)
+        dl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dl.setSpacing(10)
+        self.dots = []
+        for i in range(len(STEPS)):
+            dot = QLabel('●')
+            dot.setFont(QFont('Inter', 8))
+            dot.setStyleSheet(f"color: {C['bg3']}; background: transparent;")
+            dl.addWidget(dot)
+            self.dots.append(dot)
+        vbox.addWidget(dots_frame)
+
+        # Page stack
+        self.stack = QStackedWidget()
+        vbox.addWidget(self.stack, stretch=1)
+
+        # Screens
+        self.welcome  = WelcomeScreen()
+        self.drive    = DriveScreen()
+        self.user     = UserScreen()
+        self.hardware = HardwareScreen()
+        self.install  = InstallScreen()
+
+        self.welcome.proceed.connect(lambda: self._goto(1))
+        self.drive.proceed.connect(self._drive_done)
+        self.drive.back.connect(lambda: self._goto(0))
+        self.user.proceed.connect(self._user_done)
+        self.user.back.connect(lambda: self._goto(1))
+        self.hardware.proceed.connect(self._hw_done)
+        self.hardware.back.connect(lambda: self._goto(2))
+        self.install.done.connect(self._install_done)
+
+        for w in [self.welcome, self.drive, self.user, self.hardware, self.install]:
+            self.stack.addWidget(w)
+
+    def _goto(self, idx):
+        self.stack.setCurrentIndex(idx)
+        self.step_label.setText(f'Step {idx + 1} of {len(STEPS)}  ·  {STEPS[idx]}')
+        for i, dot in enumerate(self.dots):
+            if i < idx:
+                dot.setStyleSheet(f"color: {C['green']}; background: transparent;")
+            elif i == idx:
+                dot.setStyleSheet(f"color: {C['gold']}; background: transparent;")
+            else:
+                dot.setStyleSheet(f"color: {C['bg3']}; background: transparent;")
+        if idx == 1:
+            self.drive.refresh()
+        elif idx == 2:
+            self.user.refresh()
+        elif idx == 3:
+            self.hardware.refresh()
+
+    def _drive_done(self, data):
+        self.install_config.update(data)
+        self._goto(2)
+
+    def _user_done(self, data):
+        self.install_config.update(data)
+        self._goto(3)
+
+    def _hw_done(self, hw_data):
+        self.install_config.update(hw_data)
+        self._goto(4)
+        self.install.start(self.install_config)
+
+    def _install_done(self, success, msg):
+        done = DoneScreen(success, msg)
+        self.stack.addWidget(done)
+        self.stack.setCurrentWidget(done)
+        self.step_label.setText('Complete' if success else 'Error')
+        for dot in self.dots:
+            dot.setStyleSheet(f"color: {C['green'] if success else C['red']}; background: transparent;")
+
+
+def main():
+    if os.geteuid() != 0:
+        print("Selah Setup must be run as root.")
+        print("Try: sudo selah-setup  or  kdesu selah-setup")
+        sys.exit(1)
+    app = QApplication(sys.argv)
+    app.setApplicationName('Selah Setup')
+    app.setStyleSheet(QSS)
+    win = SelahSetup()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,11 @@
+[SddmGreeterTheme]
+Name=SelahOS
+Description=SelahOS Login Theme — Pause. Reflect. Create.
+Author=Selah Technologies LLC
+License=GPL-3.0
+Type=sddm-theme
+Version=1.0
+Website=https://selahos.io
+Screenshot=assets/preview.png
+MainScript=Main.qml
+TranslationsDirectory=translations

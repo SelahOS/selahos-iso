@@ -4,85 +4,47 @@
     "type": "file",
     "source": "/usr/share/selahos/fastfetch/selahos-logo.txt",
     "color": {
-      "1": "blue"
+      "1": "blue",
+      "2": "cyan",
+      "3": "yellow"
     }
   },
   "display": {
     "separator": "  ",
-    "color": "blue"
+    "color": { "keys": "yellow", "title": "cyan" }
   },
   "modules": [
     {
-      "type": "custom",
-      "format": "SelahOS™ v1.0-beta — Pause. Reflect. Create."
+      "type": "title",
+      "format": "SelahOS™ v1.0-beta  —  Pause. Reflect. Create."
     },
     "separator",
     {
       "type": "os",
-      "key": "OS"
+      "key": "OS",
+      "format": "SelahOS v1.0-beta x86_64"
     },
-    {
-      "type": "kernel",
-      "key": "Kernel"
-    },
-    {
-      "type": "host",
-      "key": "Machine"
-    },
-    {
-      "type": "uptime",
-      "key": "Uptime"
-    },
-    {
-      "type": "packages",
-      "key": "Packages"
-    },
-    {
-      "type": "shell",
-      "key": "Shell"
-    },
-    {
-      "type": "de",
-      "key": "Desktop"
-    },
-    {
-      "type": "wm",
-      "key": "Window Manager"
-    },
-    {
-      "type": "terminal",
-      "key": "Terminal"
-    },
-    {
-      "type": "cpu",
-      "key": "CPU"
-    },
-    {
-      "type": "gpu",
-      "key": "GPU"
-    },
-    {
-      "type": "memory",
-      "key": "Memory"
-    },
-    {
-      "type": "disk",
-      "key": "Disk"
-    },
-    {
-      "type": "localip",
-      "key": "Network"
-    },
+    { "type": "kernel",   "key": "Kernel"   },
+    { "type": "host",     "key": "Machine"  },
+    { "type": "uptime",   "key": "Uptime"   },
+    { "type": "packages", "key": "Packages" },
+    { "type": "shell",    "key": "Shell"    },
+    { "type": "de",       "key": "Desktop"  },
+    { "type": "wm",       "key": "WM"       },
+    { "type": "terminal", "key": "Terminal" },
+    { "type": "cpu",      "key": "CPU"      },
+    { "type": "gpu",      "key": "GPU"      },
+    { "type": "memory",   "key": "Memory"   },
+    { "type": "disk",     "key": "Disk"     },
+    { "type": "localip",  "key": "Network"  },
     "separator",
     {
       "type": "custom",
-      "key": "SelahBridge™",
-      "format": "Creative compatibility layer active"
+      "format": "SelahBridge™  Creative compatibility layer"
     },
     {
       "type": "custom",
-      "key": "AI Companion",
-      "format": "Preview infrastructure — coming soon"
+      "format": "Muse            Creative collaborator (coming soon)"
     }
   ]
 }
