@@ -1,0 +1,9 @@
+{
+  "KPlugin": {
+    "Id": "selahos-cosmic-dark",
+    "Name": "SelahOS cosmic dark",
+    "License": "GPL-3.0",
+    "Website": "https://selahos.io",
+    "Authors": [{ "Name": "Selah Technologies LLC" }]
+  }
+}

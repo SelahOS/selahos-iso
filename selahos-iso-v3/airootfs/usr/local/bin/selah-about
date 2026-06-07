@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+# ============================================================
+# About This Machine — selah-about
+# Apple-style system info app for SelahOS
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+
+import sys
+import os
+import re
+import subprocess
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QFrame, QSizePolicy
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
+from PyQt6.QtGui import QFont, QColor, QPixmap, QPainter, QLinearGradient, QIcon
+
+C = {
+    'bg':       '#171C2A',
+    'bg2':      '#1D2333',
+    'bg3':      '#2A3042',
+    'gold':     '#D6A85A',
+    'gold_lt':  '#E6C27A',
+    'white':    '#FFFFFF',
+    'text2':    'rgba(255,255,255,0.7)',
+    'muted':    'rgba(255,255,255,0.4)',
+    'cyan':     '#7EC8E3',
+    'green':    '#81B29A',
+    'border':   'rgba(230,194,122,0.15)',
+}
+
+QSS = f"""
+* {{ font-family: 'Inter', 'Noto Sans', sans-serif; }}
+QWidget {{ background: {C['bg']}; color: {C['white']}; }}
+QLabel {{ background: transparent; color: {C['white']}; }}
+QPushButton {{
+    background: rgba(42,48,66,0.85); color: {C['gold_lt']};
+    border: 1px solid rgba(230,194,122,0.25); border-radius: 8px;
+    padding: 8px 20px; font-size: 13px;
+}}
+QPushButton:hover {{ background: {C['bg3']}; border-color: {C['gold']}; }}
+"""
+
+APPLE_MODELS = {
+    'MacBookPro14,1': 'MacBook Pro (13-inch, 2017)',
+    'MacBookPro14,2': 'MacBook Pro (13-inch, 2017, Touch Bar)',
+    'MacBookPro14,3': 'MacBook Pro (15-inch, 2017)',
+    'MacBookPro15,1': 'MacBook Pro (15-inch, 2018)',
+    'MacBookPro15,2': 'MacBook Pro (13-inch, 2018, Touch Bar)',
+    'MacBookPro16,1': 'MacBook Pro (16-inch, 2019)',
+    'MacBookPro11,1': 'MacBook Pro (13-inch, Late 2013)',
+    'MacBookPro11,4': 'MacBook Pro (15-inch, Mid 2015)',
+    'MacBookPro9,2':  'MacBook Pro (13-inch, Mid 2012)',
+    'MacBookAir7,2':  'MacBook Air (13-inch, 2015)',
+    'MacBookAir8,1':  'MacBook Air (13-inch, 2018)',
+    'iMac16,2':       'iMac (21.5-inch, Late 2015)',
+    'iMac17,1':       'iMac (27-inch, Late 2015)',
+    'iMac18,3':       'iMac (27-inch, 2017)',
+    'MacPro5,1':      'Mac Pro (Mid 2010)',
+}
+
+
+def run(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ''
+
+
+def gather_info():
+    info = {}
+    info['os']       = run(['bash', '-c', 'source /etc/os-release && echo "$PRETTY_NAME"']) or 'SelahOS'
+    info['kernel']   = run(['uname', '-r'])
+    info['desktop']  = run(['bash', '-c', 'plasmashell --version 2>/dev/null | head -1']) or 'KDE Plasma'
+    info['cpu']      = ''
+    for line in run(['lscpu']).splitlines():
+        if 'Model name' in line:
+            info['cpu'] = line.split(':', 1)[1].strip()
+            break
+    info['gpu'] = ''
+    for line in run(['lspci']).splitlines():
+        if 'VGA' in line or 'Display' in line:
+            info['gpu'] = line.split(':', 2)[-1].strip()
+            break
+    info['ram'] = ''
+    for line in run(['free', '-h']).splitlines():
+        if line.startswith('Mem'):
+            parts = line.split()
+            info['ram'] = parts[1] + ' total'
+            if len(parts) > 2:
+                info['ram'] += f',  {parts[2]} used'
+            break
+    info['disk'] = ''
+    for line in run(['df', '-h', '/']).splitlines():
+        if line.startswith('/'):
+            parts = line.split()
+            if len(parts) >= 5:
+                info['disk'] = f"{parts[1]} total,  {parts[2]} used"
+            break
+    info['display'] = run(['bash', '-c', "xrandr --current 2>/dev/null | grep ' connected' | head -1 | grep -o '[0-9]*x[0-9]*'"])
+    info['audio'] = run(['bash', '-c', "aplay -l 2>/dev/null | grep 'card 0:' | head -1 | sed 's/.*: //' | sed 's/ \\[.*//'"])
+    info['network'] = run(['bash', '-c', "nmcli -t -f NAME connection show --active 2>/dev/null | head -1"])
+    info['serial'] = run(['dmidecode', '-s', 'system-serial-number'])
+    info['manufacturer'] = run(['dmidecode', '-s', 'system-manufacturer'])
+    info['product'] = run(['dmidecode', '-s', 'system-product-name'])
+    info['uptime'] = run(['uptime', '-p'])
+
+    # SelahBridgePro status
+    sbp_bin = '/usr/local/bin/selahbridgepro'
+    info['selahbridge_active'] = os.path.exists(sbp_bin)
+    info['seedcore_active'] = os.path.exists('/usr/local/bin/selahseedcore-init')
+    return info
+
+
+def separator():
+    line = QFrame()
+    line.setFixedHeight(1)
+    line.setStyleSheet(f"background: rgba(230,194,122,0.12); border: none;")
+    return line
+
+
+class InfoRow(QWidget):
+    def __init__(self, label, value, highlight=False):
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 6, 0, 6)
+        layout.setSpacing(0)
+
+        lbl = QLabel(label)
+        lbl.setFont(QFont('Inter', 13))
+        lbl.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+        lbl.setFixedWidth(130)
+
+        val = QLabel(value or '—')
+        val.setFont(QFont('Inter', 13))
+        val.setStyleSheet(f"color: {C['gold_lt'] if highlight else C['white']}; background: transparent;")
+        val.setWordWrap(True)
+
+        layout.addWidget(lbl)
+        layout.addWidget(val)
+        layout.addStretch()
+
+
+class StatusRow(QWidget):
+    def __init__(self, label, active, note=''):
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 6, 0, 6)
+        layout.setSpacing(10)
+
+        dot = QLabel('●')
+        dot.setFont(QFont('Inter', 12))
+        dot.setStyleSheet(f"color: {C['green'] if active else C['muted']}; background: transparent;")
+        dot.setFixedWidth(18)
+
+        lbl = QLabel(label)
+        lbl.setFont(QFont('Inter', 13, QFont.Weight.Medium))
+        lbl.setStyleSheet(f"color: {C['white'] if active else C['muted']}; background: transparent;")
+
+        layout.addWidget(dot)
+        layout.addWidget(lbl)
+
+        if note:
+            n = QLabel(note)
+            n.setFont(QFont('Inter', 12))
+            n.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+            layout.addWidget(n)
+
+        layout.addStretch()
+
+
+class DataThread(QThread):
+    ready = pyqtSignal(dict)
+
+    def run(self):
+        self.ready.emit(gather_info())
+
+
+class AboutWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('About This Machine')
+        self.setFixedSize(620, 680)
+        screen = QApplication.primaryScreen().geometry()
+        self.move((screen.width() - self.width()) // 2, (screen.height() - self.height()) // 2)
+        self.setStyleSheet(QSS)
+        self._build_skeleton()
+        self._load_data()
+
+    def _build_skeleton(self):
+        self.main = QVBoxLayout(self)
+        self.main.setContentsMargins(0, 0, 0, 0)
+        self.main.setSpacing(0)
+
+        # Top section: machine image + name
+        top = QFrame()
+        top.setStyleSheet(f"background: {C['bg2']}; border: none;")
+        top.setFixedHeight(180)
+        tl = QVBoxLayout(top)
+        tl.setContentsMargins(40, 28, 40, 20)
+        tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.machine_img = QLabel('◈')
+        self.machine_img.setFont(QFont('Inter', 52, QFont.Weight.Thin))
+        self.machine_img.setStyleSheet(f"color: {C['gold']}; background: transparent;")
+        self.machine_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tl.addWidget(self.machine_img)
+
+        self.machine_name = QLabel('Loading...')
+        self.machine_name.setFont(QFont('Inter', 18, QFont.Weight.Medium))
+        self.machine_name.setStyleSheet(f"color: {C['white']}; background: transparent;")
+        self.machine_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tl.addWidget(self.machine_name)
+
+        self.machine_model = QLabel('')
+        self.machine_model.setFont(QFont('Inter', 12))
+        self.machine_model.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+        self.machine_model.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tl.addWidget(self.machine_model)
+
+        self.main.addWidget(top)
+        self.main.addWidget(separator())
+
+        # Info rows area
+        scroll_widget = QWidget()
+        scroll_widget.setStyleSheet(f"background: {C['bg']}; border: none;")
+        self.info_layout = QVBoxLayout(scroll_widget)
+        self.info_layout.setContentsMargins(40, 20, 40, 20)
+        self.info_layout.setSpacing(0)
+
+        # Placeholder rows
+        self.rows_area = QVBoxLayout()
+        self.info_layout.addLayout(self.rows_area)
+        self.info_layout.addWidget(separator())
+        self.info_layout.addSpacing(12)
+
+        # Services section
+        self.services_area = QVBoxLayout()
+        self.info_layout.addLayout(self.services_area)
+        self.info_layout.addSpacing(20)
+
+        # Bottom buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+        update_btn = QPushButton('Software Update')
+        support_btn = QPushButton('Support')
+        update_btn.clicked.connect(lambda: os.system('xdg-open https://selahos.io/update &'))
+        support_btn.clicked.connect(lambda: os.system('xdg-open https://selahos.io/support &'))
+        btn_row.addStretch()
+        btn_row.addWidget(update_btn)
+        btn_row.addWidget(support_btn)
+        btn_row.addStretch()
+        self.info_layout.addLayout(btn_row)
+        self.info_layout.addSpacing(16)
+
+        # Footer
+        footer = QLabel('© 2026 Selah Technologies LLC  ·  selahos.io  ·  Pause. Reflect. Create.')
+        footer.setFont(QFont('Inter', 11))
+        footer.setStyleSheet(f"color: {C['muted']}; background: transparent;")
+        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_layout.addWidget(footer)
+
+        self.main.addWidget(scroll_widget, stretch=1)
+
+    def _load_data(self):
+        self.thread = DataThread()
+        self.thread.ready.connect(self._populate)
+        self.thread.start()
+
+    def _populate(self, info):
+        mfr  = info.get('manufacturer', '')
+        prod = info.get('product', '')
+        is_apple = 'apple' in mfr.lower()
+        friendly = APPLE_MODELS.get(prod) if is_apple else None
+
+        if friendly:
+            self.machine_name.setText(friendly)
+            self.machine_model.setText(f"Model: {prod}")
+            self.machine_img.setText('💻')
+            self.machine_img.setFont(QFont('Inter', 52))
+        elif mfr:
+            self.machine_name.setText(f"{mfr} {prod}".strip())
+            self.machine_img.setText('🖥')
+            self.machine_img.setFont(QFont('Inter', 52))
+        else:
+            self.machine_name.setText('Generic PC')
+
+        # Clear and repopulate info rows
+        while self.rows_area.count():
+            item = self.rows_area.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        rows = [
+            ('SelahOS',   info.get('os', '—'),      True),
+            ('Kernel',    info.get('kernel', '—'),   False),
+            ('Desktop',   info.get('desktop', '—'),  False),
+            ('CPU',       info.get('cpu', '—'),      False),
+            ('GPU',       info.get('gpu', '—'),      False),
+            ('Memory',    info.get('ram', '—'),      False),
+            ('Storage',   info.get('disk', '—'),     False),
+            ('Display',   info.get('display', '—'),  False),
+            ('Audio',     info.get('audio', '—'),    False),
+            ('Network',   info.get('network', '—'),  False),
+            ('Serial',    info.get('serial', '—'),   False),
+            ('Uptime',    info.get('uptime', '—'),   False),
+        ]
+        for label, value, hi in rows:
+            self.rows_area.addWidget(InfoRow(label, value, hi))
+
+        # Services
+        while self.services_area.count():
+            item = self.services_area.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self.services_area.addWidget(
+            StatusRow('SelahSeedCore', info.get('seedcore_active', False), '● Active' if info.get('seedcore_active') else '')
+        )
+        self.services_area.addWidget(
+            StatusRow('SelahBridgePro', info.get('selahbridge_active', False),
+                      '● Licensed' if info.get('selahbridge_active') else '○ Not installed')
+        )
+        self.services_area.addWidget(
+            StatusRow('Muse', False, '○ Coming Soon')
+        )
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName('About This Machine')
+    win = AboutWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()

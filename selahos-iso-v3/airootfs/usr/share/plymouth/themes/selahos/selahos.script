@@ -1,108 +1,57 @@
-// ============================================================
-// SelahOS Plymouth Boot Theme
-// Selah Technologies LLC — Copyright (C) 2026
-// ============================================================
+// SelahOS Plymouth Boot Splash
+Window.SetBackgroundTopColor(0.07, 0.08, 0.12);
+Window.SetBackgroundBottomColor(0.05, 0.06, 0.09);
 
-// ── Background ───────────────────────────────────────────────
-// Solid dark navy (#0B0F1A)
-Window.SetBackgroundTopColor(0.043, 0.059, 0.102);
-Window.SetBackgroundBottomColor(0.043, 0.059, 0.102);
+logo_image = Image("logo.png");
+logo_sprite = Sprite(logo_image);
 
 screen_width  = Window.GetWidth();
 screen_height = Window.GetHeight();
 
-// ── Logo ─────────────────────────────────────────────────────
-logo_image  = Image("selah-logo.png");
-logo_sprite = Sprite(logo_image);
-
-logo_x = Math.Int((screen_width  - logo_image.GetWidth())  / 2);
-logo_y = Math.Int((screen_height - logo_image.GetHeight()) / 2) - 36;
+logo_x = (screen_width  - logo_image.GetWidth())  / 2;
+logo_y = (screen_height - logo_image.GetHeight())  / 2 - 40;
 
 logo_sprite.SetX(logo_x);
 logo_sprite.SetY(logo_y);
-logo_sprite.SetZ(10);
 
-// ── Tagline ──────────────────────────────────────────────────
-tagline_image  = Image("tagline.png");
-tagline_sprite = Sprite(tagline_image);
+dot_count = 5;
+dot_spacing = 24;
+dot_total = dot_count * dot_spacing;
+dot_start_x = (screen_width - dot_total) / 2;
+dot_y = logo_y + logo_image.GetHeight() + 48;
 
-tagline_x = Math.Int((screen_width - tagline_image.GetWidth()) / 2);
-tagline_y = logo_y + logo_image.GetHeight() + 18;
-
-tagline_sprite.SetX(tagline_x);
-tagline_sprite.SetY(tagline_y);
-tagline_sprite.SetZ(10);
-
-// ── Progress bar ─────────────────────────────────────────────
-progress_width  = 300;
-progress_height = 3;
-progress_x      = Math.Int((screen_width - progress_width) / 2);
-progress_y      = screen_height - 64;
-
-// Track: full-width dark bar
-track_image  = Image("progress-bg.png");
-track_scaled = track_image.Scale(progress_width, progress_height);
-track_sprite = Sprite(track_scaled);
-track_sprite.SetX(progress_x);
-track_sprite.SetY(progress_y);
-track_sprite.SetZ(10);
-
-// Fill: gold bar that grows left→right as boot progresses
-fill_image  = Image("progress-bar.png");
-fill_sprite = Sprite();
-fill_sprite.SetX(progress_x);
-fill_sprite.SetY(progress_y);
-fill_sprite.SetZ(11);
-
-// Seed it at 1px so the sprite is valid before first callback
-fill_sprite.SetImage(fill_image.Scale(1, progress_height));
-
-// ── Boot progress callback ────────────────────────────────────
-fun boot_progress_callback(duration, progress) {
-    fill_width = Math.Int(progress_width * progress);
-    if (fill_width < 1) {
-        fill_width = 1;
-    }
-    fill_sprite.SetImage(fill_image.Scale(fill_width, progress_height));
+dot_sprites = [];
+for (i = 0; i < dot_count; i++) {
+    dot = Sprite();
+    dot.SetX(dot_start_x + i * dot_spacing);
+    dot.SetY(dot_y);
+    dot.SetOpacity(0.25);
+    dot_sprites[i] = dot;
 }
 
-Plymouth.SetBootProgressFunction(boot_progress_callback);
+pulse_phase = 0;
+progress_val = 0;
 
-// ── Root mounted: snap bar to 100% ───────────────────────────
-fun root_mounted_callback() {
-    boot_progress_callback(0, 1.0);
-}
-
-Plymouth.SetRootMountedFunction(root_mounted_callback);
-
-// ── Quit: fade everything out ─────────────────────────────────
-global quitting;
-global opacity;
-quitting = 0;
-opacity  = 1.0;
-
-fun quit_callback() {
-    global quitting;
-    quitting = 1;
-}
-
-Plymouth.SetQuitFunction(quit_callback);
-
-// ── Refresh: drive the fade-out ──────────────────────────────
 fun refresh_callback() {
-    global quitting;
-    global opacity;
+    pulse_phase = pulse_phase + 0.08;
+    opacity = 0.875 + 0.125 * Math.Sin(pulse_phase);
+    logo_sprite.SetOpacity(opacity);
 
-    if (quitting == 1) {
-        opacity = opacity - 0.06;
-        if (opacity < 0.0) {
-            opacity = 0.0;
-        }
-        logo_sprite.SetOpacity(opacity);
-        tagline_sprite.SetOpacity(opacity);
-        track_sprite.SetOpacity(opacity);
-        fill_sprite.SetOpacity(opacity);
+    active_dot = Math.Int(progress_val * dot_count / 100.0);
+    for (i = 0; i < dot_count; i++) {
+        if (i < active_dot)
+            dot_sprites[i].SetOpacity(0.9);
+        else if (i == active_dot)
+            dot_sprites[i].SetOpacity(0.5 + 0.4 * Math.Sin(pulse_phase * 2));
+        else
+            dot_sprites[i].SetOpacity(0.2);
     }
 }
 
 Plymouth.SetRefreshFunction(refresh_callback);
+
+fun progress_callback(duration, progress) {
+    progress_val = Math.Int(progress * 100);
+}
+
+Plymouth.SetBootProgressFunction(progress_callback);

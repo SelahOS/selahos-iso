@@ -1,0 +1,11 @@
+[Desktop Entry]
+DefaultProfile=SelahOS.profile
+
+[MainWindow]
+MenuBar=Disabled
+State=AAAA/wAAAAD9AAAAAAAAAmYAAAJqAAAABAAAAAQAAAAIAAAACPwAAAABAAAAAgAAAAEAAAAWAG0AYQBpAG4AVABvAG8AbABCAGEAcgAAAAAA/////wAAAAAAAAAA
+ToolBarsMovable=Disabled
+
+[TabBar]
+NewTabBehavior=PutNewTabAtTheEnd
+TabBarPosition=Top

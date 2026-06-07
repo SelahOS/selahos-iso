@@ -1,0 +1,17 @@
+[Libinput][1452][641][Apple Internal Keyboard / Trackpad]
+PointerAcceleration=0.4
+NaturalScroll=true
+TapToClick=true
+TapDragLock=true
+
+[Libinput][1452][613][Apple Internal Keyboard / Trackpad]
+PointerAcceleration=0.4
+NaturalScroll=true
+TapToClick=true
+TapDragLock=true
+
+[Libinput][1452][657][Apple Internal Keyboard / Trackpad]
+PointerAcceleration=0.4
+NaturalScroll=true
+TapToClick=true
+TapDragLock=true

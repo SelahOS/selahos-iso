@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=About This Machine
+GenericName=System Information
+Comment=View system information and SelahOS status
+Exec=/usr/local/bin/selah-about
+Icon=/usr/share/icons/selahos/apps/128/selah-about.svg
+Terminal=false
+Categories=Qt;System;Settings;
+Keywords=about;system;info;machine;hardware;specs;
+X-KDE-StartupNotify=true

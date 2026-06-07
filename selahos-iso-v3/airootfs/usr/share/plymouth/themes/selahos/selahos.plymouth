@@ -1,6 +1,6 @@
 [Plymouth Theme]
 Name=SelahOS
-Description=SelahOS boot splash — Pause. Reflect. Create.
+Description=SelahOS Boot Splash — Pause. Reflect. Create.
 ModuleName=script
 
 [script]

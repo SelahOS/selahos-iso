@@ -1,10 +1,30 @@
 [General]
-ColorScheme=Selah
+ColorScheme=SelahOS
 widgetStyle=kvantum
+fixed=JetBrains Mono,11,-1,5,50,0,0,0,0,0
+font=Inter,11,-1,5,50,0,0,0,0,0
+menuFont=Inter,11,-1,5,50,0,0,0,0,0
+smallestReadableFont=Inter,9,-1,5,50,0,0,0,0,0
+toolBarFont=Inter,10,-1,5,50,0,0,0,0,0
 
 [KDE]
 LookAndFeelPackage=org.selahos.selah
 SingleClick=false
+AnimationDurationFactor=0.85
 
 [Icons]
-Theme=breeze-dark
+Theme=selahos
+
+[Colors:Window]
+BackgroundNormal=29,35,51
+ForegroundNormal=255,255,255
+
+[Colors:View]
+BackgroundNormal=23,28,42
+ForegroundNormal=255,255,255
+
+[WM]
+activeBackground=23,28,42
+activeForeground=230,194,122
+inactiveBackground=23,28,42
+inactiveForeground=100,100,120
