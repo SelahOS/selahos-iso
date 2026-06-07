@@ -134,7 +134,7 @@ EOF
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/10-selah-theme.conf << 'EOF'
 [Theme]
-Current=selah
+Current=selahos
 EOF
 
 # SDDM autologin for live environment
