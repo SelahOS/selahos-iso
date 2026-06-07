@@ -191,7 +191,6 @@ tailscale
 
 # === Hardware support ===
 # brcmfmac-firmware — included in linux-firmware
-archlinux-keyring
 upower
 udev
 udisks2
@@ -348,7 +347,6 @@ ddrescue
 dhclient
 dhcpcd
 diffutils
-edk2-shell
 ethtool
 fatresize
 foot-terminfo
@@ -377,7 +375,6 @@ sdparm
 sequoia-sq
 sg3_utils
 squashfs-tools
-syslinux
 terminus-font
 testdisk
 udftools
@@ -386,7 +383,6 @@ usbutils
 vpnc
 wireguard-tools
 wireless-regdb
-wireless_tools
 wvdial
 xl2tpd
 zram-generator
@@ -394,17 +390,10 @@ zsh
 python-pyqt6
 
 # === SelahSeedCore — Hardware Support ===
-mbpfan-git
-tlp-git
+mbpfan
+tlp
 cpupower
 thermald
 irqbalance
-bluez
-bluez-utils
-facetimehd-firmware
-facetimehd-dkms
-
-wireless_tools
-iw
 bolt
 snd-hda-macbookpro-dkms-git
