@@ -1,0 +1,6 @@
+[General]
+LogoPath=/usr/share/icons/selahos/apps/selahos-app-launcher.svg
+Name=SelahOS
+Variant=v1.0-beta
+Version=1.0-beta
+Website=https://selahos.io

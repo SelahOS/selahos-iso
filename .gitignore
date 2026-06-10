@@ -38,3 +38,7 @@ install-selahbridgepro.sh
 
 # Source backups created by tools/build-protected.sh
 tools/src/
+
+# Large kernel packages - stored locally only
+selahos-iso-v3/local-repo/*.pkg.tar.zst
+selahos-iso-v3/local-repo/*.pkg.tar.zst.sig

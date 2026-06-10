@@ -13,16 +13,17 @@ groupadd -r autologin  2>/dev/null || true
 groupadd -r bluetooth  2>/dev/null || true
 groupadd -r realtime   2>/dev/null || true
 groupadd -r storage    2>/dev/null || true
+groupadd -r optical    2>/dev/null || true
 groupadd -r liveuser   2>/dev/null || true
 
 # ── Step 2: Create liveuser (safe group list only) ───────────
 useradd -m \
-    -G wheel,audio,video,network,input,autologin \
+    -G wheel,audio,video,storage,optical,network,input,autologin \
     -s /bin/bash \
     liveuser 2>/dev/null || true
 
 # Add optional groups separately (won't fail if group missing)
-for grp in bluetooth realtime storage sys lp; do
+for grp in bluetooth realtime sys lp; do
     usermod -aG "$grp" liveuser 2>/dev/null || true
 done
 
@@ -47,9 +48,22 @@ cp /usr/share/applications/selahos-install.desktop \
 chmod +x /home/liveuser/Desktop/selahos-install.desktop 2>/dev/null || true
 chown -R liveuser:liveuser /home/liveuser/Desktop
 
-# ── Step 3: Locale ────────────────────────────────────────────
+# ── Step 3: Locale + Timezone ────────────────────────────────
 sed -i 's/#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
 locale-gen
+# Set UTC so systemd-firstboot never prompts for timezone
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+
+# Block plasma-welcome wizard (also overridden via /etc/xdg/autostart/,
+# but belt-and-suspenders: remove the package's own autostart entry)
+mkdir -p /etc/xdg/autostart
+for f in plasma-welcome plasma-initial-setup kde-firstrun; do
+    if [ -f "/etc/xdg/autostart/${f}.desktop" ]; then
+        # Override rather than delete so package updates can't re-add it
+        echo '[Desktop Entry]' > "/etc/xdg/autostart/${f}.desktop"
+        echo 'Hidden=true'   >> "/etc/xdg/autostart/${f}.desktop"
+    fi
+done
 
 # ── Step 4: Services ──────────────────────────────────────────
 systemctl enable NetworkManager
@@ -141,7 +155,7 @@ EOF
 cat > /etc/sddm.conf.d/autologin.conf << 'EOF'
 [Autologin]
 User=liveuser
-Session=plasma.desktop
+Session=plasma
 Relogin=false
 EOF
 
@@ -189,5 +203,4 @@ else
     echo "SelahSeedCore: Non-Apple hardware — skipping Mac-specific services"
 fi
 
-# Enable SelahSeedCore as user autostart (post-desktop)
-systemctl --global enable selahseedcore.service 2>/dev/null || true
+# SelahSeedCore runs via KDE autostart desktop entry only
