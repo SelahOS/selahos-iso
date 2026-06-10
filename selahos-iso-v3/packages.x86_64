@@ -9,8 +9,8 @@
 # === Base system ===
 base
 base-devel
-linux-zen
-linux-zen-headers
+linux-zen=7.0.9.zen1-1
+linux-zen-headers=7.0.9.zen1-1
 linux-firmware
 archlinux-keyring
 linux-lts
