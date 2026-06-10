@@ -8,19 +8,20 @@
 set -uo pipefail
 
 # ── Step 1: Create ALL groups before any useradd ─────────────
-# This prevents "group does not exist" errors during install
+# Note: do NOT pre-create 'liveuser' group — useradd needs to own it
 groupadd -r autologin  2>/dev/null || true
 groupadd -r bluetooth  2>/dev/null || true
 groupadd -r realtime   2>/dev/null || true
-groupadd -r storage    2>/dev/null || true
-groupadd -r optical    2>/dev/null || true
-groupadd -r liveuser   2>/dev/null || true
+groupadd    storage    2>/dev/null || true
+groupadd    optical    2>/dev/null || true
+groupadd    network    2>/dev/null || true
+groupadd    input      2>/dev/null || true
 
 # ── Step 2: Create liveuser (safe group list only) ───────────
 useradd -m \
     -G wheel,audio,video,storage,optical,network,input,autologin \
     -s /bin/bash \
-    liveuser 2>/dev/null || true
+    liveuser
 
 # Add optional groups separately (won't fail if group missing)
 for grp in bluetooth realtime sys lp; do
