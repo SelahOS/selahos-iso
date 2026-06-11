@@ -105,23 +105,25 @@ QScrollBar::handle:vertical {{
 }}
 """
 
-APPLE_MODELS = {
-    'MacBookPro14,1': 'MacBook Pro (13-inch, 2017)',
-    'MacBookPro14,2': 'MacBook Pro (13-inch, 2017, Touch Bar)',
-    'MacBookPro14,3': 'MacBook Pro (15-inch, 2017)',
-    'MacBookPro15,1': 'MacBook Pro (15-inch, 2018)',
-    'MacBookPro15,2': 'MacBook Pro (13-inch, 2018, Touch Bar)',
-    'MacBookPro16,1': 'MacBook Pro (16-inch, 2019)',
-    'MacBookPro11,1': 'MacBook Pro (13-inch, Late 2013)',
-    'MacBookPro11,4': 'MacBook Pro (15-inch, Mid 2015)',
-    'MacBookPro9,2':  'MacBook Pro (13-inch, Mid 2012)',
-    'MacBookAir7,2':  'MacBook Air (13-inch, 2015)',
-    'MacBookAir8,1':  'MacBook Air (13-inch, 2018)',
-    'iMac16,2':       'iMac (21.5-inch, Late 2015)',
-    'iMac17,1':       'iMac (27-inch, Late 2015)',
-    'iMac18,3':       'iMac (27-inch, 2017)',
-    'MacPro5,1':      'Mac Pro (Mid 2010)',
-}
+_MAC_PROFILES_PATH = '/usr/local/share/selahos/mac-profiles.json'
+
+def _load_mac_profiles():
+    try:
+        with open(_MAC_PROFILES_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {'models': {}, 'tiers': {}, 'fallback_apple': {}}
+
+MAC_PROFILES = _load_mac_profiles()
+
+def get_mac_profile(model_id):
+    """Return profile dict for a model ID, or the fallback if unknown."""
+    return MAC_PROFILES.get('models', {}).get(
+        model_id, MAC_PROFILES.get('fallback_apple', {}))
+
+def get_tier(tier_name):
+    """Return tier dict by name."""
+    return MAC_PROFILES.get('tiers', {}).get(tier_name, {})
 
 INSTALL_STEPS = [
     (5,  'Partitioning drive'),
@@ -790,7 +792,8 @@ class HardwareScreen(QWidget):
         prod = self.hw.get('product', '')
 
         is_apple = 'apple' in mfr.lower()
-        friendly = APPLE_MODELS.get(prod, None) if is_apple else None
+        profile  = get_mac_profile(prod) if is_apple else {}
+        friendly = profile.get('name') if is_apple else None
 
         if friendly:
             self.machine_name.setText(friendly)
@@ -814,22 +817,58 @@ class HardwareScreen(QWidget):
                     item.layout().takeAt(0)
 
         if is_apple:
-            self._add_config_item('BCM4350 WiFi — PCIe rescan driver')
-            self._add_config_item('CS8409 Audio — HDA patch applied')
-            self._add_config_item('Thunderbolt 3 — Alpine Ridge enabled')
+            tier_name = profile.get('tier', 'kaby_lake')
+            tier      = get_tier(tier_name)
+            wifi      = profile.get('wifi', 'BCM WiFi')
+            audio     = profile.get('audio', 'HDA')
+            tb        = profile.get('tb', 0)
+            battery   = profile.get('battery', False)
+            has_t2    = profile.get('has_t2', False)
+
+            self._add_config_item(f'{wifi} — PCIe WiFi driver')
+            self._add_config_item(f'{audio} Audio — HDA patch applied')
+            if tb == 3:
+                self._add_config_item('Thunderbolt 3 — Alpine Ridge enabled')
+            elif tb == 2:
+                self._add_config_item('Thunderbolt 2 — DSL5520 enabled')
+            elif tb == 1:
+                self._add_config_item('Thunderbolt 1 — Light Ridge enabled')
             self._add_config_item('FaceTime HD Camera — firmware loaded')
             self._add_config_item('Fan Control — smart thermal curves')
-            self._add_config_item('Battery Management — power optimization')
-            self._add_config_item('T2 / SSD — NVMe power management')
+            if battery:
+                self._add_config_item('Battery Management — power optimization')
+            if has_t2:
+                self._add_config_item('T2 Security Chip — SSD power management')
+            self._add_config_item(f'Boot: {tier.get("label", tier_name)} profile applied')
         else:
+            # Generic PC — detect GPU vendor for display
+            gpu_str = self.hw.get('gpu', '').lower()
+            is_nvidia = 'nvidia' in gpu_str or 'geforce' in gpu_str or 'quadro' in gpu_str
+            is_amd    = 'amd' in gpu_str or 'radeon' in gpu_str or 'rx ' in gpu_str
+            is_intel_gpu = 'intel' in gpu_str
+            is_laptop = os.path.exists('/sys/class/power_supply/BAT0') or \
+                        os.path.exists('/sys/class/power_supply/BAT1')
+
             self._add_config_item('CPU microcode — intel-ucode / amd-ucode')
-            self._add_config_item('GPU drivers — Mesa / Intel / AMDGPU / NVIDIA')
-            self._add_config_item('WiFi / Ethernet — NetworkManager')
+            if is_nvidia:
+                self._add_config_item('NVIDIA — Nouveau open source driver')
+                self._add_config_item('Note: install nvidia pkg post-boot for full perf')
+            elif is_amd:
+                self._add_config_item('AMD — AMDGPU open source driver')
+            elif is_intel_gpu:
+                self._add_config_item('Intel — i915 driver, PSR optimized')
+            else:
+                self._add_config_item('GPU — Mesa open source drivers')
             self._add_config_item('Audio — PipeWire + WirePlumber')
-            self._add_config_item('Power Management — TLP / thermald')
+            self._add_config_item('WiFi / Ethernet — NetworkManager')
+            if is_laptop:
+                self._add_config_item('Battery Management — TLP power optimization')
+            else:
+                self._add_config_item('Power — thermald thermal management')
 
         self.config_layout.addStretch()
         self.hw['is_apple'] = is_apple
+        self.hw['profile']  = profile
 
 
 # ── Screen 5: Installation Progress ──────────────────────────
@@ -1140,7 +1179,7 @@ class InstallThread(QThread):
         self.done_signal.emit(True, '')
 
     def _apply_seedcore(self, chroot, sh):
-        import shutil, os as _os
+        import shutil, os as _os, re as _re
         seed_files = [
             ('/etc/modprobe.d/selah-broadcom.conf', '/mnt/etc/modprobe.d/'),
             ('/etc/modules-load.d/selah-wifi.conf', '/mnt/etc/modules-load.d/'),
@@ -1153,16 +1192,29 @@ class InstallThread(QThread):
         for src, dst in seed_files:
             if _os.path.exists(src):
                 sh(['cp', src, dst])
-        for svc in ['selah-wifi-wake', 'tlp', 'thermald', 'irqbalance', 'acpid']:
+
+        hw      = self.config.get('hw', {})
+        profile = hw.get('profile', {})
+        battery = profile.get('battery', False)
+
+        services = ['selah-wifi-wake', 'thermald', 'irqbalance', 'acpid']
+        if battery:
+            services.append('tlp')
+        for svc in services:
             chroot(['systemctl', 'enable', svc])
-        # GRUB params for Apple
+
+        # Build GRUB params from profile tier
+        tier_name = profile.get('tier', 'kaby_lake')
+        tier      = get_tier(tier_name)
+        base      = tier.get('grub_base', 'pcie_aspm=off acpi_osi=Darwin video=efifb:off')
+        extra     = tier.get('grub_laptop_extra', '') if battery else ''
+        params    = f'quiet splash {base} {extra}'.strip()
+
         grub_cfg = '/mnt/etc/default/grub'
         if _os.path.exists(grub_cfg):
             with open(grub_cfg) as f:
                 content = f.read()
             if 'GRUB_CMDLINE_LINUX_DEFAULT' in content:
-                import re as _re
-                params = 'quiet splash pcie_aspm=off acpi_osi=Darwin i915.enable_guc=2 mem_sleep_default=deep'
                 content = _re.sub(
                     r'GRUB_CMDLINE_LINUX_DEFAULT=.*',
                     f'GRUB_CMDLINE_LINUX_DEFAULT="{params}"',
@@ -1181,6 +1233,7 @@ class InstallThread(QThread):
             '/usr/share/plymouth/themes/selahos',
             '/usr/share/wallpapers/selahos',
             '/usr/share/selahos',
+            '/usr/local/share/selahos',
             '/etc/skel/.config',
         ]
         for d in theme_dirs:

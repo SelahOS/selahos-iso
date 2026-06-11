@@ -1,0 +1,130 @@
+{
+  "_note": "SelahOS Mac Hardware Profiles — model ID to tier and component mapping. Add new models here; no code changes needed.",
+
+  "tiers": {
+    "legacy": {
+      "label": "Legacy Intel (2010–2012)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off noapic i915.enable_psr=0",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "ivy_bridge": {
+      "label": "Ivy Bridge (2012–2013)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off i915.enable_psr=0",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "haswell": {
+      "label": "Haswell (2013–2014)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off i915.enable_psr=0",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "broadwell": {
+      "label": "Broadwell (2015)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin i915.enable_psr=0 i915.enable_fbc=0 video=efifb:off",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "skylake": {
+      "label": "Skylake (2016)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin i915.enable_psr=0 video=efifb:off",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "kaby_lake": {
+      "label": "Kaby Lake (2017)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "coffee_lake": {
+      "label": "Coffee Lake (2018–2019)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "ice_lake": {
+      "label": "Ice Lake / Comet Lake (2019–2020)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off",
+      "grub_laptop_extra": "mem_sleep_default=deep"
+    },
+    "no_igp": {
+      "label": "Discrete GPU only (Mac Pro)",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off",
+      "grub_laptop_extra": ""
+    }
+  },
+
+  "models": {
+
+    "MacBook8,1":       { "name": "MacBook (Early 2015)",          "tier": "broadwell",   "battery": true,  "tb": 0, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false },
+    "MacBook9,1":       { "name": "MacBook (Early 2016)",          "tier": "skylake",     "battery": true,  "tb": 0, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false },
+    "MacBook10,1":      { "name": "MacBook (2017)",                "tier": "kaby_lake",   "battery": true,  "tb": 0, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false },
+
+    "MacBookAir5,1":    { "name": "MacBook Air (11-inch, Mid 2012)", "tier": "ivy_bridge", "battery": true,  "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false },
+    "MacBookAir5,2":    { "name": "MacBook Air (13-inch, Mid 2012)", "tier": "ivy_bridge", "battery": true,  "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false },
+    "MacBookAir6,1":    { "name": "MacBook Air (11-inch, Mid 2013)", "tier": "haswell",    "battery": true,  "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "MacBookAir6,2":    { "name": "MacBook Air (13-inch, Mid 2013)", "tier": "haswell",    "battery": true,  "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "MacBookAir7,1":    { "name": "MacBook Air (11-inch, Early 2015)", "tier": "broadwell", "battery": true, "tb": 2, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false },
+    "MacBookAir7,2":    { "name": "MacBook Air (13-inch, Early 2015)", "tier": "broadwell", "battery": true, "tb": 2, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false },
+    "MacBookAir8,1":    { "name": "MacBook Air (Late 2018)",        "tier": "kaby_lake",   "battery": true,  "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": true  },
+    "MacBookAir8,2":    { "name": "MacBook Air (Mid 2019)",         "tier": "kaby_lake",   "battery": true,  "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": true  },
+    "MacBookAir9,1":    { "name": "MacBook Air (Early 2020)",       "tier": "ice_lake",    "battery": true,  "tb": 3, "audio": "CS8409",  "wifi": "BCM4377",  "has_t2": true  },
+
+    "MacBookPro9,1":    { "name": "MacBook Pro (15-inch, Mid 2012)", "tier": "ivy_bridge", "battery": true,  "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false, "discrete_gpu": true  },
+    "MacBookPro9,2":    { "name": "MacBook Pro (13-inch, Mid 2012)", "tier": "ivy_bridge", "battery": true,  "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false },
+    "MacBookPro10,1":   { "name": "MacBook Pro (15-inch Retina, Mid 2012)", "tier": "ivy_bridge", "battery": true, "tb": 2, "audio": "CS4208", "wifi": "BCM4331", "has_t2": false, "discrete_gpu": true },
+    "MacBookPro10,2":   { "name": "MacBook Pro (13-inch Retina, Late 2012)", "tier": "ivy_bridge", "battery": true, "tb": 2, "audio": "CS4208", "wifi": "BCM4331", "has_t2": false },
+    "MacBookPro11,1":   { "name": "MacBook Pro (13-inch, Late 2013)", "tier": "haswell",   "battery": true,  "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "MacBookPro11,2":   { "name": "MacBook Pro (15-inch, Late 2013)", "tier": "haswell",   "battery": true,  "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false, "discrete_gpu": true },
+    "MacBookPro11,3":   { "name": "MacBook Pro (15-inch, Late 2013)", "tier": "haswell",   "battery": true,  "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false, "discrete_gpu": true },
+    "MacBookPro11,4":   { "name": "MacBook Pro (15-inch, Mid 2015)", "tier": "broadwell",  "battery": true,  "tb": 2, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false, "discrete_gpu": true },
+    "MacBookPro11,5":   { "name": "MacBook Pro (15-inch, Mid 2015)", "tier": "broadwell",  "battery": true,  "tb": 2, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false, "discrete_gpu": true },
+    "MacBookPro12,1":   { "name": "MacBook Pro (13-inch, Early 2015)", "tier": "broadwell", "battery": true, "tb": 2, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false },
+    "MacBookPro13,1":   { "name": "MacBook Pro (13-inch, Late 2016, 2 TB3)", "tier": "skylake", "battery": true, "tb": 3, "audio": "CS4208", "wifi": "BCM43602", "has_t2": false },
+    "MacBookPro13,2":   { "name": "MacBook Pro (13-inch, Late 2016, 4 TB3)", "tier": "skylake", "battery": true, "tb": 3, "audio": "CS4208", "wifi": "BCM43602", "has_t2": false },
+    "MacBookPro13,3":   { "name": "MacBook Pro (15-inch, Late 2016)", "tier": "skylake",   "battery": true,  "tb": 3, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false, "discrete_gpu": true },
+    "MacBookPro14,1":   { "name": "MacBook Pro (13-inch, Mid 2017, 2 TB3)", "tier": "kaby_lake", "battery": true, "tb": 3, "audio": "CS4208", "wifi": "BCM43602", "has_t2": false },
+    "MacBookPro14,2":   { "name": "MacBook Pro (13-inch, Mid 2017, 4 TB3)", "tier": "kaby_lake", "battery": true, "tb": 3, "audio": "CS4208", "wifi": "BCM43602", "has_t2": false },
+    "MacBookPro14,3":   { "name": "MacBook Pro (15-inch, Mid 2017)", "tier": "kaby_lake",  "battery": true,  "tb": 3, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false, "discrete_gpu": true },
+    "MacBookPro15,1":   { "name": "MacBook Pro (15-inch, Mid 2018)", "tier": "coffee_lake", "battery": true, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": true,  "discrete_gpu": true },
+    "MacBookPro15,2":   { "name": "MacBook Pro (13-inch, Mid 2018)", "tier": "coffee_lake", "battery": true, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": true  },
+    "MacBookPro15,3":   { "name": "MacBook Pro (15-inch, Mid 2019)", "tier": "coffee_lake", "battery": true, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": true,  "discrete_gpu": true },
+    "MacBookPro15,4":   { "name": "MacBook Pro (13-inch, Mid 2019)", "tier": "coffee_lake", "battery": true, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": true  },
+    "MacBookPro16,1":   { "name": "MacBook Pro (16-inch, Late 2019)", "tier": "coffee_lake", "battery": true, "tb": 3, "audio": "CS8409", "wifi": "BCM4364",  "has_t2": true,  "discrete_gpu": true },
+    "MacBookPro16,2":   { "name": "MacBook Pro (13-inch, Early 2020)", "tier": "ice_lake", "battery": true,  "tb": 3, "audio": "CS8409",  "wifi": "BCM4377",  "has_t2": true  },
+    "MacBookPro16,3":   { "name": "MacBook Pro (13-inch, Early 2020)", "tier": "ice_lake", "battery": true,  "tb": 3, "audio": "CS8409",  "wifi": "BCM4377",  "has_t2": true  },
+    "MacBookPro16,4":   { "name": "MacBook Pro (16-inch, Late 2019)", "tier": "coffee_lake", "battery": true, "tb": 3, "audio": "CS8409", "wifi": "BCM4364",  "has_t2": true,  "discrete_gpu": true },
+
+    "iMac12,1":         { "name": "iMac (21.5-inch, Mid 2011)",    "tier": "legacy",      "battery": false, "tb": 1, "audio": "CS4206A", "wifi": "BCM4331",  "has_t2": false, "discrete_gpu": true },
+    "iMac12,2":         { "name": "iMac (27-inch, Mid 2011)",      "tier": "legacy",      "battery": false, "tb": 1, "audio": "CS4206A", "wifi": "BCM4331",  "has_t2": false, "discrete_gpu": true },
+    "iMac13,1":         { "name": "iMac (21.5-inch, Late 2012)",   "tier": "ivy_bridge",  "battery": false, "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false, "discrete_gpu": true },
+    "iMac13,2":         { "name": "iMac (27-inch, Late 2012)",     "tier": "ivy_bridge",  "battery": false, "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false, "discrete_gpu": true },
+    "iMac14,1":         { "name": "iMac (21.5-inch, Late 2013)",   "tier": "haswell",     "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "iMac14,2":         { "name": "iMac (27-inch, Late 2013)",     "tier": "haswell",     "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false, "discrete_gpu": true },
+    "iMac14,3":         { "name": "iMac (21.5-inch, Late 2013)",   "tier": "haswell",     "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "iMac14,4":         { "name": "iMac (21.5-inch, Mid 2014)",    "tier": "haswell",     "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "iMac15,1":         { "name": "iMac (27-inch 5K, Late 2014)",  "tier": "haswell",     "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false, "discrete_gpu": true },
+    "iMac16,1":         { "name": "iMac (21.5-inch, Late 2015)",   "tier": "broadwell",   "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "iMac16,2":         { "name": "iMac (21.5-inch, Late 2015)",   "tier": "broadwell",   "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "iMac17,1":         { "name": "iMac (27-inch 5K, Late 2015)",  "tier": "skylake",     "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false, "discrete_gpu": true },
+    "iMac18,1":         { "name": "iMac (21.5-inch, Mid 2017)",    "tier": "kaby_lake",   "battery": false, "tb": 3, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false },
+    "iMac18,2":         { "name": "iMac (21.5-inch, Mid 2017)",    "tier": "kaby_lake",   "battery": false, "tb": 3, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false, "discrete_gpu": true },
+    "iMac18,3":         { "name": "iMac (27-inch 5K, Mid 2017)",   "tier": "kaby_lake",   "battery": false, "tb": 3, "audio": "CS4208",  "wifi": "BCM43602", "has_t2": false, "discrete_gpu": true },
+    "iMac19,1":         { "name": "iMac (27-inch 5K, Early 2019)", "tier": "coffee_lake", "battery": false, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": false, "discrete_gpu": true },
+    "iMac19,2":         { "name": "iMac (21.5-inch, Early 2019)",  "tier": "coffee_lake", "battery": false, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": false, "discrete_gpu": true },
+    "iMac20,1":         { "name": "iMac (27-inch 5K, Mid 2020)",   "tier": "ice_lake",    "battery": false, "tb": 3, "audio": "CS8409",  "wifi": "BCM4377",  "has_t2": false, "discrete_gpu": true },
+    "iMac20,2":         { "name": "iMac (27-inch 5K, Mid 2020)",   "tier": "ice_lake",    "battery": false, "tb": 3, "audio": "CS8409",  "wifi": "BCM4377",  "has_t2": false, "discrete_gpu": true },
+
+    "Macmini6,1":       { "name": "Mac mini (Late 2012)",          "tier": "ivy_bridge",  "battery": false, "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false },
+    "Macmini6,2":       { "name": "Mac mini (Late 2012)",          "tier": "ivy_bridge",  "battery": false, "tb": 1, "audio": "CS4208",  "wifi": "BCM4331",  "has_t2": false },
+    "Macmini7,1":       { "name": "Mac mini (Late 2014)",          "tier": "haswell",     "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false },
+    "Macmini8,1":       { "name": "Mac mini (Late 2018)",          "tier": "coffee_lake", "battery": false, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": true  },
+
+    "MacPro6,1":        { "name": "Mac Pro (Late 2013)",           "tier": "no_igp",      "battery": false, "tb": 2, "audio": "CS4208",  "wifi": "BCM4360",  "has_t2": false, "discrete_gpu": true },
+    "MacPro7,1":        { "name": "Mac Pro (Late 2019)",           "tier": "no_igp",      "battery": false, "tb": 3, "audio": "CS8409",  "wifi": "BCM4364",  "has_t2": false, "discrete_gpu": true }
+  },
+
+  "fallback_apple": {
+    "tier": "kaby_lake",
+    "battery": false,
+    "tb": 3,
+    "audio": "Unknown",
+    "wifi": "BCM WiFi",
+    "has_t2": false
+  }
+}

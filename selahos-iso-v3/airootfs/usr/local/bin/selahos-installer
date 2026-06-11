@@ -743,8 +743,9 @@ VENDOR_NAME="Selah Technologies LLC"
 VENDOR_URL="https://selahtechnologies.io"
 OSREL
 
-# Fix GRUB distributor name
+# Fix GRUB distributor name and kernel parameters
 sed -i 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/' /mnt/etc/default/grub
+sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash i915.enable_psr=0 i915.enable_fbc=0"/' /mnt/etc/default/grub
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
 
 echo "=== Installing bootloader ==="
@@ -755,6 +756,9 @@ arch-chroot /mnt grub-install \
     --removable \
     --recheck
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+
+echo "=== Regenerating initramfs ==="
+arch-chroot /mnt mkinitcpio -p linux-zen
 
 echo "=== Unmounting ==="
 umount -R /mnt

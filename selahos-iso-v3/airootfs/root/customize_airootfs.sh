@@ -29,6 +29,8 @@ for grp in bluetooth realtime sys lp; do
 done
 
 echo "liveuser:liveuser" | chpasswd
+passwd -d liveuser
+passwd -d root
 
 # Passwordless sudo for live session
 echo "liveuser ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/liveuser
@@ -156,7 +158,7 @@ EOF
 cat > /etc/sddm.conf.d/autologin.conf << 'EOF'
 [Autologin]
 User=liveuser
-Session=plasma
+Session=plasmawayland
 Relogin=false
 EOF
 
