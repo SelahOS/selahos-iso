@@ -49,8 +49,19 @@ REGEDIT4
 "Auto"="0"
 "UserDebuggerHotKey"=dword:00000000
 
-; ── Ensure mDNSResponder can bind to local interfaces ────────────
-; MOTU's mDNS service (used for hardware/license discovery) needs
-; the loopback interface to be accessible for inter-process comms.
+; ── Disable MOTU Bonjour/mDNSResponder service ───────────────────
+; motuDNSResponder.exe hangs under Wine — tries to bind mDNS port
+; 5353 and never signals SERVICE_RUNNING, blocking DP authorization.
+; Disable both service name variants + add IFEO intercept so any
+; launch attempt exits immediately instead of hanging Wine.
+; Applied before AND after the DP installer to survive its overwrite.
 [HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\mDNSResponder]
-"Start"=dword:00000002
+"Start"=dword:00000004
+"ErrorControl"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Bonjour Service]
+"Start"=dword:00000004
+"ErrorControl"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\motuDNSResponder.exe]
+"Debugger"="cmd.exe /c exit"

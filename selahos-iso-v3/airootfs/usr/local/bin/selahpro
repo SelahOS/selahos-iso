@@ -175,7 +175,7 @@ def _run_cmd(desc: str, *args, check=True, capture=False):
         kwargs["text"] = True
     return subprocess.run(list(args), **kwargs)
 
-def cmd_install(daw_name: str | None, existing_prefix: str | None = None):
+def cmd_install(daw_name: str | None, existing_prefix: str | None = None, installer_path: str | None = None):
     """Install SelahBridgePro runtime and optionally scaffold a DAW Wine prefix."""
     hdr("SelahBridgePro Install")
     _check_license()
@@ -236,13 +236,13 @@ def cmd_install(daw_name: str | None, existing_prefix: str | None = None):
         if not daw:
             warn(f"Unknown DAW '{daw_name}'. Known: {', '.join(KNOWN_DAWS)}")
         else:
-            _scaffold_prefix(daw, existing_prefix=existing_prefix)
+            _scaffold_prefix(daw, existing_prefix=existing_prefix, installer_path=installer_path)
 
     ok("SelahBridgePro installation complete")
     info("Launch a DAW: selahpro launch <daw>")
     info("Diagnose issues: selahpro diagnose")
 
-def _scaffold_prefix(daw: dict, existing_prefix: str | None = None):
+def _scaffold_prefix(daw: dict, existing_prefix: str | None = None, installer_path: str | None = None):
     """Create or patch a DAW-specific Wine prefix with the correct profile applied."""
     name = daw["name"]
     profile_key = daw["profile"]
@@ -301,6 +301,35 @@ def _scaffold_prefix(daw: dict, existing_prefix: str | None = None):
         else:
             warn("vcredist2022 install failed — DP may crash on launch")
             warn("Manual fix: WINEPREFIX=~/.wine-selah-digitalperformer winetricks vcredist2022")
+
+        # Run the DP installer if provided, then re-apply service-disable patches.
+        # The DP installer overwrites the mDNSResponder/Bonjour service registry entries
+        # it just created — re-applying dp-fixes.reg after install restores Start=4
+        # (disabled) and the IFEO intercept that prevents the authorization hang.
+        if installer_path:
+            installer = Path(installer_path).expanduser().resolve()
+            if not installer.exists():
+                warn(f"Installer not found: {installer}")
+            else:
+                info(f"Running Digital Performer installer: {installer.name}")
+                info("Complete the installer window, then close it to continue.")
+                subprocess.run(
+                    ["wine", str(installer)],
+                    env={**os.environ, **env},
+                    check=False
+                )
+                ok("Digital Performer installer finished")
+
+                # Re-apply dp-fixes.reg: installer overwrote our Bonjour service
+                # entries with Start=2 (auto) — put them back to Start=4 (disabled)
+                # and restore the IFEO intercept for motuDNSResponder.exe.
+                if extra_reg_path and Path(extra_reg_path).exists():
+                    info("Re-applying post-install service patches...")
+                    subprocess.run(
+                        ["wine", "regedit", extra_reg_path],
+                        env={**os.environ, **env}, check=False, capture_output=True
+                    )
+                    ok("motuDNSResponder disabled — authorization hang prevented")
 
     # MPC Software: install VC++ 2019, .NET 4.8, and DirectX 9 components
     if profile_key in ("mpc",):
@@ -766,6 +795,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=f"SelahBridgePro v{VERSION} — Creator DAW compatibility for SelahOS",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
+            f"  {GOLD}selahpro install dp --installer ~/Downloads/DP1136.exe{RESET}  Install Digital Performer\n"
             f"  {GOLD}selahpro install flstudio{RESET}          Install + scaffold FL Studio prefix\n"
             f"  {GOLD}selahpro install mpc{RESET}               Install + scaffold MPC Software prefix\n"
             f"  {GOLD}selahpro install{RESET}                   Install SelahBridgePro runtime only\n"
@@ -795,6 +825,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="DAW to scaffold (flstudio/ableton/reaper/protools/dp)")
     ins.add_argument("--prefix", metavar="PATH",
                      help="Apply fixes to an existing Wine prefix instead of creating a new one")
+    ins.add_argument("--installer", metavar="PATH",
+                     help="Path to the DAW installer .exe — runs it after prefix setup and re-applies service patches post-install")
 
     # launch
     launch = sub.add_parser("launch", help="Launch a DAW via SelahWine")
@@ -916,7 +948,7 @@ def main():
 
     cmd = args.command
     if cmd == "install":
-        cmd_install(getattr(args, "daw", None), getattr(args, "prefix", None))
+        cmd_install(getattr(args, "daw", None), getattr(args, "prefix", None), getattr(args, "installer", None))
     elif cmd == "launch":
         cmd_launch(args.daw, getattr(args, "exe", None))
     elif cmd == "auth":
