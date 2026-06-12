@@ -46,11 +46,10 @@ SELAH_MIDI_PASSTHROUGH=1
 SELAH_MIDI_SYSEX=1
 
 # ── DP pre-launch services ──────────────────────────────────────
-# LDSvc.exe (MOTU license daemon) must be running and its COM server
-# must finish registering before DP.exe calls into motucorelibs.
-# selahpro launch dp handles this automatically via SELAH_PRELAUNCHES.
-SELAH_PRELAUNCHES="LDSvc.exe"
-SELAH_PRELAUNCH_WAIT=4
+# DP 11.36 does not ship LDSvc.exe — MOTU removed the standalone
+# license daemon in this version. Leave SELAH_PRELAUNCHES empty.
+SELAH_PRELAUNCHES=""
+SELAH_PRELAUNCH_WAIT=0
 
 # ── DP executable ───────────────────────────────────────────────
 SELAH_DAW_EXE="DP.exe"
