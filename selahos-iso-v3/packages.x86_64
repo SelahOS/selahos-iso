@@ -255,6 +255,8 @@ npm
 python
 python-pip
 python-pipx
+python-rtmidi
+python-mido
 go
 rust
 gcc

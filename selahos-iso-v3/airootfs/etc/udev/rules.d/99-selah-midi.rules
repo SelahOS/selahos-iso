@@ -8,12 +8,20 @@
 #                      sudo udevadm trigger --subsystem-match=usb
 # ═══════════════════════════════════════════════════════════════
 
-# ── Akai MPK Mini 4 ─────────────────────────────────────────────
-SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="006b", \
+# ── Akai MPK mini IV (PID:005d, confirmed hardware) ─────────────
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="005d", \
   TAG+="uaccess", GROUP="audio", MODE="0664", \
-  SYMLINK+="selah-midi/akai-mpk-mini4"
+  SYMLINK+="selah-midi/akai-mpk-mini-iv"
 
-SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="006b", \
+SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="005d", \
+  GROUP="audio", MODE="0664", TAG+="uaccess"
+
+# ── Akai MPK mini Mk II (PID:0045) — older hardware ─────────────
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0045", \
+  TAG+="uaccess", GROUP="audio", MODE="0664", \
+  SYMLINK+="selah-midi/akai-mpk-mini-mk2"
+
+SUBSYSTEM=="sound", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0045", \
   GROUP="audio", MODE="0664", TAG+="uaccess"
 
 # ── Akai MPC Studio 2 (VID:09e8 PID:004a) ──────────────────────
