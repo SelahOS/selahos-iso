@@ -10,15 +10,9 @@
 #    selah-mpk-mini-iv              launch GUI editor
 #    selah-mpk-mini-iv --ports      list MIDI ports and exit
 #    selah-mpk-mini-iv --monitor    print raw MIDI messages
-#
-#  Requires: python-rtmidi  python-pyqt6
 # ═══════════════════════════════════════════════════════════════════════════════
 
-import sys
-import json
-import time
-import signal
-import argparse
+import sys, json, time, signal, argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable
@@ -38,17 +32,15 @@ MPK_DEVICE_ID = 0x5D
 CMD_GET       = 0x66
 CMD_SET       = 0x67
 PAYLOAD_LEN   = 276
-
-ARP_MODES  = ["Up", "Down", "Inclusive", "Exclusive", "Order", "Random"]
-ARP_DIVS   = ["1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T"]
-ARP_OCTS   = ["1 Oct", "2 Oct", "3 Oct", "4 Oct"]
-KNOB_MODES = ["Relative", "Absolute"]
-NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
-MMC_CMDS   = {1:"Stop", 2:"Play", 3:"Deferred Play", 4:"Fast Fwd",
-              5:"Rewind", 6:"Record", 9:"Pause"}
+ARP_MODES     = ["Up", "Down", "Inclusive", "Exclusive", "Order", "Random"]
+ARP_DIVS      = ["1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T"]
+ARP_OCTS      = ["1 Oct", "2 Oct", "3 Oct", "4 Oct"]
+KNOB_MODES    = ["Relative", "Absolute"]
+NOTE_NAMES    = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
+MMC_CMDS      = {1:"STOP", 2:"PLAY", 3:"PLAY", 4:"FFWD", 5:"REW", 6:"REC", 9:"PAUSE"}
+IS_WHITE      = [True,False,True,False,True,True,False,True,False,True,False,True]
 
 def nn(n): return f"{NOTE_NAMES[n%12]}{n//12-1}"
-def is_white(n): return [True,False,True,False,True,True,False,True,False,True,False,True][n%12]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -57,77 +49,55 @@ def is_white(n): return [True,False,True,False,True,True,False,True,False,True,F
 
 @dataclass
 class PadConfig:
-    note:    int = 36
-    type_b3: int = 0x05
-    type_b4: int = 0x21
+    note: int=36; type_b3: int=0x05; type_b4: int=0x21
 
 @dataclass
 class KnobConfig:
-    cc:      int = 24
-    min_val: int = 0
-    max_val: int = 127
-    mode:    int = 1
-    name:    str = ""
+    cc: int=24; min_val: int=0; max_val: int=127; mode: int=1; name: str=""
 
 @dataclass
 class Preset:
-    index:        int  = 0
-    name:         str  = "USER"
-    midi_channel: int  = 1
-    arp_enabled:  bool = False
-    arp_mode:     int  = 0
-    arp_division: int  = 2
-    arp_octave:   int  = 0
-    arp_tempo:    int  = 120
-    clock_source: int  = 0
-    pads_a: list = field(default_factory=lambda: [PadConfig(note=36+i) for i in range(8)])
-    pads_b: list = field(default_factory=lambda: [PadConfig(note=44+i) for i in range(8)])
-    knobs:  list = field(default_factory=lambda: [KnobConfig(cc=24+i, name=f"KNOB{i+1}") for i in range(8)])
-    _raw: Optional[bytes] = field(default=None, repr=False)
+    index: int=0; name: str="USER"; midi_channel: int=1
+    arp_enabled: bool=False; arp_mode: int=0; arp_division: int=2
+    arp_octave: int=0; arp_tempo: int=120; clock_source: int=0
+    pads_a: list=field(default_factory=lambda:[PadConfig(note=36+i) for i in range(8)])
+    pads_b: list=field(default_factory=lambda:[PadConfig(note=44+i) for i in range(8)])
+    knobs:  list=field(default_factory=lambda:[KnobConfig(cc=24+i,name=f"KNOB{i+1}") for i in range(8)])
+    _raw: Optional[bytes]=field(default=None, repr=False)
 
-    def to_payload(self) -> list:
-        d = bytearray(self._raw) if (self._raw and len(self._raw)==PAYLOAD_LEN) else bytearray(PAYLOAD_LEN)
-        if not self._raw or len(self._raw) != PAYLOAD_LEN:
-            d[17]=0x00; d[18]=0x09; d[19]=0x00
-            d[26]=0x00; d[27]=0x7F; d[28]=0x00
+    def to_payload(self):
+        d=bytearray(self._raw) if (self._raw and len(self._raw)==PAYLOAD_LEN) else bytearray(PAYLOAD_LEN)
+        if not self._raw or len(self._raw)!=PAYLOAD_LEN:
+            d[17]=0;d[18]=9;d[19]=0;d[26]=0;d[27]=0x7F;d[28]=0
             for i in range(8):
-                d[30+i*5+1]=0x20+i; d[30+i*5+2]=i
-                d[70+i*5+1]=0x28+i; d[70+i*5+2]=8+i
-        d[0]   = self.index
-        d[1:17]= self.name.encode('ascii','replace')[:16].ljust(16,b'\x00')
-        d[20]  = max(20,min(127,self.arp_tempo))
-        d[21]  = self.arp_division & 0x07
-        d[22]  = self.arp_mode    & 0x07
-        d[23]  = int(self.arp_enabled)
-        d[24]  = self.arp_octave  & 0x03
-        d[25]  = self.clock_source & 0x01
-        d[29]  = max(1,min(16,self.midi_channel))
+                d[30+i*5+1]=0x20+i;d[30+i*5+2]=i;d[70+i*5+1]=0x28+i;d[70+i*5+2]=8+i
+        d[0]=self.index;d[1:17]=self.name.encode('ascii','replace')[:16].ljust(16,b'\x00')
+        d[20]=max(20,min(127,self.arp_tempo));d[21]=self.arp_division&7;d[22]=self.arp_mode&7
+        d[23]=int(self.arp_enabled);d[24]=self.arp_octave&3;d[25]=self.clock_source&1
+        d[29]=max(1,min(16,self.midi_channel))
         for i,p in enumerate(self.pads_a[:8]):
-            off=30+i*5; d[off]=p.note&0x7F; d[off+3]=p.type_b3; d[off+4]=p.type_b4
+            o=30+i*5;d[o]=p.note&0x7F;d[o+3]=p.type_b3;d[o+4]=p.type_b4
         for i,p in enumerate(self.pads_b[:8]):
-            off=70+i*5; d[off]=p.note&0x7F; d[off+3]=p.type_b3; d[off+4]=p.type_b4
+            o=70+i*5;d[o]=p.note&0x7F;d[o+3]=p.type_b3;d[o+4]=p.type_b4
         for i,k in enumerate(self.knobs[:8]):
-            off=110+i*20
-            d[off]=k.cc&0x7F; d[off+1]=k.min_val&0x7F; d[off+2]=k.max_val&0x7F; d[off+3]=k.mode&0x01
-            d[off+4:off+20]=k.name.encode('ascii','replace')[:16].ljust(16,b'\x00')
+            o=110+i*20;d[o]=k.cc&0x7F;d[o+1]=k.min_val&0x7F;d[o+2]=k.max_val&0x7F;d[o+3]=k.mode&1
+            d[o+4:o+20]=k.name.encode('ascii','replace')[:16].ljust(16,b'\x00')
         return list(d)
 
     @classmethod
-    def from_payload(cls, payload: list) -> "Preset":
-        if len(payload) < PAYLOAD_LEN: return cls()
-        d=payload; p=cls(index=d[0])
-        p._raw         = bytes(d[:PAYLOAD_LEN])
-        p.name         = bytes(d[1:17]).rstrip(b'\x00').decode('ascii','replace')
-        p.arp_tempo    = d[20];  p.arp_division = d[21]&0x07
-        p.arp_mode     = d[22]&0x07; p.arp_enabled = bool(d[23])
-        p.arp_octave   = d[24]&0x03; p.clock_source= d[25]&0x01
-        p.midi_channel = max(1,min(16,d[29]))
+    def from_payload(cls, payload):
+        if len(payload)<PAYLOAD_LEN: return cls()
+        d=payload;p=cls(index=d[0]);p._raw=bytes(d[:PAYLOAD_LEN])
+        p.name=bytes(d[1:17]).rstrip(b'\x00').decode('ascii','replace')
+        p.arp_tempo=d[20];p.arp_division=d[21]&7;p.arp_mode=d[22]&7
+        p.arp_enabled=bool(d[23]);p.arp_octave=d[24]&3;p.clock_source=d[25]&1
+        p.midi_channel=max(1,min(16,d[29]))
         p.pads_a=[PadConfig(note=d[30+i*5],type_b3=d[30+i*5+3],type_b4=d[30+i*5+4]) for i in range(8)]
         p.pads_b=[PadConfig(note=d[70+i*5],type_b3=d[70+i*5+3],type_b4=d[70+i*5+4]) for i in range(8)]
-        p.knobs =[KnobConfig(cc=d[110+i*20],min_val=d[110+i*20+1],max_val=d[110+i*20+2],
-                             mode=d[110+i*20+3],
-                             name=bytes(d[110+i*20+4:110+i*20+20]).rstrip(b'\x00').decode('ascii','replace'))
-                  for i in range(8)]
+        p.knobs=[KnobConfig(cc=d[110+i*20],min_val=d[110+i*20+1],max_val=d[110+i*20+2],
+                            mode=d[110+i*20+3],
+                            name=bytes(d[110+i*20+4:110+i*20+20]).rstrip(b'\x00').decode('ascii','replace'))
+                 for i in range(8)]
         return p
 
     def to_dict(self):
@@ -142,15 +112,15 @@ class Preset:
 
     @classmethod
     def from_dict(cls, d):
-        p=cls(index=d.get("index",0)); p.name=d.get("name","USER")
-        p.midi_channel=d.get("midi_channel",1); p.arp_enabled=d.get("arp_enabled",False)
-        p.arp_mode=d.get("arp_mode",0); p.arp_division=d.get("arp_division",2)
-        p.arp_octave=d.get("arp_octave",0); p.arp_tempo=d.get("arp_tempo",120)
+        p=cls(index=d.get("index",0));p.name=d.get("name","USER")
+        p.midi_channel=d.get("midi_channel",1);p.arp_enabled=d.get("arp_enabled",False)
+        p.arp_mode=d.get("arp_mode",0);p.arp_division=d.get("arp_division",2)
+        p.arp_octave=d.get("arp_octave",0);p.arp_tempo=d.get("arp_tempo",120)
         p.clock_source=d.get("clock_source",0)
         p.pads_a=[PadConfig(**x) for x in d.get("pads_a",[])] or p.pads_a
         p.pads_b=[PadConfig(**x) for x in d.get("pads_b",[])] or p.pads_b
-        p.knobs =[KnobConfig(**x) for x in d.get("knobs",[])]  or p.knobs
-        raw=d.get("_raw"); p._raw=bytes(raw) if raw else None
+        p.knobs=[KnobConfig(**x) for x in d.get("knobs",[])] or p.knobs
+        raw=d.get("_raw");p._raw=bytes(raw) if raw else None
         return p
 
 
@@ -159,42 +129,36 @@ class Preset:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class MPKDevice:
-    MPK_PATTERNS = ["mpk mini iv","mpk mini","mpk"]
-
+    PAT = ["mpk mini iv","mpk mini","mpk"]
     def __init__(self):
-        self._in  = rtmidi.MidiIn()
-        self._out = rtmidi.MidiOut()
-        self._in.ignore_types(sysex=False)
-        self._buf: list = []
-        self._sysex_cb: Optional[Callable] = None
+        self._in=rtmidi.MidiIn();self._out=rtmidi.MidiOut()
+        self._in.ignore_types(sysex=False);self._buf=[];self._sysex_cb=None
 
     @classmethod
     def find_ctrl_ports(cls):
-        mi=rtmidi.MidiIn(); mo=rtmidi.MidiOut()
-        def _mpk(ports): return [(i,n) for i,n in enumerate(ports) if any(p in n.lower() for p in cls.MPK_PATTERNS)]
-        ins =[(i,n) for i,n in _mpk(mi.get_ports())  if "software control" in n.lower()]
-        outs=[(i,n) for i,n in _mpk(mo.get_ports())  if "software control" in n.lower()]
-        if not ins:  ins =_mpk(mi.get_ports())[:1]
-        if not outs: outs=_mpk(mo.get_ports())[:1]
-        del mi,mo; return ins,outs
+        mi=rtmidi.MidiIn();mo=rtmidi.MidiOut()
+        def mpk(p): return [(i,n) for i,n in enumerate(p) if any(x in n.lower() for x in cls.PAT)]
+        ins=[x for x in mpk(mi.get_ports()) if "software control" in x[1].lower()]
+        outs=[x for x in mpk(mo.get_ports()) if "software control" in x[1].lower()]
+        if not ins:  ins=mpk(mi.get_ports())[:1]
+        if not outs: outs=mpk(mo.get_ports())[:1]
+        del mi,mo;return ins,outs
 
     @classmethod
     def find_live_ports(cls):
-        """All MPK MIDI input ports except Software Control (for live notes/CC)."""
         mi=rtmidi.MidiIn()
-        ports=[(i,n) for i,n in enumerate(mi.get_ports())
-               if any(p in n.lower() for p in cls.MPK_PATTERNS)
-               and "software control" not in n.lower()]
-        del mi; return ports
+        r=[(i,n) for i,n in enumerate(mi.get_ports())
+           if any(x in n.lower() for x in cls.PAT) and "software control" not in n.lower()]
+        del mi;return r
 
     @classmethod
     def list_all_ports(cls):
-        mi=rtmidi.MidiIn(); mo=rtmidi.MidiOut()
+        mi=rtmidi.MidiIn();mo=rtmidi.MidiOut()
         r=list(enumerate(mi.get_ports())),list(enumerate(mo.get_ports()))
-        del mi,mo; return r
+        del mi,mo;return r
 
-    def connect(self, in_port, out_port):
-        self._in.open_port(in_port); self._out.open_port(out_port)
+    def connect(self,inp,out):
+        self._in.open_port(inp);self._out.open_port(out)
         self._in.set_callback(self._on_midi)
 
     def disconnect(self):
@@ -202,39 +166,38 @@ class MPKDevice:
         if self._out.is_port_open(): self._out.close_port()
 
     def is_connected(self): return self._in.is_port_open() and self._out.is_port_open()
-    def set_sysex_callback(self, cb): self._sysex_cb = cb
+    def set_sysex_callback(self,cb): self._sysex_cb=cb
 
-    def _on_midi(self, msg, _=None):
+    def _on_midi(self,msg,_=None):
         raw,_=msg
         if not raw: return
         if raw[0]==0xF0:
-            if 0xF7 in raw:
-                if self._sysex_cb: self._sysex_cb(list(raw))
+            if 0xF7 in raw: self._sysex_cb and self._sysex_cb(list(raw))
             else: self._buf=list(raw)
         elif self._buf:
             self._buf.extend(raw)
             if 0xF7 in self._buf:
-                data=self._buf[:]; self._buf=[]
-                if self._sysex_cb: self._sysex_cb(data)
+                d=self._buf[:];self._buf=[]
+                self._sysex_cb and self._sysex_cb(d)
 
     def _sx(self,cmd,data):
         n=len(data)
         return [0xF0,AKAI_MFR_ID,0x00,MPK_DEVICE_ID,cmd,(n>>7)&0x7F,n&0x7F]+data+[0xF7]
 
-    def request_preset(self, index):
-        if self._out.is_port_open(): self._out.send_message(self._sx(CMD_GET,[index&0x03]))
+    def request_preset(self,i):
+        self._out.is_port_open() and self._out.send_message(self._sx(CMD_GET,[i&3]))
 
-    def send_preset(self, preset):
-        if self._out.is_port_open(): self._out.send_message(self._sx(CMD_SET,preset.to_payload()))
+    def send_preset(self,p):
+        self._out.is_port_open() and self._out.send_message(self._sx(CMD_SET,p.to_payload()))
 
-    def parse_response(self, data):
+    def parse_response(self,data):
         if (len(data)>=7+PAYLOAD_LEN and data[0]==0xF0 and data[1]==AKAI_MFR_ID
                 and data[3]==MPK_DEVICE_ID and data[4]==CMD_SET):
             return Preset.from_payload(data[7:-1])
         return None
 
-    def create_virtual_port(self, name="MPK mini IV (SelahOS)"):
-        vo=rtmidi.MidiOut(); vo.open_virtual_port(name); return vo
+    def create_virtual_port(self,name="MPK mini IV (SelahOS)"):
+        v=rtmidi.MidiOut();v.open_virtual_port(name);return v
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -243,109 +206,93 @@ class MPKDevice:
 
 def cmd_ports():
     ins,outs=MPKDevice.list_all_ports()
-    print("MIDI Input ports:")
+    print("MIDI Inputs:")
     for i,n in ins: print(f"  [{i}] {n}")
-    print("\nMIDI Output ports:")
+    print("\nMIDI Outputs:")
     for i,n in outs: print(f"  [{i}] {n}")
-    live=MPKDevice.find_live_ports()
-    if live: print(f"\n  MPK mini IV live ports: {[n for _,n in live]}")
 
 def cmd_monitor():
-    dev=MPKDevice(); ctrl_in,ctrl_out=MPKDevice.find_ctrl_ports()
-    if not ctrl_in: print("No MPK mini IV found."); return
-    dev.set_sysex_callback(lambda d: print(f"SysEx({len(d)}): {' '.join(f'{b:02X}' for b in d[:20])}..."))
-    dev.connect(ctrl_in[0][0], ctrl_out[0][0] if ctrl_out else ctrl_in[0][0])
-    live_handles=[]
+    dev=MPKDevice();ci,co=MPKDevice.find_ctrl_ports()
+    if not ci: print("No MPK found."); return
+    dev.set_sysex_callback(lambda d:print(f"SysEx({len(d)}): {' '.join(f'{b:02X}' for b in d[:20])}..."))
+    dev.connect(ci[0][0],co[0][0] if co else ci[0][0])
+    hs=[]
     for idx,name in MPKDevice.find_live_ports():
-        mi=rtmidi.MidiIn(); mi.ignore_types(sysex=True); mi.open_port(idx)
-        mi.set_callback(lambda m,_,n=name: print(f"[{n.split(':')[-1].strip()}] {' '.join(f'{b:02X}' for b in m[0])}"))
-        live_handles.append(mi)
-    print(f"Monitoring — Ctrl-C to stop")
+        mi=rtmidi.MidiIn();mi.ignore_types(sysex=True);mi.open_port(idx)
+        mi.set_callback(lambda m,_,n=name:print(f"[{n.split(':')[-1].strip()}] {' '.join(f'{b:02X}' for b in m[0])}"))
+        hs.append(mi)
     try:
         while True: time.sleep(0.1)
     except KeyboardInterrupt: pass
     dev.disconnect()
-    for mi in live_handles:
+    for mi in hs:
         try: mi.close_port()
         except: pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  GUI — SelahOS brand palette
+#  GUI
 # ══════════════════════════════════════════════════════════════════════════════
 
-C = {
-    'bg':      '#171C2A', 'bg2': '#1D2333', 'bg3': '#2A3042',
-    'gold':    '#D6A85A', 'gold_lt': '#E6C27A',
-    'white':   '#FFFFFF', 'muted': 'rgba(255,255,255,0.45)',
-    'dim':     'rgba(255,255,255,0.25)',
-    'green':   '#81B29A', 'red': '#C0735A', 'cyan': '#7EC8E3',
-    'border':  'rgba(214,168,90,0.18)', 'border2': 'rgba(214,168,90,0.10)',
+C={
+    'bg':'#171C2A','bg2':'#1D2333','bg3':'#2A3042',
+    'gold':'#D6A85A','gold_lt':'#E6C27A',
+    'white':'#FFFFFF','muted':'rgba(255,255,255,0.45)','dim':'rgba(255,255,255,0.25)',
+    'green':'#81B29A','red':'#C0735A','cyan':'#7EC8E3',
+    'border':'rgba(214,168,90,0.18)','border2':'rgba(214,168,90,0.10)',
+    'oled_bg':'#030608','oled_text':'#A8D4FF','oled_dim':'#3A6090',
+    'pad_teal':'#00C8B8','pad_off':'#1A2535',
 }
 
-QSS = f"""
+QSS=f"""
 * {{ font-family: 'Inter', 'Noto Sans', sans-serif; }}
-QMainWindow, QWidget {{ background: {C['bg']}; color: {C['white']}; }}
-QLabel {{ background: transparent; color: {C['white']}; }}
+QMainWindow,QWidget {{ background:{C['bg']}; color:{C['white']}; }}
+QLabel {{ background:transparent; color:{C['white']}; }}
 QGroupBox {{
-    border: 1px solid {C['border']}; border-radius: 6px;
-    margin-top: 10px; padding-top: 6px;
-    font-size: 11px; font-weight: 600; color: {C['gold']};
+    border:1px solid {C['border']}; border-radius:6px; margin-top:10px;
+    padding-top:6px; font-size:11px; font-weight:600; color:{C['gold']};
 }}
-QGroupBox::title {{ subcontrol-origin: margin; left: 10px; color: {C['gold']}; }}
-QGroupBox[active="true"]      {{ border: 2px solid {C['gold_lt']}; background: rgba(214,168,90,0.18); }}
-QGroupBox[knob_active="true"] {{ border: 2px solid {C['cyan']}; background: rgba(126,200,227,0.15); }}
+QGroupBox::title {{ subcontrol-origin:margin; left:10px; color:{C['gold']}; }}
+QGroupBox[active="true"]      {{ border:2px solid {C['gold_lt']}; background:rgba(214,168,90,0.18); }}
+QGroupBox[knob_active="true"] {{ border:2px solid {C['cyan']}; background:rgba(126,200,227,0.15); }}
 QPushButton {{
-    background: {C['bg3']}; color: {C['gold_lt']};
-    border: 1px solid {C['border']}; border-radius: 6px;
-    padding: 6px 16px; font-size: 12px; font-weight: 500; min-width: 80px;
+    background:{C['bg3']}; color:{C['gold_lt']}; border:1px solid {C['border']};
+    border-radius:6px; padding:6px 16px; font-size:12px; min-width:60px;
 }}
-QPushButton:hover {{ background: {C['bg2']}; border-color: {C['gold']}; color: {C['white']}; }}
-QPushButton:pressed {{ background: {C['gold']}; color: {C['bg']}; }}
-QPushButton#action {{
-    background: rgba(214,168,90,0.10); border-color: {C['gold']};
-    color: {C['gold_lt']}; font-weight: 600;
+QPushButton:hover {{ background:{C['bg2']}; border-color:{C['gold']}; color:{C['white']}; }}
+QPushButton:pressed {{ background:{C['gold']}; color:{C['bg']}; }}
+QPushButton#action {{ background:rgba(214,168,90,0.10); border-color:{C['gold']}; color:{C['gold_lt']}; font-weight:600; }}
+QPushButton#action:hover {{ background:{C['gold']}; color:{C['bg']}; }}
+QComboBox,QSpinBox {{
+    background:{C['bg3']}; border:1px solid {C['border']}; border-radius:5px;
+    padding:3px 6px; color:{C['white']}; font-size:12px; min-width:50px;
 }}
-QPushButton#action:hover {{ background: {C['gold']}; color: {C['bg']}; }}
-QComboBox, QSpinBox {{
-    background: {C['bg3']}; border: 1px solid {C['border']};
-    border-radius: 5px; padding: 3px 6px; color: {C['white']}; font-size: 12px; min-width: 50px;
-}}
-QComboBox:focus, QSpinBox:focus {{ border-color: {C['gold']}; }}
-QComboBox::drop-down {{ border: none; }}
+QComboBox:focus,QSpinBox:focus {{ border-color:{C['gold']}; }}
+QComboBox::drop-down {{ border:none; }}
 QComboBox QAbstractItemView {{
-    background: {C['bg3']}; color: {C['white']}; border: 1px solid {C['border']};
-    selection-background-color: rgba(214,168,90,0.2); selection-color: {C['gold_lt']};
+    background:{C['bg3']}; color:{C['white']}; border:1px solid {C['border']};
+    selection-background-color:rgba(214,168,90,0.2); selection-color:{C['gold_lt']};
 }}
 QLineEdit {{
-    background: {C['bg3']}; border: 1px solid {C['border']};
-    border-radius: 5px; padding: 3px 8px; color: {C['white']}; font-size: 12px;
+    background:{C['bg3']}; border:1px solid {C['border']}; border-radius:5px;
+    padding:3px 8px; color:{C['white']}; font-size:12px;
 }}
-QLineEdit:focus {{ border-color: {C['gold']}; }}
+QLineEdit:focus {{ border-color:{C['gold']}; }}
 QTextEdit {{
-    background: {C['bg2']}; border: 1px solid {C['border2']};
-    border-radius: 4px; color: rgba(255,255,255,0.7); font-size: 11px;
-    font-family: 'JetBrains Mono', 'Noto Mono', monospace;
+    background:{C['bg2']}; border:1px solid {C['border2']}; border-radius:4px;
+    color:rgba(255,255,255,0.7); font-size:11px;
+    font-family:'JetBrains Mono','Noto Mono',monospace;
 }}
-QTabWidget::pane {{ border: 1px solid {C['border2']}; background: {C['bg']}; border-radius: 0 6px 6px 6px; }}
-QTabBar::tab {{
-    background: {C['bg2']}; color: rgba(255,255,255,0.45);
-    padding: 6px 16px; border-radius: 5px 5px 0 0; font-size: 12px; margin-right: 2px;
-}}
-QTabBar::tab:selected {{ background: {C['bg3']}; color: {C['gold_lt']}; border-bottom: 2px solid {C['gold']}; }}
-QTabBar::tab:hover:!selected {{ color: {C['white']}; background: {C['bg3']}; }}
-QCheckBox {{ color: {C['white']}; spacing: 8px; font-size: 12px; }}
-QCheckBox::indicator {{
-    width: 16px; height: 16px; border: 1px solid {C['border']};
-    border-radius: 3px; background: {C['bg3']};
-}}
-QCheckBox::indicator:checked {{ background: {C['gold']}; border-color: {C['gold']}; }}
-QStatusBar {{
-    background: {C['bg2']}; color: rgba(255,255,255,0.45);
-    font-size: 11px; border-top: 1px solid {C['border2']};
-}}
-QScrollBar:vertical {{ background: {C['bg2']}; width: 6px; border-radius: 3px; }}
-QScrollBar::handle:vertical {{ background: rgba(214,168,90,0.3); border-radius: 3px; }}
+QTabWidget::pane {{ border:1px solid {C['border2']}; background:{C['bg']}; border-radius:0 6px 6px 6px; }}
+QTabBar::tab {{ background:{C['bg2']}; color:rgba(255,255,255,0.45); padding:6px 16px; border-radius:5px 5px 0 0; font-size:12px; margin-right:2px; }}
+QTabBar::tab:selected {{ background:{C['bg3']}; color:{C['gold_lt']}; border-bottom:2px solid {C['gold']}; }}
+QTabBar::tab:hover:!selected {{ color:{C['white']}; background:{C['bg3']}; }}
+QCheckBox {{ color:{C['white']}; spacing:8px; font-size:12px; }}
+QCheckBox::indicator {{ width:16px; height:16px; border:1px solid {C['border']}; border-radius:3px; background:{C['bg3']}; }}
+QCheckBox::indicator:checked {{ background:{C['gold']}; border-color:{C['gold']}; }}
+QStatusBar {{ background:{C['bg2']}; color:rgba(255,255,255,0.45); font-size:11px; border-top:1px solid {C['border2']}; }}
+QScrollBar:vertical {{ background:{C['bg2']}; width:6px; border-radius:3px; }}
+QScrollBar::handle:vertical {{ background:rgba(214,168,90,0.3); border-radius:3px; }}
 """
 
 
@@ -355,307 +302,611 @@ def _run_gui():
             QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
             QGridLayout, QLabel, QComboBox, QSpinBox, QCheckBox, QPushButton,
             QGroupBox, QTabWidget, QStatusBar, QMessageBox, QFileDialog,
-            QLineEdit, QFrame, QTextEdit, QSizePolicy,
+            QLineEdit, QFrame, QTextEdit, QSizePolicy, QScrollArea,
         )
-        from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, pyqtSlot
-        from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QBrush
+        from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, pyqtSlot, QRectF
+        from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QBrush, QLinearGradient
     except ImportError:
         sys.exit("Error: python-pyqt6 not installed.\n  sudo pacman -S python-pyqt6")
 
-    CONFIG_DIR = Path.home() / ".config" / "selah" / "mpk-mini-iv"
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR=Path.home()/".config"/"selah"/"mpk-mini-iv"
+    CONFIG_DIR.mkdir(parents=True,exist_ok=True)
 
-    # ── Piano keyboard widget ─────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Virtual OLED display widget
+    # ══════════════════════════════════════════════════════════════════════════
 
-    class PianoWidget(QWidget):
-        """Visual piano — highlights pressed keys in gold."""
-        IS_WHITE = [True,False,True,False,True,True,False,True,False,True,False,True]
+    class OLEDWidget(QWidget):
+        """Simulates the MPK mini IV 128×32 OLED — updates from MIDI events."""
 
-        def __init__(self, start=24, end=84, parent=None):
+        def __init__(self, parent=None):
             super().__init__(parent)
-            self._start  = start
-            self._end    = end
-            self._active = {}   # note → velocity
-            self.setMinimumHeight(80)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self._l1="MPK mini IV"   # line 1 (large)
+            self._l2=""               # line 2 (small)
+            self._l3=""               # line 3 (value bar or extra)
+            self._mode="idle"         # idle|pad|knob|transport|note|octave
+            self._vel=0
+            self.setFixedSize(300, 76)
+            self._reset=QTimer();self._reset.setSingleShot(True)
+            self._reset.timeout.connect(self._go_idle)
 
-        def note_on(self, note, velocity):
-            if not (self._start <= note <= self._end): return
-            if velocity > 0: self._active[note] = velocity
-            else:            self._active.pop(note, None)
-            self.update()
+        def show_home(self, num, name):
+            self._l1=f"PRESET {num}"; self._l2=name; self._l3=""
+            self._mode="idle"; self._reset.stop(); self.update()
 
-        def clear(self):
-            self._active.clear(); self.update()
+        def show_pad(self, bank, pad, note, vel):
+            self._l1=f"PAD  {bank}{pad}"
+            self._l2=f"{nn(note)}   vel: {vel}"
+            self._l3=self._bar(vel,127)
+            self._vel=vel; self._mode="pad"
+            self._reset.start(2200); self.update()
+
+        def show_knob(self, name, cc, val, mn=0, mx=127):
+            k=name[:12] if name else f"CC {cc}"
+            self._l1=k.upper(); self._l2=f"CC: {cc:03d}   val: {val:03d}"
+            span=mx-mn if mx!=mn else 127
+            self._l3=self._bar(val-mn, span)
+            self._mode="knob"; self._reset.start(2200); self.update()
+
+        def show_note(self, note, vel, ch):
+            self._l1=nn(note).ljust(4)+f"  ch {ch:02d}"
+            self._l2=f"vel: {vel:03d}"
+            self._l3=self._bar(vel,127)
+            self._vel=vel; self._mode="note"
+            self._reset.start(2200); self.update()
+
+        def show_transport(self, action):
+            self._l1=action; self._l2=""; self._l3=""
+            self._mode="transport"; self._reset.start(2200); self.update()
+
+        def show_octave(self, offset):
+            s="+" if offset>=0 else ""
+            self._l1=f"OCTAVE  {s}{offset}"
+            self._l2="OCT- / OCT+  controls pitch"
+            self._l3=""; self._mode="octave"; self._reset.start(2200); self.update()
+
+        def _bar(self, val, total):
+            filled=int(val/max(1,total)*16)
+            return "▮"*filled+"▯"*(16-filled)
+
+        def _go_idle(self): self.update()   # parent calls show_home periodically
 
         def paintEvent(self, _):
-            p = QPainter(self)
-            p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            W, H = self.width(), self.height()
+            p=QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            W,H=self.width(),self.height()
 
-            white_notes = [n for n in range(self._start, self._end+1) if self.IS_WHITE[n%12]]
-            if not white_notes: return
+            # Housing
+            p.setBrush(QBrush(QColor(8,10,16)))
+            p.setPen(QPen(QColor(30,50,90),2))
+            p.drawRoundedRect(1,1,W-2,H-2,6,6)
 
-            kw = W / len(white_notes)
-            bw = kw * 0.58
-            bh = H * 0.60
+            # Inner glow at top edge (like OLED backlight)
+            g=QLinearGradient(0,2,0,14)
+            g.setColorAt(0,QColor(40,100,200,35))
+            g.setColorAt(1,QColor(0,0,0,0))
+            p.fillRect(4,3,W-8,12,g)
 
-            # map white note → x
-            wx = {note: int(i*kw) for i,note in enumerate(white_notes)}
+            # Mode-dependent accent strip on left edge
+            mode_colors={"pad":(0,200,184),"knob":(126,200,227),
+                         "transport":(214,168,90),"note":(129,178,154),"octave":(192,115,90)}
+            mc=QColor(*mode_colors.get(self._mode,(40,80,140)))
+            p.fillRect(3,6,3,H-12,mc)
 
-            # background
-            p.fillRect(0,0,W,H, QColor(0x1D,0x23,0x33))
+            # Line 1 — large bright text
+            p.setPen(QPen(QColor(C['oled_text'])))
+            p.setFont(QFont("JetBrains Mono, Noto Mono, Courier",13,QFont.Weight.Bold))
+            p.drawText(12,26,self._l1)
 
-            # white keys
-            for note in white_notes:
-                x = wx[note]; kpx = max(1, int(kw)-1)
+            # Line 2 — secondary text
+            p.setFont(QFont("JetBrains Mono, Noto Mono, Courier",10))
+            p.setPen(QPen(QColor(C['oled_dim'])))
+            p.drawText(12,44,self._l2)
+
+            # Line 3 — value bar or extra
+            if self._l3:
+                p.setFont(QFont("JetBrains Mono, Noto Mono, Courier",9))
+                bar_color=mc
+                bar_color.setAlpha(200)
+                p.setPen(QPen(bar_color))
+                p.drawText(12,62,self._l3)
+            p.end()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Piano keyboard widget
+    # ══════════════════════════════════════════════════════════════════════════
+
+    class PianoWidget(QWidget):
+        def __init__(self,start=24,end=84,parent=None):
+            super().__init__(parent)
+            self._start=start;self._end=end;self._active={}
+            self.setMinimumHeight(72)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
+
+        def note_on(self,note,vel):
+            if not (self._start<=note<=self._end): return
+            if vel>0: self._active[note]=vel
+            else:     self._active.pop(note,None)
+            self.update()
+
+        def clear(self): self._active.clear();self.update()
+
+        def paintEvent(self,_):
+            p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing,False)
+            W,H=self.width(),self.height()
+            wn=[n for n in range(self._start,self._end+1) if IS_WHITE[n%12]]
+            if not wn: return
+            kw=W/len(wn);bw=kw*0.58;bh=H*0.60
+            wx={note:int(i*kw) for i,note in enumerate(wn)}
+            p.fillRect(0,0,W,H,QColor(0x1D,0x23,0x33))
+            for note in wn:
+                x=wx[note];kpx=max(1,int(kw)-1)
                 if note in self._active:
-                    vel = self._active[note]
-                    a   = 180 + int(vel/127*75)
-                    p.setBrush(QBrush(QColor(214,168,90,a)))
+                    v=self._active[note]
+                    p.setBrush(QBrush(QColor(214,168,90,180+int(v/127*75))))
                 else:
                     p.setBrush(QBrush(QColor(210,205,192)))
                 p.setPen(QPen(QColor(60,65,85),1))
-                p.drawRect(x+1, 0, kpx-1, H-1)
-
-                # C note label
-                if note % 12 == 0 and kw >= 14:
-                    p.setPen(QPen(QColor(80,85,100),1))
-                    p.setFont(QFont("Inter",7))
-                    p.drawText(x+2, H-4, nn(note))
-
-            # black keys
-            for note in range(self._start, self._end+1):
-                if self.IS_WHITE[note%12]: continue
-                prev = note-1
-                while prev >= self._start and not self.IS_WHITE[prev%12]: prev -= 1
-                if prev < self._start or prev not in wx: continue
-                bx = int(wx[prev] + kw*0.62)
+                p.drawRect(x+1,0,kpx-1,H-1)
+                if note%12==0 and kw>=14:
+                    p.setPen(QPen(QColor(80,85,100)));p.setFont(QFont("Inter",7))
+                    p.drawText(x+2,H-4,nn(note))
+            for note in range(self._start,self._end+1):
+                if IS_WHITE[note%12]: continue
+                prev=note-1
+                while prev>=self._start and not IS_WHITE[prev%12]: prev-=1
+                if prev<self._start or prev not in wx: continue
+                bx=int(wx[prev]+kw*0.62)
                 if note in self._active:
-                    vel = self._active[note]
-                    p.setBrush(QBrush(QColor(214,168,90, 200+int(vel/127*55))))
+                    v=self._active[note]
+                    p.setBrush(QBrush(QColor(214,168,90,200+int(v/127*55))))
                 else:
                     p.setBrush(QBrush(QColor(22,26,38)))
                 p.setPen(QPen(QColor(10,12,18),1))
-                p.drawRect(bx, 0, int(bw), int(bh))
+                p.drawRect(bx,0,int(bw),int(bh))
             p.end()
 
-    # ── Device + live MIDI watcher (monitors ALL MPK ports) ──────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Controller schematic widget — top-down device view
+    # ══════════════════════════════════════════════════════════════════════════
+
+    class DeviceWidget(QWidget):
+        """Paints a schematic of the MPK mini IV. Call flash_* methods on events."""
+
+        # Layout grid (fractions of widget size)
+        # Right section (55% width): pads top, OLED/buttons mid, knobs bottom
+        # Left section (45% width): keyboard
+
+        def __init__(self,parent=None):
+            super().__init__(parent)
+            self.setMinimumSize(760,280)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed)
+            # State: active elements
+            self._pads_a={i:0 for i in range(8)}   # 0=off, 1..127=velocity
+            self._pads_b={i:0 for i in range(8)}
+            self._knobs=[0]*8
+            self._transport={}   # label->flash
+            self._oct=0          # octave offset
+            self._bank='A'       # active bank
+            self._key_note=None  # last key press
+            self._timers=[]
+
+        def _flash_timer(self,setter,ms=200):
+            t=QTimer();t.setSingleShot(True);t.setInterval(ms)
+            t.timeout.connect(setter)
+            self._timers.append(t)
+            t.start()
+            return t
+
+        def flash_pad(self,bank,idx,vel):
+            if bank=='A': self._pads_a[idx]=vel
+            else:         self._pads_b[idx]=vel
+            self.update()
+            def off():
+                if bank=='A': self._pads_a[idx]=0
+                else:         self._pads_b[idx]=0
+                self.update()
+            self._flash_timer(off,200)
+
+        def flash_knob(self,idx):
+            self._knobs[idx]=1;self.update()
+            def off(): self._knobs[idx]=0;self.update()
+            self._flash_timer(off,300)
+
+        def flash_transport(self,label):
+            self._transport[label]=1;self.update()
+            def off(): self._transport.pop(label,None);self.update()
+            self._flash_timer(off,250)
+
+        def set_octave(self,offset): self._oct=offset;self.update()
+        def set_bank(self,b):        self._bank=b;self.update()
+        def flash_key(self,note):    self._key_note=note;self.update()
+
+        def paintEvent(self,_):
+            p=QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            W,H=self.width(),self.height()
+
+            # ── Body ────────────────────────────────────────────────────────
+            p.setBrush(QBrush(QColor(58,60,66)))
+            p.setPen(QPen(QColor(30,32,38),2))
+            p.drawRoundedRect(2,2,W-4,H-4,12,12)
+
+            # Divider between keyboard and controls
+            KW=int(W*0.43)   # keyboard width
+            CX=KW+8          # controls start x
+
+            # ── Keyboard area label ─────────────────────────────────────────
+            p.setFont(QFont("Inter",8))
+            p.setPen(QPen(QColor(120,120,130)))
+            p.drawText(10,H-10,"25-KEY  MIDI KEYBOARD")
+
+            # Simplified keyboard graphic (bottom strip)
+            KB_H=int(H*0.28);KB_Y=H-KB_H-4
+            for wi in range(25):
+                note=(wi+36)  # C2-C4
+                x=12+wi*(KW//26)
+                kw_=max(1,KW//26-1)
+                white=IS_WHITE[note%12]
+                active=self._key_note==note
+                if white:
+                    color=QColor(214,168,90,200) if active else QColor(195,192,182)
+                    p.fillRect(x,KB_Y,kw_,KB_H,color)
+                    p.setPen(QPen(QColor(60,62,70),1));p.drawRect(x,KB_Y,kw_,KB_H)
+            for wi in range(25):
+                note=36+wi
+                if IS_WHITE[note%12]: continue
+                x=12+wi*(KW//26)+int(KW//26*0.6)
+                p.fillRect(x,KB_Y,max(1,KW//30),int(KB_H*0.6),QColor(22,24,30))
+                p.setPen(QPen(QColor(10,10,15),1))
+                p.drawRect(x,KB_Y,max(1,KW//30),int(KB_H*0.6))
+
+            # ── Controls section ─────────────────────────────────────────────
+            # Pad grid — 2 banks of 4×2 pads
+            PAD_SIZE=int(H*0.16)
+            PAD_GAP=4
+            # Bank A (left)
+            def _draw_pads(bank_dict,start_x,start_y,label):
+                p.setFont(QFont("Inter",7,QFont.Weight.Bold))
+                p.setPen(QPen(QColor(150,150,160)))
+                p.drawText(start_x,start_y-4,f"BANK {label}")
+                for row in range(2):
+                    for col in range(4):
+                        idx=(1-row)*4+col  # pads 0-3 bottom row, 4-7 top row
+                        x=start_x+col*(PAD_SIZE+PAD_GAP)
+                        y=start_y+row*(PAD_SIZE+PAD_GAP)
+                        vel=bank_dict.get(idx,0)
+                        if vel:
+                            alpha=min(255,150+int(vel/127*105))
+                            color=QColor(0,200,184,alpha)
+                        else:
+                            color=QColor(22,36,48)
+                        p.setBrush(QBrush(color))
+                        p.setPen(QPen(QColor(10,20,30),1))
+                        p.drawRoundedRect(x,y,PAD_SIZE,PAD_SIZE,3,3)
+                        p.setFont(QFont("Inter",6))
+                        p.setPen(QPen(QColor(80,120,120) if not vel else QColor(0,0,0)))
+                        p.drawText(x+2,y+PAD_SIZE-3,f"{label}{idx+1}")
+
+            PY=16
+            _draw_pads(self._pads_a,CX,PY,"A")
+            _draw_pads(self._pads_b,CX+4*(PAD_SIZE+PAD_GAP)+12,PY,"B")
+
+            # ── OLED placeholder box (actual widget overlaid by caller) ──────
+            MID_Y=PY+2*(PAD_SIZE+PAD_GAP)+10
+            OLED_X=CX; OLED_W=220; OLED_H=60
+            p.setBrush(QBrush(QColor(5,8,14)))
+            p.setPen(QPen(QColor(30,60,110),1))
+            p.drawRoundedRect(OLED_X,MID_Y,OLED_W,OLED_H,4,4)
+            # encoder
+            ENC_X=OLED_X+OLED_W+10; ENC_CY=MID_Y+OLED_H//2; ENC_R=16
+            p.setBrush(QBrush(QColor(40,42,50)))
+            p.setPen(QPen(QColor(80,84,96),1))
+            p.drawEllipse(ENC_X,ENC_CY-ENC_R,ENC_R*2,ENC_R*2)
+            p.setPen(QPen(QColor(120,124,136)))
+            p.setFont(QFont("Inter",6));p.drawText(ENC_X+4,ENC_CY+3,"ENC")
+
+            # ── Transport buttons ─────────────────────────────────────────────
+            TRANS_Y=MID_Y+OLED_H+10
+            trans_labels=["<<",">>","■","▶","●","↺"]
+            trans_keys  =["REW","FFWD","STOP","PLAY","REC","LOOP"]
+            BTN_W=28;BTN_H=20;BTN_GAP=4
+            for i,(lbl,key) in enumerate(zip(trans_labels,trans_keys)):
+                bx=CX+i*(BTN_W+BTN_GAP);by=TRANS_Y
+                active=key in self._transport
+                if active:
+                    p.setBrush(QBrush(QColor(214,168,90)))
+                    p.setPen(QPen(QColor(160,120,40),1))
+                else:
+                    p.setBrush(QBrush(QColor(35,40,50)))
+                    p.setPen(QPen(QColor(60,68,80),1))
+                p.drawRoundedRect(bx,by,BTN_W,BTN_H,3,3)
+                p.setFont(QFont("Inter",8,QFont.Weight.Bold))
+                p.setPen(QPen(QColor(10,10,10) if active else QColor(160,160,180)))
+                p.drawText(bx+2,by+BTN_H-5,lbl)
+
+            # OCT buttons
+            OCT_X=CX+6*(BTN_W+BTN_GAP)+10
+            for i,(lbl,dy) in enumerate([("OCT-",0),("OCT+",BTN_H+4)]):
+                p.setBrush(QBrush(QColor(30,36,46)))
+                p.setPen(QPen(QColor(60,70,90),1))
+                p.drawRoundedRect(OCT_X,TRANS_Y+dy,BTN_W+4,BTN_H,3,3)
+                p.setFont(QFont("Inter",7,QFont.Weight.Bold))
+                p.setPen(QPen(QColor(140,160,180)))
+                p.drawText(OCT_X+2,TRANS_Y+dy+BTN_H-5,lbl)
+            # Octave display
+            sign="+" if self._oct>=0 else ""
+            p.setFont(QFont("JetBrains Mono,Noto Mono",8,QFont.Weight.Bold))
+            p.setPen(QPen(QColor(C['gold'])))
+            p.drawText(OCT_X,TRANS_Y+2*(BTN_H+4)+8,f"oct {sign}{self._oct}")
+
+            # ARP / TAP buttons
+            ARP_X=OCT_X+BTN_W+14
+            for i,(lbl,col) in enumerate([("ARP",QColor(80,60,140)),("TAP",QColor(50,50,60))]):
+                p.setBrush(QBrush(col))
+                p.setPen(QPen(QColor(40,40,50)))
+                p.drawRoundedRect(ARP_X,TRANS_Y+i*(BTN_H+4),BTN_W+4,BTN_H,3,3)
+                p.setFont(QFont("Inter",7,QFont.Weight.Bold))
+                p.setPen(QPen(QColor(180,180,220)))
+                p.drawText(ARP_X+4,TRANS_Y+i*(BTN_H+4)+BTN_H-5,lbl)
+
+            # ── Knobs 2×4 grid ────────────────────────────────────────────────
+            KNOB_Y=TRANS_Y+2*BTN_H+18
+            KR=12;KGAP=8
+            for i in range(8):
+                row=i//4;col=i%4
+                cx=CX+col*(KR*2+KGAP)+KR
+                cy=KNOB_Y+row*(KR*2+KGAP+8)+KR
+                active=self._knobs[i]
+                p.setBrush(QBrush(QColor(0,180,220,180) if active else QColor(40,44,54)))
+                p.setPen(QPen(QColor(20,120,180) if active else QColor(60,66,78),1))
+                p.drawEllipse(cx-KR,cy-KR,KR*2,KR*2)
+                p.setFont(QFont("Inter",6))
+                p.setPen(QPen(QColor(100,180,210) if active else QColor(80,86,100)))
+                p.drawText(cx-7,cy+3,f"K{i+1}")
+
+            p.end()
+
+        def oled_rect(self):
+            """Returns the rectangle where the OLED widget should be placed (in parent coords)."""
+            W,H=self.width(),self.height()
+            KW=int(W*0.43);CX=KW+8
+            PAD_SIZE=int(H*0.16);PAD_GAP=4;PY=16
+            MID_Y=PY+2*(PAD_SIZE+PAD_GAP)+10
+            return CX,MID_Y,220,60
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Device watcher thread
+    # ══════════════════════════════════════════════════════════════════════════
 
     class DevThread(QThread):
         connected    = pyqtSignal(str)
         disconnected = pyqtSignal()
         sysex_rx     = pyqtSignal(list)
-        raw_midi     = pyqtSignal(list, str)   # bytes, port_label
+        raw_midi     = pyqtSignal(list, str)
 
-        def __init__(self, dev, parent=None):
+        def __init__(self,dev,parent=None):
             super().__init__(parent)
-            self._dev=dev; self._running=True; self._conn=False
-            self._live: dict = {}   # "idx:name" → rtmidi.MidiIn
+            self._dev=dev;self._running=True;self._conn=False;self._live={}
 
-        def _make_live_cb(self, label):
-            def cb(msg, _=None):
-                raw,_ = msg
-                if raw: self.raw_midi.emit(list(raw), label)
+        def _make_cb(self,label):
+            def cb(msg,_=None):
+                raw,_=msg
+                if raw: self.raw_midi.emit(list(raw),label)
             return cb
 
         def run(self):
-            self._dev.set_sysex_callback(lambda d: self.sysex_rx.emit(d))
+            self._dev.set_sysex_callback(lambda d:self.sysex_rx.emit(d))
             while self._running:
                 try:
-                    # SysEx / editor connection
-                    ins_c,outs_c = MPKDevice.find_ctrl_ports()
-                    if ins_c and outs_c and not self._conn:
-                        self._dev.connect(ins_c[0][0], outs_c[0][0])
-                        self._conn = True
-                        self.connected.emit(ins_c[0][1].split(":")[0].strip())
-                    elif not ins_c and self._conn:
-                        self._dev.disconnect(); self._conn=False; self.disconnected.emit()
-
-                    # Live ports — open any new, close any gone
-                    live_now = {f"{i}:{n}": (i, self._port_label(n))
-                                for i,n in MPKDevice.find_live_ports()}
+                    ci,co=MPKDevice.find_ctrl_ports()
+                    if ci and co and not self._conn:
+                        self._dev.connect(ci[0][0],co[0][0]);self._conn=True
+                        self.connected.emit(ci[0][1].split(":")[0].strip())
+                    elif not ci and self._conn:
+                        self._dev.disconnect();self._conn=False;self.disconnected.emit()
+                    live_now={f"{i}:{n}":(i,self._plbl(n)) for i,n in MPKDevice.find_live_ports()}
                     for key,(idx,lbl) in live_now.items():
                         if key not in self._live:
-                            mi=rtmidi.MidiIn(); mi.ignore_types(sysex=True)
-                            mi.open_port(idx); mi.set_callback(self._make_live_cb(lbl))
+                            mi=rtmidi.MidiIn();mi.ignore_types(sysex=True)
+                            mi.open_port(idx);mi.set_callback(self._make_cb(lbl))
                             self._live[key]=mi
                     for key in list(self._live):
                         if key not in live_now:
                             try: self._live[key].close_port()
                             except: pass
                             del self._live[key]
-                except Exception:
-                    pass
+                except Exception: pass
                 self.msleep(1500)
-
             for mi in self._live.values():
                 try: mi.close_port()
                 except: pass
 
         @staticmethod
-        def _port_label(name):
-            n = name.lower()
-            if "daw"     in n: return "DAW"
-            if "plugin"  in n: return "PLUGIN"
-            if "din"     in n: return "DIN"
+        def _plbl(n):
+            n=n.lower()
+            if "daw"    in n: return "DAW"
+            if "plugin" in n: return "PLUGIN"
+            if "din"    in n: return "DIN"
             return "MIDI"
 
-        def stop(self): self._running=False; self.wait()
+        def stop(self): self._running=False;self.wait()
 
-    # ── Helpers ──────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Helpers
+    # ══════════════════════════════════════════════════════════════════════════
 
     def hsep():
-        f=QFrame(); f.setFixedHeight(1)
-        f.setStyleSheet(f"background:{C['border2']};border:none;"); return f
+        f=QFrame();f.setFixedHeight(1)
+        f.setStyleSheet(f"background:{C['border2']};border:none;");return f
 
-    def section_lbl(text):
-        l=QLabel(text); l.setFont(QFont("Inter",12,QFont.Weight.Medium))
-        l.setStyleSheet(f"color:{C['gold']};margin-bottom:4px;"); return l
+    def slbl(text):
+        l=QLabel(text);l.setFont(QFont("Inter",12,QFont.Weight.Medium))
+        l.setStyleSheet(f"color:{C['gold']};margin-bottom:4px;");return l
 
-    def field_lbl(text):
+    def flbl(text):
         l=QLabel(text)
-        l.setStyleSheet(f"color:{C['muted']};font-size:11px;font-weight:600;"); return l
-
-    # ── Pad widget with flash ─────────────────────────────────────────────────
+        l.setStyleSheet(f"color:{C['muted']};font-size:11px;font-weight:600;");return l
 
     def make_pad(label):
         grp=QGroupBox(label)
-        g=QGridLayout(grp); g.setSpacing(4); g.setContentsMargins(8,14,8,8)
-        note=QSpinBox(); note.setRange(0,127)
-        nn_lbl=QLabel("C2"); nn_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        g=QGridLayout(grp);g.setSpacing(4);g.setContentsMargins(8,14,8,8)
+        note=QSpinBox();note.setRange(0,127)
+        nn_lbl=QLabel("C2");nn_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nn_lbl.setStyleSheet(f"color:{C['gold']};font-size:11px;font-weight:700;"
                              f"background:rgba(214,168,90,0.08);border-radius:4px;padding:2px 4px;")
-        note.valueChanged.connect(lambda v: nn_lbl.setText(nn(v)))
-        g.addWidget(field_lbl("NOTE"),0,0,1,2)
-        g.addWidget(note,1,0,1,2); g.addWidget(nn_lbl,2,0,1,2)
-
-        _t=QTimer(); _t.setSingleShot(True); _t.setInterval(180)
-        def _off():
-            grp.setProperty("active","false")
-            grp.style().unpolish(grp); grp.style().polish(grp)
+        note.valueChanged.connect(lambda v:nn_lbl.setText(nn(v)))
+        g.addWidget(flbl("NOTE"),0,0,1,2);g.addWidget(note,1,0,1,2);g.addWidget(nn_lbl,2,0,1,2)
+        _t=QTimer();_t.setSingleShot(True);_t.setInterval(180)
+        def _off(): grp.setProperty("active","false");grp.style().unpolish(grp);grp.style().polish(grp)
         _t.timeout.connect(_off)
-
         def flash(vel=127):
-            grp.setProperty("active","true")
-            grp.style().unpolish(grp); grp.style().polish(grp); _t.start()
-
-        def load(c):
-            note.blockSignals(True); note.setValue(c.note); note.blockSignals(False)
-            nn_lbl.setText(nn(c.note))
-
+            grp.setProperty("active","true");grp.style().unpolish(grp);grp.style().polish(grp);_t.start()
+        def load(c): note.blockSignals(True);note.setValue(c.note);note.blockSignals(False);nn_lbl.setText(nn(c.note))
         def get(): return PadConfig(note=note.value())
-
-        grp.flash=flash; grp.load=load; grp.get=get; grp._t=_t
+        grp.flash=flash;grp.load=load;grp.get=get;grp._t=_t
         return grp
-
-    # ── Knob widget with flash ────────────────────────────────────────────────
 
     def make_knob(idx):
         grp=QGroupBox(f"K{idx+1}")
-        g=QGridLayout(grp); g.setSpacing(4); g.setContentsMargins(8,14,8,8)
-        cc=QSpinBox();  cc.setRange(0,127)
-        mn=QSpinBox();  mn.setRange(0,127)
-        mx=QSpinBox();  mx.setRange(0,127); mx.setValue(127)
-        mod=QComboBox(); mod.addItems(KNOB_MODES)
-        name=QLineEdit(); name.setMaxLength(16); name.setPlaceholderText("Name")
-        g.addWidget(field_lbl("CC"),  0,0); g.addWidget(cc,  0,1)
-        g.addWidget(field_lbl("MIN"), 1,0); g.addWidget(mn,  1,1)
-        g.addWidget(field_lbl("MAX"), 2,0); g.addWidget(mx,  2,1)
-        g.addWidget(mod,3,0,1,2)
-        g.addWidget(field_lbl("NAME"),4,0); g.addWidget(name,4,1)
-
-        _t=QTimer(); _t.setSingleShot(True); _t.setInterval(300)
-        def _off():
-            grp.setProperty("knob_active","false")
-            grp.style().unpolish(grp); grp.style().polish(grp)
+        g=QGridLayout(grp);g.setSpacing(4);g.setContentsMargins(8,14,8,8)
+        cc=QSpinBox();cc.setRange(0,127)
+        mn=QSpinBox();mn.setRange(0,127)
+        mx=QSpinBox();mx.setRange(0,127);mx.setValue(127)
+        mod=QComboBox();mod.addItems(KNOB_MODES)
+        name=QLineEdit();name.setMaxLength(16);name.setPlaceholderText("Name")
+        g.addWidget(flbl("CC"),0,0);g.addWidget(cc,0,1)
+        g.addWidget(flbl("MIN"),1,0);g.addWidget(mn,1,1)
+        g.addWidget(flbl("MAX"),2,0);g.addWidget(mx,2,1)
+        g.addWidget(mod,3,0,1,2);g.addWidget(flbl("NAME"),4,0);g.addWidget(name,4,1)
+        _t=QTimer();_t.setSingleShot(True);_t.setInterval(300)
+        def _off(): grp.setProperty("knob_active","false");grp.style().unpolish(grp);grp.style().polish(grp)
         _t.timeout.connect(_off)
-
         def flash():
-            grp.setProperty("knob_active","true")
-            grp.style().unpolish(grp); grp.style().polish(grp); _t.start()
-
+            grp.setProperty("knob_active","true");grp.style().unpolish(grp);grp.style().polish(grp);_t.start()
         def load(k):
             for w in [cc,mn,mx,mod]: w.blockSignals(True)
-            cc.setValue(k.cc); mn.setValue(k.min_val); mx.setValue(k.max_val)
-            mod.setCurrentIndex(k.mode); name.setText(k.name)
+            cc.setValue(k.cc);mn.setValue(k.min_val);mx.setValue(k.max_val)
+            mod.setCurrentIndex(k.mode);name.setText(k.name)
             for w in [cc,mn,mx,mod]: w.blockSignals(False)
-
         def get(): return KnobConfig(cc=cc.value(),min_val=mn.value(),max_val=mx.value(),
                                      mode=mod.currentIndex(),name=name.text())
-        grp.flash=flash; grp.load=load; grp.get=get; grp._t=_t
+        grp.flash=flash;grp.load=load;grp.get=get;grp._t=_t
         return grp
 
-    # ── Main window ──────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    #  Main window
+    # ══════════════════════════════════════════════════════════════════════════
 
     class Win(QMainWindow):
         def __init__(self):
             super().__init__()
             self.setWindowTitle("MPK mini IV — SelahOS")
-            self.setMinimumSize(1060, 780)
-            self._dev     = MPKDevice()
-            self._presets = [Preset(index=i) for i in range(4)]
-            self._cur     = 0
-            self._thread  = DevThread(self._dev)
-            self._vport   = None
+            self.setMinimumSize(1060,800)
+            self._dev=MPKDevice()
+            self._presets=[Preset(index=i) for i in range(4)]
+            self._cur=0
+            self._thread=DevThread(self._dev)
+            self._vport=None
+            self._oct_offset=0      # software-tracked octave
+            self._last_cc_vals={}   # cc -> last value (for knob flash accuracy)
             self._load_local()
             self._build()
             self.setStyleSheet(QSS)
             self._thread.connected.connect(self._on_conn)
             self._thread.disconnected.connect(self._on_disc)
             self._thread.sysex_rx.connect(self._on_sysex)
-            self._thread.raw_midi.connect(self._on_raw_midi)
+            self._thread.raw_midi.connect(self._on_raw)
             self._thread.start()
             self._load_ui(0)
+            # Timer to refresh OLED to home after inactivity
+            self._oled_home_timer=QTimer()
+            self._oled_home_timer.setSingleShot(True)
+            self._oled_home_timer.setInterval(2500)
+            self._oled_home_timer.timeout.connect(self._oled_go_home)
 
         def _build(self):
-            root_w=QWidget(); self.setCentralWidget(root_w)
-            root=QVBoxLayout(root_w); root.setSpacing(0); root.setContentsMargins(0,0,0,0)
+            rw=QWidget();self.setCentralWidget(rw)
+            root=QVBoxLayout(rw);root.setSpacing(0);root.setContentsMargins(0,0,0,0)
 
             # Header
-            hdr=QWidget(); hdr.setFixedHeight(56)
+            hdr=QWidget();hdr.setFixedHeight(56)
             hdr.setStyleSheet(f"background:{C['bg2']};border-bottom:1px solid {C['border2']};")
-            hl=QHBoxLayout(hdr); hl.setContentsMargins(20,0,20,0); hl.setSpacing(0)
-            brand=QLabel("SELAH"); brand.setFont(QFont("Inter",15,QFont.Weight.Bold))
+            hl=QHBoxLayout(hdr);hl.setContentsMargins(20,0,20,0);hl.setSpacing(0)
+            brand=QLabel("SELAH");brand.setFont(QFont("Inter",15,QFont.Weight.Bold))
             brand.setStyleSheet(f"color:{C['gold']};letter-spacing:4px;")
-            title=QLabel("  MPK mini IV Editor"); title.setFont(QFont("Inter",13))
+            title=QLabel("  MPK mini IV Editor");title.setFont(QFont("Inter",13))
             title.setStyleSheet(f"color:rgba(255,255,255,0.65);")
-            self._dot=QLabel("●  "); self._dot.setStyleSheet(f"color:{C['red']};font-size:10px;")
-            self._clbl=QLabel("Not connected"); self._clbl.setFont(QFont("Inter",11))
+            self._dot=QLabel("●  ");self._dot.setStyleSheet(f"color:{C['red']};font-size:10px;")
+            self._clbl=QLabel("Not connected");self._clbl.setFont(QFont("Inter",11))
             self._clbl.setStyleSheet(f"color:{C['red']};")
-            hl.addWidget(brand); hl.addWidget(title); hl.addStretch()
-            hl.addWidget(self._dot); hl.addWidget(self._clbl)
+            hl.addWidget(brand);hl.addWidget(title);hl.addStretch()
+            hl.addWidget(self._dot);hl.addWidget(self._clbl)
             root.addWidget(hdr)
 
             # Toolbar
-            tbar=QWidget(); tbar.setFixedHeight(52)
+            tbar=QWidget();tbar.setFixedHeight(52)
             tbar.setStyleSheet(f"background:{C['bg']};border-bottom:1px solid {C['border2']};")
-            tl=QHBoxLayout(tbar); tl.setContentsMargins(20,8,20,8); tl.setSpacing(10)
-            tl.addWidget(field_lbl("PRESET"))
+            tl=QHBoxLayout(tbar);tl.setContentsMargins(20,8,20,8);tl.setSpacing(10)
+            tl.addWidget(flbl("PRESET"))
             self._psel=QComboBox()
             self._psel.addItems(["1 — Preset 1","2 — Preset 2","3 — Preset 3","4 — Preset 4"])
-            self._psel.setFixedWidth(160); self._psel.currentIndexChanged.connect(self._on_pchg)
-            self._name_edit=QLineEdit(); self._name_edit.setMaxLength(16)
-            self._name_edit.setPlaceholderText("Preset name"); self._name_edit.setFixedWidth(130)
+            self._psel.setFixedWidth(160);self._psel.currentIndexChanged.connect(self._on_pchg)
+            self._name_edit=QLineEdit();self._name_edit.setMaxLength(16)
+            self._name_edit.setPlaceholderText("Preset name");self._name_edit.setFixedWidth(130)
             self._gbtn=QPushButton("Get from Device",objectName="action")
             self._sbtn=QPushButton("Send to Device",objectName="action")
-            self._gbtn.clicked.connect(self._on_get); self._sbtn.clicked.connect(self._on_send)
-            tl.addWidget(self._psel); tl.addSpacing(4); tl.addWidget(self._name_edit)
-            tl.addStretch(); tl.addWidget(self._gbtn); tl.addWidget(self._sbtn)
+            self._gbtn.clicked.connect(self._on_get);self._sbtn.clicked.connect(self._on_send)
+            tl.addWidget(self._psel);tl.addSpacing(4);tl.addWidget(self._name_edit)
+            tl.addStretch();tl.addWidget(self._gbtn);tl.addWidget(self._sbtn)
             root.addWidget(tbar)
 
-            # Tab area
-            body=QWidget(); body.setStyleSheet(f"background:{C['bg']};")
-            bl=QVBoxLayout(body); bl.setContentsMargins(16,16,16,8); bl.setSpacing(0)
+            # Tabs
+            body=QWidget();body.setStyleSheet(f"background:{C['bg']};")
+            bl=QVBoxLayout(body);bl.setContentsMargins(14,14,14,8);bl.setSpacing(0)
             tabs=QTabWidget()
 
+            # ── Controller tab ──────────────────────────────────────────────
+            wctl=QWidget();lctl=QVBoxLayout(wctl);lctl.setContentsMargins(8,8,8,8);lctl.setSpacing(8)
+            lctl.addWidget(slbl("MPK mini IV  —  Live Controller View"))
+
+            # Device schematic
+            self._device=DeviceWidget()
+            lctl.addWidget(self._device)
+
+            # OLED + octave row (below schematic)
+            oled_row=QHBoxLayout();oled_row.setSpacing(20)
+            self._oled=OLEDWidget()
+            oled_row.addWidget(self._oled)
+
+            # Octave controls (same row as OLED)
+            oled_row.addSpacing(24)
+            oct_vbox=QVBoxLayout();oct_vbox.setSpacing(6)
+            oct_vbox.addWidget(slbl("Octave"))
+            oct_inner=QHBoxLayout();oct_inner.setSpacing(6)
+            oct_dn=QPushButton("OCT  −",objectName="action")
+            oct_up=QPushButton("OCT  +",objectName="action")
+            self._oct_lbl=QLabel("0");self._oct_lbl.setFixedWidth(30)
+            self._oct_lbl.setFont(QFont("Inter",14,QFont.Weight.Bold))
+            self._oct_lbl.setStyleSheet(f"color:{C['gold']};")
+            oct_dn.setFixedWidth(90);oct_up.setFixedWidth(90)
+            oct_dn.clicked.connect(lambda:self._adj_oct(-1))
+            oct_up.clicked.connect(lambda:self._adj_oct(+1))
+            oct_inner.addWidget(oct_dn);oct_inner.addWidget(self._oct_lbl);oct_inner.addWidget(oct_up)
+            oct_vbox.addLayout(oct_inner)
+            oled_row.addLayout(oct_vbox)
+            oled_row.addStretch()
+            lctl.addLayout(oled_row)
+            lctl.addStretch()
+            tabs.addTab(wctl,"Controller")
+
             # ── Pad tabs
-            def _pad_tab(label, pads_list):
-                w=QWidget(); l=QVBoxLayout(w); l.setContentsMargins(12,12,12,12); l.setSpacing(8)
-                l.addWidget(section_lbl(label))
-                g=QGridLayout(); g.setSpacing(8)
+            def _pad_tab(label,pads_list):
+                w=QWidget();l=QVBoxLayout(w);l.setContentsMargins(12,12,12,12);l.setSpacing(8)
+                l.addWidget(slbl(label))
+                g=QGridLayout();g.setSpacing(8)
                 for i,pw in enumerate(pads_list): g.addWidget(pw,0,i)
-                l.addLayout(g); l.addStretch(); return w
+                l.addLayout(g);l.addStretch();return w
 
             self._pads_a=[make_pad(f"A{i+1}") for i in range(8)]
             self._pads_b=[make_pad(f"B{i+1}") for i in range(8)]
@@ -663,240 +914,237 @@ def _run_gui():
             tabs.addTab(_pad_tab("Bank B  —  Pads 1–8",self._pads_b),"Pads — Bank B")
 
             # ── Knob tab
-            wk=QWidget(); lk=QVBoxLayout(wk); lk.setContentsMargins(12,12,12,12); lk.setSpacing(8)
-            lk.addWidget(section_lbl("Knobs 1–8  —  CC Assignments & Range"))
-            gk=QGridLayout(); gk.setSpacing(8)
+            wk=QWidget();lk=QVBoxLayout(wk);lk.setContentsMargins(12,12,12,12);lk.setSpacing(8)
+            lk.addWidget(slbl("Knobs 1–8  —  CC Assignments & Range"))
+            gk=QGridLayout();gk.setSpacing(8)
             self._knobs=[make_knob(i) for i in range(8)]
             for i,kw in enumerate(self._knobs): gk.addWidget(kw,0,i)
-            lk.addLayout(gk); lk.addStretch()
+            lk.addLayout(gk);lk.addStretch()
             tabs.addTab(wk,"Knobs")
 
             # ── Keyboard tab
-            wkb=QWidget(); lkb=QVBoxLayout(wkb); lkb.setContentsMargins(12,12,12,12); lkb.setSpacing(10)
-            lkb.addWidget(section_lbl("MIDI Keyboard  —  C1 to C5"))
-            self._piano=PianoWidget(start=24, end=84)
-            lkb.addWidget(self._piano)
-            lkb.addWidget(hsep())
-            note_row=QHBoxLayout()
-            self._note_lbl=QLabel("—")
-            self._note_lbl.setFont(QFont("Inter",26,QFont.Weight.Bold))
+            wkb=QWidget();lkb=QVBoxLayout(wkb);lkb.setContentsMargins(12,12,12,12);lkb.setSpacing(10)
+            lkb.addWidget(slbl("MIDI Keyboard  —  C1 to C5"))
+            self._piano=PianoWidget(24,84)
+            lkb.addWidget(self._piano);lkb.addWidget(hsep())
+            nr=QHBoxLayout()
+            self._note_lbl=QLabel("—");self._note_lbl.setFont(QFont("Inter",26,QFont.Weight.Bold))
             self._note_lbl.setStyleSheet(f"color:{C['gold']};")
-            self._vel_lbl=QLabel("")
-            self._vel_lbl.setStyleSheet(f"color:{C['muted']};font-size:13px;")
-            self._ch_lbl=QLabel("")
-            self._ch_lbl.setStyleSheet(f"color:{C['muted']};font-size:13px;")
-            note_row.addWidget(self._note_lbl); note_row.addSpacing(16)
-            note_row.addWidget(self._vel_lbl); note_row.addSpacing(12)
-            note_row.addWidget(self._ch_lbl); note_row.addStretch()
-            lkb.addLayout(note_row)
-            lkb.addStretch()
+            self._vel_lbl=QLabel("");self._vel_lbl.setStyleSheet(f"color:{C['muted']};font-size:13px;")
+            self._ch_lbl=QLabel("");self._ch_lbl.setStyleSheet(f"color:{C['muted']};font-size:13px;")
+            nr.addWidget(self._note_lbl);nr.addSpacing(16);nr.addWidget(self._vel_lbl)
+            nr.addSpacing(12);nr.addWidget(self._ch_lbl);nr.addStretch()
+            lkb.addLayout(nr);lkb.addStretch()
             tabs.addTab(wkb,"Keyboard")
 
-            # ── Controls / Activity tab
-            wct=QWidget(); lct=QVBoxLayout(wct); lct.setContentsMargins(12,12,12,12); lct.setSpacing(10)
-            lct.addWidget(section_lbl("Transport & Controls  —  Live MIDI Activity"))
-
-            # Sustain + transport indicators
-            ind_row=QHBoxLayout(); ind_row.setSpacing(8)
+            # ── Controls tab
+            wct2=QWidget();lct2=QVBoxLayout(wct2);lct2.setContentsMargins(12,12,12,12);lct2.setSpacing(10)
+            lct2.addWidget(slbl("Transport & Controls  —  Live MIDI Log"))
+            ind_row=QHBoxLayout();ind_row.setSpacing(8)
             self._indicators={}
-            for lbl in ["SUSTAIN","REW","FFW","STOP","PLAY","REC","LOOP"]:
-                btn=QLabel(lbl)
-                btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                btn.setFixedHeight(32)
-                btn.setStyleSheet(
-                    f"color:{C['muted']};background:{C['bg3']};"
-                    f"border:1px solid {C['border']};border-radius:5px;"
-                    f"font-size:10px;font-weight:700;letter-spacing:1px;padding:0 8px;")
-                ind_row.addWidget(btn)
-                self._indicators[lbl]=btn
-            ind_row.addStretch()
-            lct.addLayout(ind_row)
-            lct.addWidget(hsep())
-
-            # MIDI log
-            lct.addWidget(field_lbl("MIDI LOG  —  all ports"))
-            self._log=QTextEdit(); self._log.setReadOnly(True); self._log.setFixedHeight(280)
-            lct.addWidget(self._log)
-            clr=QPushButton("Clear Log"); clr.clicked.connect(self._log.clear)
-            lct.addWidget(clr); lct.addStretch()
-            tabs.addTab(wct,"Controls")
+            for lbl in ["SUSTAIN","REW","FFWD","STOP","PLAY","REC","LOOP"]:
+                btn=QLabel(lbl);btn.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                btn.setFixedHeight(30)
+                btn.setStyleSheet(f"color:{C['muted']};background:{C['bg3']};"
+                                  f"border:1px solid {C['border']};border-radius:5px;"
+                                  f"font-size:10px;font-weight:700;letter-spacing:1px;padding:0 8px;")
+                ind_row.addWidget(btn);self._indicators[lbl]=btn
+            ind_row.addStretch();lct2.addLayout(ind_row);lct2.addWidget(hsep())
+            lct2.addWidget(flbl("MIDI LOG  —  all ports"))
+            self._log=QTextEdit();self._log.setReadOnly(True);self._log.setFixedHeight(260)
+            lct2.addWidget(self._log)
+            clr=QPushButton("Clear Log");clr.clicked.connect(self._log.clear)
+            lct2.addWidget(clr);lct2.addStretch()
+            tabs.addTab(wct2,"Controls")
 
             # ── Arp tab
-            war=QWidget(); lar=QVBoxLayout(war); lar.setContentsMargins(20,16,20,16); lar.setSpacing(12)
-            lar.addWidget(section_lbl("Arpeggiator"))
+            war=QWidget();lar=QVBoxLayout(war);lar.setContentsMargins(20,16,20,16);lar.setSpacing(12)
+            lar.addWidget(slbl("Arpeggiator"))
             self._arp_on=QCheckBox("Arpeggiator Enabled")
             self._arp_on.setFont(QFont("Inter",13,QFont.Weight.Medium))
-            lar.addWidget(self._arp_on); lar.addWidget(hsep())
-            ag=QWidget(); agl=QGridLayout(ag); agl.setSpacing(10); agl.setColumnMinimumWidth(0,120)
-            self._arp_mode=QComboBox(); self._arp_mode.addItems(ARP_MODES)
-            self._arp_div =QComboBox(); self._arp_div.addItems(ARP_DIVS)
-            self._arp_oct =QComboBox(); self._arp_oct.addItems(ARP_OCTS)
-            self._arp_bpm =QSpinBox();  self._arp_bpm.setRange(20,127)
-            self._arp_clk =QComboBox(); self._arp_clk.addItems(["Internal","External"])
+            lar.addWidget(self._arp_on);lar.addWidget(hsep())
+            ag=QWidget();agl=QGridLayout(ag);agl.setSpacing(10);agl.setColumnMinimumWidth(0,120)
+            self._arp_mode=QComboBox();self._arp_mode.addItems(ARP_MODES)
+            self._arp_div=QComboBox();self._arp_div.addItems(ARP_DIVS)
+            self._arp_oct=QComboBox();self._arp_oct.addItems(ARP_OCTS)
+            self._arp_bpm=QSpinBox();self._arp_bpm.setRange(20,127)
+            self._arp_clk=QComboBox();self._arp_clk.addItems(["Internal","External"])
             for r,(l,w) in enumerate([("Mode",self._arp_mode),("Division",self._arp_div),
                                        ("Octave",self._arp_oct),("Tempo (BPM)",self._arp_bpm),
                                        ("Clock Source",self._arp_clk)]):
-                agl.addWidget(field_lbl(l),r,0); agl.addWidget(w,r,1)
-            agl.setRowStretch(5,1); lar.addWidget(ag); lar.addStretch()
+                agl.addWidget(flbl(l),r,0);agl.addWidget(w,r,1)
+            agl.setRowStretch(5,1);lar.addWidget(ag);lar.addStretch()
             tabs.addTab(war,"Arpeggiator")
 
             # ── Global tab
-            wgl=QWidget(); lgl=QVBoxLayout(wgl); lgl.setContentsMargins(20,16,20,16); lgl.setSpacing(12)
-            lgl.addWidget(section_lbl("Global Settings"))
-            gg=QWidget(); ggl=QGridLayout(gg); ggl.setSpacing(10); ggl.setColumnMinimumWidth(0,120)
-            self._gl_ch=QSpinBox(); self._gl_ch.setRange(1,16)
-            ggl.addWidget(field_lbl("MIDI Channel"),0,0); ggl.addWidget(self._gl_ch,0,1)
-            ggl.setRowStretch(1,1); lgl.addWidget(gg); lgl.addStretch()
+            wgl=QWidget();lgl=QVBoxLayout(wgl);lgl.setContentsMargins(20,16,20,16);lgl.setSpacing(12)
+            lgl.addWidget(slbl("Global Settings"))
+            gg=QWidget();ggl=QGridLayout(gg);ggl.setSpacing(10);ggl.setColumnMinimumWidth(0,120)
+            self._gl_ch=QSpinBox();self._gl_ch.setRange(1,16)
+            ggl.addWidget(flbl("MIDI Channel"),0,0);ggl.addWidget(self._gl_ch,0,1)
+            ggl.setRowStretch(1,1);lgl.addWidget(gg);lgl.addStretch()
             tabs.addTab(wgl,"Global")
 
             # ── MIDI Routing tab
-            wrt=QWidget(); lrt=QVBoxLayout(wrt); lrt.setContentsMargins(20,16,20,16); lrt.setSpacing(12)
-            lrt.addWidget(section_lbl("MIDI Routing"))
-            info=QLabel(
-                "MPK mini IV is USB class-compliant — ALSA and PipeWire detect it automatically.\n"
-                "No routing needed for native SelahOS apps (Ardour, Bitwig, Qtractor, etc.).\n\n"
-                "SelahBridgePro: Wine DAWs receive MIDI via the WineASIO bridge automatically.\n\n"
-                "'Send to Device' writes to active device RAM — power-cycle to save to flash.")
+            wrt=QWidget();lrt=QVBoxLayout(wrt);lrt.setContentsMargins(20,16,20,16);lrt.setSpacing(12)
+            lrt.addWidget(slbl("MIDI Routing"))
+            info=QLabel("MPK mini IV is USB class-compliant — ALSA and PipeWire detect it automatically.\n"
+                        "No routing needed for native SelahOS apps.\n\n"
+                        "SelahBridgePro: Wine DAWs receive MIDI via the WineASIO bridge.\n\n"
+                        "'Send to Device' writes to device RAM — power-cycle to save to flash.\n\n"
+                        "Note: The hardware OLED encoder activates in 'host mode' which requires\n"
+                        "a USB HID handshake from the Akai software. Once we capture that\n"
+                        "handshake via USB sniffing from Windows, full encoder/screen control\n"
+                        "will be added to this editor.")
             info.setWordWrap(True)
             info.setStyleSheet(f"color:rgba(255,255,255,0.6);font-size:12px;")
-            lrt.addWidget(info); lrt.addWidget(hsep())
+            lrt.addWidget(info);lrt.addWidget(hsep())
             self._vbtn=QPushButton("Create Virtual MIDI Port  —  'MPK mini IV (SelahOS)'",objectName="action")
             self._vbtn.clicked.connect(self._on_vport)
             self._vstatus=QLabel("Virtual port: not active")
             self._vstatus.setStyleSheet(f"color:{C['muted']};font-size:11px;")
-            lrt.addWidget(self._vbtn); lrt.addWidget(self._vstatus); lrt.addStretch()
+            lrt.addWidget(self._vbtn);lrt.addWidget(self._vstatus);lrt.addStretch()
             tabs.addTab(wrt,"MIDI Routing")
 
             bl.addWidget(tabs)
 
             # Bottom bar
-            bbar=QWidget(); bbar.setFixedHeight(44)
+            bbar=QWidget();bbar.setFixedHeight(44)
             bbar.setStyleSheet(f"background:{C['bg2']};border-top:1px solid {C['border2']};")
-            bbl=QHBoxLayout(bbar); bbl.setContentsMargins(16,0,16,0); bbl.setSpacing(8)
-            sf=QPushButton("Save Preset…"); lf=QPushButton("Load Preset…")
-            sf.clicked.connect(self._save_file); lf.clicked.connect(self._load_file)
+            bbl=QHBoxLayout(bbar);bbl.setContentsMargins(16,0,16,0);bbl.setSpacing(8)
+            sf=QPushButton("Save Preset…");lf=QPushButton("Load Preset…")
+            sf.clicked.connect(self._save_file);lf.clicked.connect(self._load_file)
             copy=QLabel("Selah Technologies LLC  ·  SelahBridgePro")
             copy.setStyleSheet(f"color:{C['dim']};font-size:10px;letter-spacing:0.5px;")
-            bbl.addWidget(sf); bbl.addWidget(lf); bbl.addStretch(); bbl.addWidget(copy)
-            root.addWidget(body,1); root.addWidget(bbar)
+            bbl.addWidget(sf);bbl.addWidget(lf);bbl.addStretch();bbl.addWidget(copy)
+            root.addWidget(body,1);root.addWidget(bbar)
             self.setStatusBar(QStatusBar())
             self.statusBar().showMessage("Waiting for MPK mini IV — plug in to connect")
 
             # Transport flash timers
             self._ind_timers={}
             for name,btn in self._indicators.items():
-                t=QTimer(); t.setSingleShot(True); t.setInterval(250)
+                t=QTimer();t.setSingleShot(True);t.setInterval(250)
                 def _off(b=btn):
-                    b.setStyleSheet(
-                        f"color:{C['muted']};background:{C['bg3']};"
-                        f"border:1px solid {C['border']};border-radius:5px;"
-                        f"font-size:10px;font-weight:700;letter-spacing:1px;padding:0 8px;")
-                t.timeout.connect(_off)
-                self._ind_timers[name]=t
+                    b.setStyleSheet(f"color:{C['muted']};background:{C['bg3']};"
+                                    f"border:1px solid {C['border']};border-radius:5px;"
+                                    f"font-size:10px;font-weight:700;letter-spacing:1px;padding:0 8px;")
+                t.timeout.connect(_off);self._ind_timers[name]=t
 
-        # ── Raw MIDI dispatcher ───────────────────────────────────────────────
 
-        @pyqtSlot(list, str)
-        def _on_raw_midi(self, raw: list, port: str):
+
+        def _adj_oct(self,delta):
+            self._oct_offset=max(-3,min(3,self._oct_offset+delta))
+            self._oct_lbl.setText(str(self._oct_offset))
+            self._device.set_octave(self._oct_offset)
+            self._oled.show_octave(self._oct_offset)
+            self._oled_home_timer.start()
+            self.statusBar().showMessage(f"Octave: {'+' if self._oct_offset>=0 else ''}{self._oct_offset}")
+
+        # ── Raw MIDI dispatcher ─────────────────────────────────────────────
+
+        @pyqtSlot(list,str)
+        def _on_raw(self,raw,port):
             if not raw: return
-            status = raw[0] & 0xF0
-            ch     = (raw[0] & 0x0F) + 1
-
-            # Note On / Off
-            if status in (0x90, 0x80) and len(raw) >= 3:
-                note = raw[1]; vel = raw[2] if status==0x90 else 0
-                self._handle_note(note, vel, ch)
-                desc = f"Note {'On' if vel else 'Off'}  {nn(note)}  vel={vel}"
-                self._log_midi(port, desc, C['gold'] if vel else C['muted'])
-
-            # CC
-            elif status == 0xB0 and len(raw) >= 3:
-                cc = raw[1]; val = raw[2]
-                self._handle_cc(cc, val)
-                self._handle_special_cc(cc, val)
-                self._log_midi(port, f"CC {cc:3d}  val={val:3d}", C['cyan'])
-
-            # Program change
-            elif status == 0xC0 and len(raw) >= 2:
-                self._log_midi(port, f"Program Change  {raw[1]}", C['muted'])
-
-            # Pitch bend
-            elif status == 0xE0 and len(raw) >= 3:
-                val = ((raw[2]<<7)|raw[1]) - 8192
-                self._log_midi(port, f"Pitch Bend  {val:+d}", C['muted'])
-
-            # MMC / SysEx
-            elif raw[0] == 0xF0 and len(raw) >= 6 and raw[1]==0x7F and raw[4]==0x06:
-                cmd_name = MMC_CMDS.get(raw[5], f"cmd={raw[5]:02X}")
-                self._flash_transport(cmd_name.upper())
-                self._log_midi(port, f"MMC  {cmd_name}", C['green'])
-
-            # Other
+            status=raw[0]&0xF0;ch=(raw[0]&0x0F)+1
+            if status in (0x90,0x80) and len(raw)>=3:
+                note=raw[1];vel=raw[2] if status==0x90 else 0
+                self._dispatch_note(note,vel,ch,port)
+                self._log_midi(port,f"Note {'On' if vel else 'Off'}  {nn(note)}  vel={vel}",C['gold'] if vel else C['muted'])
+            elif status==0xB0 and len(raw)>=3:
+                cc=raw[1];val=raw[2]
+                self._dispatch_cc(cc,val,ch)
+                self._log_midi(port,f"CC {cc:3d}  val={val:3d}",C['cyan'])
+            elif status==0xC0 and len(raw)>=2:
+                self._log_midi(port,f"Program Change  {raw[1]}",C['muted'])
+            elif status==0xE0 and len(raw)>=3:
+                v=((raw[2]<<7)|raw[1])-8192
+                self._log_midi(port,f"Pitch Bend  {v:+d}",C['muted'])
+            elif raw[0]==0xF0 and len(raw)>=6 and raw[1]==0x7F and len(raw)>5 and raw[4]==0x06:
+                cmd=MMC_CMDS.get(raw[5] if len(raw)>5 else 0,f"MMC={raw[5]:02X}" if len(raw)>5 else "MMC")
+                self._device.flash_transport(cmd)
+                self._oled.show_transport(cmd)
+                self._flash_ind(cmd);self._oled_home_timer.start()
+                self._log_midi(port,f"MMC  {cmd}",C['green'])
             else:
-                hex_str = ' '.join(f'{b:02X}' for b in raw[:8])
-                self._log_midi(port, hex_str, C['dim'])
+                self._log_midi(port,' '.join(f'{b:02X}' for b in raw[:10]),C['dim'])
 
-        def _handle_note(self, note, vel, ch):
-            self._piano.note_on(note, vel)
+        def _dispatch_note(self,note,vel,ch,port):
+            self._piano.note_on(note,vel)
             if vel:
                 self._note_lbl.setText(nn(note))
                 self._vel_lbl.setText(f"vel {vel}")
                 self._ch_lbl.setText(f"ch {ch}")
-            # Flash matching pad
-            p = self._presets[self._cur]
+            p=self._presets[self._cur]
+            # Check pads
             for j,pw in enumerate(self._pads_a):
-                if p.pads_a[j].note == note: pw.flash(vel); return
+                if p.pads_a[j].note==note:
+                    pw.flash(vel);self._device.flash_pad('A',j,vel)
+                    self._oled.show_pad('A',j+1,note,vel);self._oled_home_timer.start()
+                    return
             for j,pw in enumerate(self._pads_b):
-                if p.pads_b[j].note == note: pw.flash(vel); return
+                if p.pads_b[j].note==note:
+                    pw.flash(vel);self._device.flash_pad('B',j,vel)
+                    self._oled.show_pad('B',j+1,note,vel);self._oled_home_timer.start()
+                    return
+            # Keyboard key
+            if vel:
+                self._oled.show_note(note,vel,ch);self._oled_home_timer.start()
 
-        def _handle_cc(self, cc, val):
-            # Flash knob if CC matches preset
-            p = self._presets[self._cur]
+        def _dispatch_cc(self,cc,val,ch):
+            self._last_cc_vals[cc]=val
+            p=self._presets[self._cur]
+            # sustain
+            if cc==64:
+                self._flash_ind("SUSTAIN");return
+            # match knob
             for j,kw in enumerate(self._knobs):
-                if p.knobs[j].cc == cc: kw.flash(); return
-            # Fallback: flash by order if CC is in range 24-31
-            if 24 <= cc <= 31:
-                self._knobs[cc-24].flash()
+                if p.knobs[j].cc==cc:
+                    kw.flash();self._device.flash_knob(j)
+                    self._oled.show_knob(p.knobs[j].name,cc,val,p.knobs[j].min_val,p.knobs[j].max_val)
+                    self._oled_home_timer.start();return
+            # fallback: CC 24-31 → knob by index
+            if 24<=cc<=31:
+                j=cc-24
+                self._knobs[j].flash();self._device.flash_knob(j)
+                self._oled.show_knob(f"KNOB {j+1}",cc,val)
+                self._oled_home_timer.start()
 
-        def _handle_special_cc(self, cc, val):
-            # Sustain pedal
-            if cc == 64:
-                self._flash_transport("SUSTAIN")
-
-        def _flash_transport(self, name):
+        def _flash_ind(self,name):
             if name not in self._indicators: return
-            btn = self._indicators[name]
-            btn.setStyleSheet(
-                f"color:{C['bg']};background:{C['gold']};"
-                f"border:1px solid {C['gold']};border-radius:5px;"
-                f"font-size:10px;font-weight:700;letter-spacing:1px;padding:0 8px;")
+            btn=self._indicators[name]
+            btn.setStyleSheet(f"color:{C['bg']};background:{C['gold']};"
+                              f"border:1px solid {C['gold']};border-radius:5px;"
+                              f"font-size:10px;font-weight:700;letter-spacing:1px;padding:0 8px;")
             self._ind_timers[name].start()
 
-        def _log_midi(self, port, desc, color):
+        def _oled_go_home(self):
+            p=self._presets[self._cur]
+            self._oled.show_home(self._cur+1,p.name)
+
+        def _log_midi(self,port,desc,color):
             self._log.append(f'<span style="color:{C["dim"]};">[{port}]</span> '
                              f'<span style="color:{color};">{desc}</span>')
-            sb = self._log.verticalScrollBar()
-            sb.setValue(sb.maximum())
-            # Trim to 60 lines
-            doc = self._log.document()
-            while doc.blockCount() > 60:
-                cur = self._log.textCursor()
+            sb=self._log.verticalScrollBar();sb.setValue(sb.maximum())
+            doc=self._log.document()
+            while doc.blockCount()>60:
+                cur=self._log.textCursor()
                 cur.movePosition(cur.MoveOperation.Start)
                 cur.select(cur.SelectionType.LineUnderCursor)
-                cur.removeSelectedText(); cur.deleteChar()
+                cur.removeSelectedText();cur.deleteChar()
 
-        # ── Device slots ─────────────────────────────────────────────────────
+        # ── Device slots ────────────────────────────────────────────────────
 
         @pyqtSlot(str)
         def _on_conn(self,name):
             self._dot.setStyleSheet(f"color:{C['green']};font-size:10px;")
-            self._clbl.setText(name); self._clbl.setStyleSheet(f"color:{C['green']};")
+            self._clbl.setText(name);self._clbl.setStyleSheet(f"color:{C['green']};")
             self.statusBar().showMessage(f"Connected: {name}  —  click 'Get from Device' to load presets")
 
         @pyqtSlot()
         def _on_disc(self):
             self._dot.setStyleSheet(f"color:{C['red']};font-size:10px;")
-            self._clbl.setText("Not connected"); self._clbl.setStyleSheet(f"color:{C['red']};")
+            self._clbl.setText("Not connected");self._clbl.setStyleSheet(f"color:{C['red']};")
             self.statusBar().showMessage("MPK mini IV disconnected")
 
         @pyqtSlot(list)
@@ -907,55 +1155,56 @@ def _run_gui():
                 self._presets[idx]=preset
                 if idx==self._cur: self._load_ui(idx)
                 self._psel.setItemText(idx,f"{idx+1} — {preset.name}")
+                self._oled.show_home(idx+1,preset.name)
                 self.statusBar().showMessage(f"Preset {idx+1}  '{preset.name}'  loaded from device")
                 self._save_local()
 
         def _on_pchg(self,i):
-            self._save_ui(self._cur); self._cur=i; self._load_ui(i)
+            self._save_ui(self._cur);self._cur=i;self._load_ui(i)
 
         def _load_ui(self,i):
-            p=self._presets[i]; self._name_edit.setText(p.name)
+            p=self._presets[i];self._name_edit.setText(p.name)
             for j,pw in enumerate(self._pads_a): pw.load(p.pads_a[j])
             for j,pw in enumerate(self._pads_b): pw.load(p.pads_b[j])
             for j,kw in enumerate(self._knobs):  kw.load(p.knobs[j])
             for w in [self._arp_on,self._arp_mode,self._arp_div,
                       self._arp_oct,self._arp_bpm,self._arp_clk,self._gl_ch]:
                 w.blockSignals(True)
-            self._arp_on.setChecked(p.arp_enabled); self._arp_mode.setCurrentIndex(p.arp_mode)
-            self._arp_div.setCurrentIndex(p.arp_division); self._arp_oct.setCurrentIndex(p.arp_octave)
-            self._arp_bpm.setValue(p.arp_tempo); self._arp_clk.setCurrentIndex(p.clock_source)
+            self._arp_on.setChecked(p.arp_enabled);self._arp_mode.setCurrentIndex(p.arp_mode)
+            self._arp_div.setCurrentIndex(p.arp_division);self._arp_oct.setCurrentIndex(p.arp_octave)
+            self._arp_bpm.setValue(p.arp_tempo);self._arp_clk.setCurrentIndex(p.clock_source)
             self._gl_ch.setValue(p.midi_channel)
             for w in [self._arp_on,self._arp_mode,self._arp_div,
                       self._arp_oct,self._arp_bpm,self._arp_clk,self._gl_ch]:
                 w.blockSignals(False)
+            self._oled.show_home(i+1,p.name)
 
         def _save_ui(self,i):
-            p=self._presets[i]; p.name=self._name_edit.text() or p.name
+            p=self._presets[i];p.name=self._name_edit.text() or p.name
             for j,pw in enumerate(self._pads_a):
-                pad=pw.get(); pad.type_b3=p.pads_a[j].type_b3; pad.type_b4=p.pads_a[j].type_b4
+                pad=pw.get();pad.type_b3=p.pads_a[j].type_b3;pad.type_b4=p.pads_a[j].type_b4
                 p.pads_a[j]=pad
             for j,pw in enumerate(self._pads_b):
-                pad=pw.get(); pad.type_b3=p.pads_b[j].type_b3; pad.type_b4=p.pads_b[j].type_b4
+                pad=pw.get();pad.type_b3=p.pads_b[j].type_b3;pad.type_b4=p.pads_b[j].type_b4
                 p.pads_b[j]=pad
             for j,kw in enumerate(self._knobs): p.knobs[j]=kw.get()
-            p.arp_enabled=self._arp_on.isChecked(); p.arp_mode=self._arp_mode.currentIndex()
-            p.arp_division=self._arp_div.currentIndex(); p.arp_octave=self._arp_oct.currentIndex()
-            p.arp_tempo=self._arp_bpm.value(); p.clock_source=self._arp_clk.currentIndex()
+            p.arp_enabled=self._arp_on.isChecked();p.arp_mode=self._arp_mode.currentIndex()
+            p.arp_division=self._arp_div.currentIndex();p.arp_octave=self._arp_oct.currentIndex()
+            p.arp_tempo=self._arp_bpm.value();p.clock_source=self._arp_clk.currentIndex()
             p.midi_channel=self._gl_ch.value()
 
         def _on_get(self):
             if not self._dev.is_connected():
-                QMessageBox.warning(self,"Not Connected","Plug in the MPK mini IV first."); return
+                QMessageBox.warning(self,"Not Connected","Plug in the MPK mini IV first.");return
             self._dev.request_preset(self._cur)
-            self.statusBar().showMessage(f"Requesting preset {self._cur+1} from device…")
+            self.statusBar().showMessage(f"Requesting preset {self._cur+1}…")
 
         def _on_send(self):
             if not self._dev.is_connected():
-                QMessageBox.warning(self,"Not Connected","Plug in the MPK mini IV first."); return
-            self._save_ui(self._cur); self._dev.send_preset(self._presets[self._cur])
+                QMessageBox.warning(self,"Not Connected","Plug in the MPK mini IV first.");return
+            self._save_ui(self._cur);self._dev.send_preset(self._presets[self._cur])
             self._save_local()
-            self.statusBar().showMessage(
-                f"Preset {self._cur+1} sent  —  power-cycle to save permanently to flash")
+            self.statusBar().showMessage(f"Preset {self._cur+1} sent  —  power-cycle to save permanently")
 
         def _on_vport(self):
             if self._vport: return
@@ -976,7 +1225,7 @@ def _run_gui():
             if not path: return
             try:
                 p=Preset.from_dict(json.loads(Path(path).read_text()))
-                p.index=self._cur; self._presets[self._cur]=p; self._load_ui(self._cur)
+                p.index=self._cur;self._presets[self._cur]=p;self._load_ui(self._cur)
                 self.statusBar().showMessage(f"Loaded:  {path}")
             except Exception as e:
                 QMessageBox.critical(self,"Load Error",str(e))
@@ -990,18 +1239,17 @@ def _run_gui():
             if not p.exists(): return
             try:
                 for i,d in enumerate(json.loads(p.read_text())[:4]):
-                    self._presets[i]=Preset.from_dict(d); self._presets[i].index=i
+                    self._presets[i]=Preset.from_dict(d);self._presets[i].index=i
             except Exception: pass
 
         def closeEvent(self,e):
-            self._save_local(); self._thread.stop(); self._dev.disconnect(); super().closeEvent(e)
+            self._save_local();self._thread.stop();self._dev.disconnect();super().closeEvent(e)
 
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-
+    signal.signal(signal.SIGHUP,signal.SIG_IGN)
     app=QApplication(sys.argv)
     app.setApplicationName("MPK mini IV Editor")
     app.setOrganizationName("Selah Technologies")
-    win=Win(); win.show()
+    win=Win();win.show()
     sys.exit(app.exec())
 
 
@@ -1011,8 +1259,8 @@ def _run_gui():
 
 def main():
     ap=argparse.ArgumentParser(description="selah-mpk-mini-iv — MPK mini IV Editor for SelahOS")
-    ap.add_argument("--ports",   action="store_true",help="List MIDI ports and exit")
-    ap.add_argument("--monitor", action="store_true",help="Print incoming MIDI messages")
+    ap.add_argument("--ports",  action="store_true")
+    ap.add_argument("--monitor",action="store_true")
     args=ap.parse_args()
     if args.ports:     cmd_ports()
     elif args.monitor: cmd_monitor()
