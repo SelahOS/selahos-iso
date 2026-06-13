@@ -12,10 +12,20 @@
 #    selah-mpk-mini-iv --monitor    print raw MIDI messages
 # ═══════════════════════════════════════════════════════════════════════════════
 
-import sys, json, time, signal, argparse
+import sys, os, json, time, signal, argparse, contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable
+
+# rtmidi prints ALSA errors to stderr even when PipeWire handles MIDI correctly.
+# Silence the fd-level noise so it doesn't pollute the log or kill a pipe.
+@contextlib.contextmanager
+def _quiet_alsa():
+    devnull=os.open(os.devnull,os.O_WRONLY)
+    saved=os.dup(2)
+    os.dup2(devnull,2)
+    try: yield
+    finally: os.dup2(saved,2);os.close(saved);os.close(devnull)
 
 try:
     import rtmidi
@@ -136,26 +146,32 @@ class MPKDevice:
 
     @classmethod
     def find_ctrl_ports(cls):
-        mi=rtmidi.MidiIn();mo=rtmidi.MidiOut()
-        def mpk(p): return [(i,n) for i,n in enumerate(p) if any(x in n.lower() for x in cls.PAT)]
-        ins=[x for x in mpk(mi.get_ports()) if "software control" in x[1].lower()]
-        outs=[x for x in mpk(mo.get_ports()) if "software control" in x[1].lower()]
-        if not ins:  ins=mpk(mi.get_ports())[:1]
-        if not outs: outs=mpk(mo.get_ports())[:1]
-        del mi,mo;return ins,outs
+        with _quiet_alsa():
+            mi=rtmidi.MidiIn();mo=rtmidi.MidiOut()
+            def mpk(p): return [(i,n) for i,n in enumerate(p) if any(x in n.lower() for x in cls.PAT)]
+            ins=[x for x in mpk(mi.get_ports()) if "software control" in x[1].lower()]
+            outs=[x for x in mpk(mo.get_ports()) if "software control" in x[1].lower()]
+            if not ins:  ins=mpk(mi.get_ports())[:1]
+            if not outs: outs=mpk(mo.get_ports())[:1]
+            del mi,mo
+        return ins,outs
 
     @classmethod
     def find_live_ports(cls):
-        mi=rtmidi.MidiIn()
-        r=[(i,n) for i,n in enumerate(mi.get_ports())
-           if any(x in n.lower() for x in cls.PAT) and "software control" not in n.lower()]
-        del mi;return r
+        with _quiet_alsa():
+            mi=rtmidi.MidiIn()
+            r=[(i,n) for i,n in enumerate(mi.get_ports())
+               if any(x in n.lower() for x in cls.PAT) and "software control" not in n.lower()]
+            del mi
+        return r
 
     @classmethod
     def list_all_ports(cls):
-        mi=rtmidi.MidiIn();mo=rtmidi.MidiOut()
-        r=list(enumerate(mi.get_ports())),list(enumerate(mo.get_ports()))
-        del mi,mo;return r
+        with _quiet_alsa():
+            mi=rtmidi.MidiIn();mo=rtmidi.MidiOut()
+            r=list(enumerate(mi.get_ports())),list(enumerate(mo.get_ports()))
+            del mi,mo
+        return r
 
     def connect(self,inp,out):
         self._in.open_port(inp);self._out.open_port(out)
@@ -708,8 +724,10 @@ def _run_gui():
                     live_now={f"{i}:{n}":(i,self._plbl(n)) for i,n in MPKDevice.find_live_ports()}
                     for key,(idx,lbl) in live_now.items():
                         if key not in self._live:
-                            mi=rtmidi.MidiIn();mi.ignore_types(sysex=True)
-                            mi.open_port(idx);mi.set_callback(self._make_cb(lbl))
+                            with _quiet_alsa():
+                                mi=rtmidi.MidiIn();mi.ignore_types(sysex=True)
+                                mi.open_port(idx)
+                            mi.set_callback(self._make_cb(lbl))
                             self._live[key]=mi
                     for key in list(self._live):
                         if key not in live_now:
@@ -775,23 +793,30 @@ def _run_gui():
         mx=QSpinBox();mx.setRange(0,127);mx.setValue(127)
         mod=QComboBox();mod.addItems(KNOB_MODES)
         name=QLineEdit();name.setMaxLength(16);name.setPlaceholderText("Name")
+        val_lbl=QLabel("—")
+        val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        val_lbl.setStyleSheet(f"color:{C['gold_lt']};font-size:13px;font-weight:700;"
+                              f"background:rgba(214,168,90,0.10);border-radius:4px;padding:2px 0;")
         g.addWidget(flbl("CC"),0,0);g.addWidget(cc,0,1)
         g.addWidget(flbl("MIN"),1,0);g.addWidget(mn,1,1)
         g.addWidget(flbl("MAX"),2,0);g.addWidget(mx,2,1)
         g.addWidget(mod,3,0,1,2);g.addWidget(flbl("NAME"),4,0);g.addWidget(name,4,1)
+        g.addWidget(val_lbl,5,0,1,2)
         _t=QTimer();_t.setSingleShot(True);_t.setInterval(300)
         def _off(): grp.setProperty("knob_active","false");grp.style().unpolish(grp);grp.style().polish(grp)
         _t.timeout.connect(_off)
-        def flash():
+        def flash(v=None):
+            if v is not None: val_lbl.setText(str(v))
             grp.setProperty("knob_active","true");grp.style().unpolish(grp);grp.style().polish(grp);_t.start()
         def load(k):
             for w in [cc,mn,mx,mod]: w.blockSignals(True)
             cc.setValue(k.cc);mn.setValue(k.min_val);mx.setValue(k.max_val)
             mod.setCurrentIndex(k.mode);name.setText(k.name)
             for w in [cc,mn,mx,mod]: w.blockSignals(False)
+            val_lbl.setText("—")
         def get(): return KnobConfig(cc=cc.value(),min_val=mn.value(),max_val=mx.value(),
                                      mode=mod.currentIndex(),name=name.text())
-        grp.flash=flash;grp.load=load;grp.get=get;grp._t=_t
+        grp.flash=flash;grp.load=load;grp.get=get;grp._t=_t;grp.val_lbl=val_lbl
         return grp
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -854,11 +879,13 @@ def _run_gui():
             self._psel.setFixedWidth(160);self._psel.currentIndexChanged.connect(self._on_pchg)
             self._name_edit=QLineEdit();self._name_edit.setMaxLength(16)
             self._name_edit.setPlaceholderText("Preset name");self._name_edit.setFixedWidth(130)
-            self._gbtn=QPushButton("Get from Device",objectName="action")
-            self._sbtn=QPushButton("Send to Device",objectName="action")
+            self._gbtn=QPushButton("Get Preset",objectName="action")
+            self._sbtn=QPushButton("Send Preset",objectName="action")
+            self._syncbtn=QPushButton("Sync All  ↺",objectName="action")
             self._gbtn.clicked.connect(self._on_get);self._sbtn.clicked.connect(self._on_send)
+            self._syncbtn.clicked.connect(self._sync_all)
             tl.addWidget(self._psel);tl.addSpacing(4);tl.addWidget(self._name_edit)
-            tl.addStretch();tl.addWidget(self._gbtn);tl.addWidget(self._sbtn)
+            tl.addStretch();tl.addWidget(self._syncbtn);tl.addWidget(self._gbtn);tl.addWidget(self._sbtn)
             root.addWidget(tbar)
 
             # Tabs
@@ -1056,7 +1083,9 @@ def _run_gui():
                 self._dispatch_cc(cc,val,ch)
                 self._log_midi(port,f"CC {cc:3d}  val={val:3d}",C['cyan'])
             elif status==0xC0 and len(raw)>=2:
-                self._log_midi(port,f"Program Change  {raw[1]}",C['muted'])
+                pc=raw[1]%4
+                self._log_midi(port,f"Program Change  {raw[1]}  →  Preset {pc+1}",C['gold'])
+                self._switch_preset(pc)
             elif status==0xE0 and len(raw)>=3:
                 v=((raw[2]<<7)|raw[1])-8192
                 self._log_midi(port,f"Pitch Bend  {v:+d}",C['muted'])
@@ -1100,13 +1129,13 @@ def _run_gui():
             # match knob
             for j,kw in enumerate(self._knobs):
                 if p.knobs[j].cc==cc:
-                    kw.flash();self._device.flash_knob(j)
+                    kw.flash(val);self._device.flash_knob(j)
                     self._oled.show_knob(p.knobs[j].name,cc,val,p.knobs[j].min_val,p.knobs[j].max_val)
                     self._oled_home_timer.start();return
             # fallback: CC 24-31 → knob by index
             if 24<=cc<=31:
                 j=cc-24
-                self._knobs[j].flash();self._device.flash_knob(j)
+                self._knobs[j].flash(val);self._device.flash_knob(j)
                 self._oled.show_knob(f"KNOB {j+1}",cc,val)
                 self._oled_home_timer.start()
 
@@ -1135,11 +1164,34 @@ def _run_gui():
 
         # ── Device slots ────────────────────────────────────────────────────
 
+        def _switch_preset(self,idx):
+            """Switch UI to preset idx and request its data from the device."""
+            if idx==self._cur and self._presets[idx]._raw: return
+            self._psel.blockSignals(True)
+            self._psel.setCurrentIndex(idx)
+            self._psel.blockSignals(False)
+            self._save_ui(self._cur);self._cur=idx
+            self._load_ui(idx)
+            if self._dev.is_connected():
+                QTimer.singleShot(80,lambda:self._dev.request_preset(idx))
+            self.statusBar().showMessage(f"Preset {idx+1} — syncing from device…")
+
+        def _sync_all(self):
+            """Request all 4 presets from device sequentially."""
+            if not self._dev.is_connected():
+                self.statusBar().showMessage("Not connected — plug in device first");return
+            self.statusBar().showMessage("Syncing all 4 presets from device…")
+            for i in range(4):
+                QTimer.singleShot(200+i*550,lambda idx=i:self._dev.request_preset(idx))
+
         @pyqtSlot(str)
         def _on_conn(self,name):
             self._dot.setStyleSheet(f"color:{C['green']};font-size:10px;")
             self._clbl.setText(name);self._clbl.setStyleSheet(f"color:{C['green']};")
-            self.statusBar().showMessage(f"Connected: {name}  —  click 'Get from Device' to load presets")
+            self.statusBar().showMessage(f"Connected: {name}  —  syncing presets…")
+            # Auto-load all presets on connect
+            for i in range(4):
+                QTimer.singleShot(400+i*600,lambda idx=i:self._dev.request_preset(idx))
 
         @pyqtSlot()
         def _on_disc(self):
@@ -1160,7 +1212,10 @@ def _run_gui():
                 self._save_local()
 
         def _on_pchg(self,i):
+            if i==self._cur: return
             self._save_ui(self._cur);self._cur=i;self._load_ui(i)
+            if self._dev.is_connected():
+                QTimer.singleShot(80,lambda:self._dev.request_preset(i))
 
         def _load_ui(self,i):
             p=self._presets[i];self._name_edit.setText(p.name)
