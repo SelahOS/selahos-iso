@@ -228,10 +228,21 @@ def detect_timezone():
 def detect_hardware():
     info = {'manufacturer': '', 'product': '', 'cpu': '', 'gpu': '', 'ram': ''}
     try:
-        info['manufacturer'] = run(['dmidecode', '-s', 'system-manufacturer']).stdout.strip()
-        info['product']      = run(['dmidecode', '-s', 'system-product-name']).stdout.strip()
+        with open('/sys/class/dmi/id/sys_vendor') as f:
+            info['manufacturer'] = f.read().strip()
     except Exception:
-        pass
+        try:
+            info['manufacturer'] = run(['dmidecode', '-s', 'system-manufacturer']).stdout.strip()
+        except Exception:
+            pass
+    try:
+        with open('/sys/class/dmi/id/product_name') as f:
+            info['product'] = f.read().strip()
+    except Exception:
+        try:
+            info['product'] = run(['dmidecode', '-s', 'system-product-name']).stdout.strip()
+        except Exception:
+            pass
     try:
         for line in run(['lscpu']).stdout.splitlines():
             if 'Model name' in line:
@@ -1193,8 +1204,7 @@ class InstallThread(QThread):
             if _os.path.exists(src):
                 sh(['cp', src, dst])
 
-        hw      = self.config.get('hw', {})
-        profile = hw.get('profile', {})
+        profile = self.config.get('profile', {})
         battery = profile.get('battery', False)
 
         services = ['selah-wifi-wake', 'thermald', 'irqbalance', 'acpid']
@@ -1222,6 +1232,19 @@ class InstallThread(QThread):
                 )
                 with open(grub_cfg, 'w') as f:
                     f.write(content)
+
+        if 'nomodeset' in params:
+            mkinit = '/mnt/etc/mkinitcpio.conf'
+            if _os.path.exists(mkinit):
+                with open(mkinit) as f:
+                    mc = f.read()
+                mc = _re.sub(r'\bkms\b\s*', '', mc)
+                with open(mkinit, 'w') as f:
+                    f.write(mc)
+            sddm_session = '/mnt/etc/sddm.conf.d/20-selah-x11-session.conf'
+            _os.makedirs(_os.path.dirname(sddm_session), exist_ok=True)
+            with open(sddm_session, 'w') as f:
+                f.write('[General]\nDefaultSession=plasma.desktop\n')
 
     def _apply_theme(self, sh):
         import os as _os

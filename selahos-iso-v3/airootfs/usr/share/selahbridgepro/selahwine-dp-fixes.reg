@@ -38,9 +38,14 @@ REGEDIT4
 "SendUsageData"=dword:00000000
 "CheckForUpdates"=dword:00000000
 
-; ── MOTU audio: prefer ASIO over WASAPI ─────────────────────────
+; ── MOTU audio: use WASAPI until WineASIO is installed ───────────
+; ASIO requires WineASIO; WDM-KS enumerates zero devices under Wine and
+; leaves the driver object null → crash at dp+0x1958065. Use WASAPI so
+; DP gets a real device via Wine's mmdevapi → winepulse/winealsa.
+; Once WineASIO is installed (sudo pacman -S wineasio + selahpro install),
+; change PreferredDriverType to ASIO for low-latency production.
 [HKEY_CURRENT_USER\Software\MOTU\Digital Performer\AudioSetup]
-"PreferredDriverType"="ASIO"
+"PreferredDriverType"="WASAPI"
 "SampleRate"=dword:0000bb80
 "BufferSize"=dword:00000100
 
@@ -52,8 +57,13 @@ REGEDIT4
 ; ── Disable MOTU Bonjour/mDNSResponder service ───────────────────
 ; motuDNSResponder.exe hangs under Wine — tries to bind mDNS port
 ; 5353 and never signals SERVICE_RUNNING, blocking DP authorization.
-; Disable both service name variants + add IFEO intercept so any
-; launch attempt exits immediately instead of hanging Wine.
+; Fix: mark both service name variants disabled (Start=4) so that
+; StartService() returns ERROR_SERVICE_DISABLED immediately instead
+; of hanging Wine's SCM indefinitely. ErrorControl=0 suppresses the
+; service error from propagating as a fatal system error.
+; NOTE: Do NOT use an IFEO Debugger intercept here — that causes
+; motuDNSResponder to "run" as cmd.exe, leaving DP's IPC endpoint
+; null and crashing DP at startup. Start=4 alone is sufficient.
 ; Applied before AND after the DP installer to survive its overwrite.
 [HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\mDNSResponder]
 "Start"=dword:00000004
@@ -62,6 +72,3 @@ REGEDIT4
 [HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Bonjour Service]
 "Start"=dword:00000004
 "ErrorControl"=dword:00000000
-
-[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\motuDNSResponder.exe]
-"Debugger"="cmd.exe /c exit"
