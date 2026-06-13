@@ -293,14 +293,14 @@ def _scaffold_prefix(daw: dict, existing_prefix: str | None = None, installer_pa
     if profile_key in ("digitalperformer",):
         info("Installing VC++ 2022 Redistributable (required for Digital Performer)...")
         result = subprocess.run(
-            ["winetricks", "-q", "vcredist2022"],
+            ["winetricks", "-q", "vcrun2022"],
             env={**os.environ, **env}, check=False, capture_output=True, text=True
         )
         if result.returncode == 0:
-            ok("vcredist2022 installed — native msvcp140/vcruntime140 active")
+            ok("vcrun2022 installed — native msvcp140/vcruntime140 active")
         else:
-            warn("vcredist2022 install failed — DP may crash on launch")
-            warn("Manual fix: WINEPREFIX=~/.wine-selah-digitalperformer winetricks vcredist2022")
+            warn("vcrun2022 install failed — DP may crash on launch")
+            warn("Manual fix: WINEPREFIX=~/.wine-selah-digitalperformer winetricks vcrun2022")
 
         # Run the DP installer if provided, then re-apply service-disable patches.
         # The DP installer overwrites the mDNSResponder/Bonjour service registry entries

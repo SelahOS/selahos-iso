@@ -19,7 +19,7 @@
     },
     "broadwell": {
       "label": "Broadwell (2015)",
-      "grub_base": "pcie_aspm=off acpi_osi=Darwin i915.enable_psr=0 i915.enable_fbc=0 video=efifb:off",
+      "grub_base": "pcie_aspm=off acpi_osi=Darwin nomodeset",
       "grub_laptop_extra": "mem_sleep_default=deep"
     },
     "skylake": {
