@@ -49,3 +49,10 @@ selahos-iso-v3/local-repo/*.pkg.tar.zst.sig
 *.vdi
 *.iso
 *.img
+
+# Large VM files
+*.qcow2
+*.vmdk
+*.vdi
+*.iso
+*.img
