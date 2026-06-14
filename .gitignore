@@ -42,3 +42,10 @@ tools/src/
 # Large kernel packages - stored locally only
 selahos-iso-v3/local-repo/*.pkg.tar.zst
 selahos-iso-v3/local-repo/*.pkg.tar.zst.sig
+
+# Large VM files
+*.qcow2
+*.vmdk
+*.vdi
+*.iso
+*.img
