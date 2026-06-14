@@ -1,0 +1,7 @@
+# Akai Professional MPK mini IV — USB MIDI class-compliant
+# Grants audio group access and runs the auto-connect helper on plug.
+# VID 09e8 = Akai Professional. Known mini PIDs; add new ones here.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="005d", GROUP="audio", MODE="0664", SYMLINK+="mpk-mini-iv"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="0045", GROUP="audio", MODE="0664", SYMLINK+="mpk-mini-iv"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", ATTRS{idProduct}=="007c", GROUP="audio", MODE="0664", SYMLINK+="mpk-mini-iv"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="09e8", GROUP="audio", MODE="0664", TAG+="uaccess"

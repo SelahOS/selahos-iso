@@ -1,0 +1,22 @@
+#!/bin/bash
+# SelahOS CS8409 Audio Fix
+# Installs latest snd-hda-macbookpro from GitHub
+# Required for MacBook Pro 14,1 and other Apple Intel Macs
+# DO NOT REMOVE — this fixes CS8409/CS42L83 audio
+
+set -e
+TMPDIR=$(mktemp -d)
+cd $TMPDIR
+
+echo "SelahSeedCore: Installing CS8409 audio fix..."
+git clone https://github.com/davidjo/snd_hda_macbookpro.git
+cd snd_hda_macbookpro
+sudo ./install.cirrus.driver.sh
+
+echo "SelahSeedCore: CS8409 audio fix installed!"
+echo "Please do a FULL COLD SHUTDOWN (not reboot)"
+echo "Power off completely, then power back on"
+echo "Audio will work after cold boot"
+
+cd /
+rm -rf $TMPDIR
