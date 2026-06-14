@@ -1,0 +1,11 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Type=Application
+Name=MPK mini IV Editor
+GenericName=MIDI Controller Editor
+Comment=Configure Akai MPK mini IV pads, knobs, arpeggiator and presets
+Exec=/usr/local/bin/mpk-mini-iv-editor
+Icon=multimedia-player
+Categories=AudioVideo;Audio;Music;
+Keywords=MIDI;Akai;MPK;keyboard;pads;controller;
+StartupWMClass=mpk_mini_iv_editor
