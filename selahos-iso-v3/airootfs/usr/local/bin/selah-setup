@@ -1150,8 +1150,9 @@ class InstallThread(QThread):
 
         # Step 9: SelahSeedCore (Apple only)
         self._step(9)
+        recommended_kernel = None
         if is_apple:
-            self._apply_seedcore(chroot, sh)
+            recommended_kernel = self._apply_seedcore(chroot, sh)
 
         # Step 10: SelahBridgePro
         self._step(10)
@@ -1169,9 +1170,13 @@ class InstallThread(QThread):
         chroot(['grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi',
                 '--bootloader-id=SelahOS', '--removable', '--recheck'])
         sh(['sed', '-i', 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/', '/mnt/etc/default/grub'])
-        # Remove Arch Linux references from GRUB config
         chroot(['grub-mkconfig', '-o', '/boot/grub/grub.cfg'])
         sh(['sed', '-i', 's/Arch Linux/SelahOS/g', '/mnt/boot/grub/grub.cfg'])
+        if recommended_kernel == 'linux-lts':
+            import subprocess as _sp
+            _sp.run(['arch-chroot', '/mnt', 'grub-set-default',
+                     'Advanced options for SelahOS>SelahOS, with Linux linux-lts'],
+                    capture_output=True)
 
         # Step 12: Desktop theme
         self._step(12)
@@ -1213,38 +1218,57 @@ class InstallThread(QThread):
         for svc in services:
             chroot(['systemctl', 'enable', svc])
 
-        # Build GRUB params from profile tier
-        tier_name = profile.get('tier', 'kaby_lake')
-        tier      = get_tier(tier_name)
-        base      = tier.get('grub_base', 'pcie_aspm=off acpi_osi=Darwin video=efifb:off')
-        extra     = tier.get('grub_laptop_extra', '') if battery else ''
-        params    = f'quiet splash {base} {extra}'.strip()
+        # Resolve kernel params: hardware-db.json takes precedence over mac-profiles tiers
+        recommended_kernel = None
+        db_entry = None
+        try:
+            with open('/usr/share/selahos/hardware-db.json') as _f:
+                hw_db = json.load(_f)
+            with open('/sys/class/dmi/id/product_name') as _f:
+                dmi_product = _f.read().strip()
+            db_entry = hw_db.get(dmi_product)
+        except Exception:
+            pass
+
+        if db_entry:
+            params = f"quiet splash {db_entry['params']}"
+            recommended_kernel = db_entry.get('kernel', 'linux-zen')
+        else:
+            tier_name = profile.get('tier', 'kaby_lake')
+            tier      = get_tier(tier_name)
+            base      = tier.get('grub_base', 'pcie_aspm=off acpi_osi=Darwin video=efifb:off')
+            extra     = tier.get('grub_laptop_extra', '') if battery else ''
+            params    = f'quiet splash {base} {extra}'.strip()
 
         grub_cfg = '/mnt/etc/default/grub'
         if _os.path.exists(grub_cfg):
-            with open(grub_cfg) as f:
-                content = f.read()
+            with open(grub_cfg) as _f:
+                content = _f.read()
             if 'GRUB_CMDLINE_LINUX_DEFAULT' in content:
                 content = _re.sub(
                     r'GRUB_CMDLINE_LINUX_DEFAULT=.*',
                     f'GRUB_CMDLINE_LINUX_DEFAULT="{params}"',
                     content
                 )
-                with open(grub_cfg, 'w') as f:
-                    f.write(content)
+            if recommended_kernel == 'linux-lts':
+                content = _re.sub(r'GRUB_DEFAULT=.*', 'GRUB_DEFAULT=saved', content)
+            with open(grub_cfg, 'w') as _f:
+                _f.write(content)
 
         if 'nomodeset' in params:
             mkinit = '/mnt/etc/mkinitcpio.conf'
             if _os.path.exists(mkinit):
-                with open(mkinit) as f:
-                    mc = f.read()
+                with open(mkinit) as _f:
+                    mc = _f.read()
                 mc = _re.sub(r'\bkms\b\s*', '', mc)
-                with open(mkinit, 'w') as f:
-                    f.write(mc)
+                with open(mkinit, 'w') as _f:
+                    _f.write(mc)
             sddm_session = '/mnt/etc/sddm.conf.d/20-selah-x11-session.conf'
             _os.makedirs(_os.path.dirname(sddm_session), exist_ok=True)
-            with open(sddm_session, 'w') as f:
-                f.write('[General]\nDefaultSession=plasma.desktop\n')
+            with open(sddm_session, 'w') as _f:
+                _f.write('[General]\nDefaultSession=plasma.desktop\n')
+
+        return recommended_kernel
 
     def _apply_theme(self, sh):
         import os as _os
