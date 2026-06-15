@@ -49,4 +49,5 @@ file_permissions=(
   ["/usr/local/bin/selah-recover"]="0:0:755"
   ["/usr/local/bin/selahos-recovery-center"]="0:0:755"
   ["/usr/local/bin/selahbridge-manager"]="0:0:755"
+  ["/usr/share/selahos/hardware-db.json"]="0:0:644"
 )

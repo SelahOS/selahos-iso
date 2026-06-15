@@ -1,0 +1,498 @@
+{
+  "_note": "SelahOS Hardware Database — DMI product name to boot config mapping. Add new models here; no Python changes needed.",
+  "_version": "1.0",
+
+  "MacBook8,1": {
+    "name": "MacBook (Early 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBook9,1": {
+    "name": "MacBook (Early 2016)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBook10,1": {
+    "name": "MacBook (2017)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+
+  "MacBookAir5,1": {
+    "name": "MacBook Air (11-inch, Mid 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookAir5,2": {
+    "name": "MacBook Air (13-inch, Mid 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookAir6,1": {
+    "name": "MacBook Air (11-inch, Mid 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookAir6,2": {
+    "name": "MacBook Air (13-inch, Mid 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookAir7,1": {
+    "name": "MacBook Air (11-inch, Early 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookAir7,2": {
+    "name": "MacBook Air (13-inch, Early 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookAir8,1": {
+    "name": "MacBook Air (Late 2018)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookAir8,2": {
+    "name": "MacBook Air (Mid 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookAir9,1": {
+    "name": "MacBook Air (Early 2020)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=3 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+
+  "MacBookPro9,1": {
+    "name": "MacBook Pro (15-inch, Mid 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro9,2": {
+    "name": "MacBook Pro (13-inch, Mid 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro10,1": {
+    "name": "MacBook Pro (15-inch Retina, Mid 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro10,2": {
+    "name": "MacBook Pro (13-inch Retina, Late 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro11,1": {
+    "name": "MacBook Pro (13-inch, Late 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro11,2": {
+    "name": "MacBook Pro (15-inch, Late 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro11,3": {
+    "name": "MacBook Pro (15-inch, Late 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro11,4": {
+    "name": "MacBook Pro (15-inch, Mid 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro11,5": {
+    "name": "MacBook Pro (15-inch, Mid 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro12,1": {
+    "name": "MacBook Pro (13-inch, Early 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro13,1": {
+    "name": "MacBook Pro (13-inch, Late 2016, 2 TB3)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro13,2": {
+    "name": "MacBook Pro (13-inch, Late 2016, 4 TB3)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro13,3": {
+    "name": "MacBook Pro (15-inch, Late 2016)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro14,1": {
+    "name": "MacBook Pro (13-inch, Mid 2017, 2 TB3)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": true
+  },
+  "MacBookPro14,2": {
+    "name": "MacBook Pro (13-inch, Mid 2017, 4 TB3)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro14,3": {
+    "name": "MacBook Pro (15-inch, Mid 2017)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacBookPro15,1": {
+    "name": "MacBook Pro (15-inch, Mid 2018)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookPro15,2": {
+    "name": "MacBook Pro (13-inch, Mid 2018)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookPro15,3": {
+    "name": "MacBook Pro (15-inch, Mid 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookPro15,4": {
+    "name": "MacBook Pro (13-inch, Mid 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookPro16,1": {
+    "name": "MacBook Pro (16-inch, Late 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookPro16,2": {
+    "name": "MacBook Pro (13-inch, Early 2020)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=3 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookPro16,3": {
+    "name": "MacBook Pro (13-inch, Early 2020)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=3 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "MacBookPro16,4": {
+    "name": "MacBook Pro (16-inch, Late 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2 mem_sleep_default=deep",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+
+  "iMac12,1": {
+    "name": "iMac (21.5-inch, Mid 2011)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic video=efifb:off",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac12,2": {
+    "name": "iMac (27-inch, Mid 2011)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic video=efifb:off",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac13,1": {
+    "name": "iMac (21.5-inch, Late 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac13,2": {
+    "name": "iMac (27-inch, Late 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac14,1": {
+    "name": "iMac (21.5-inch, Late 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac14,2": {
+    "name": "iMac (27-inch, Late 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac14,3": {
+    "name": "iMac (21.5-inch, Late 2013)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac14,4": {
+    "name": "iMac (21.5-inch, Mid 2014)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac15,1": {
+    "name": "iMac (27-inch 5K, Late 2014)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac16,1": {
+    "name": "iMac (21.5-inch, Late 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 video=efifb:off",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac16,2": {
+    "name": "iMac (21.5-inch, Late 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4 video=efifb:off",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": true
+  },
+  "iMac17,1": {
+    "name": "iMac (27-inch 5K, Late 2015)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac18,1": {
+    "name": "iMac (21.5-inch, Mid 2017)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac18,2": {
+    "name": "iMac (21.5-inch, Mid 2017)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac18,3": {
+    "name": "iMac (27-inch 5K, Mid 2017)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "iMac19,1": {
+    "name": "iMac (27-inch 5K, Early 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "iMac19,2": {
+    "name": "iMac (21.5-inch, Early 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "iMac20,1": {
+    "name": "iMac (27-inch 5K, Mid 2020)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=3",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+  "iMac20,2": {
+    "name": "iMac (27-inch 5K, Mid 2020)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=3",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+
+  "Macmini6,1": {
+    "name": "Mac mini (Late 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "Macmini6,2": {
+    "name": "Mac mini (Late 2012)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=1 noapic",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "Macmini7,1": {
+    "name": "Mac mini (Late 2014)",
+    "kernel": "linux-lts",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_rc6=1 intel_idle.max_cstate=4",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "Macmini8,1": {
+    "name": "Mac mini (Late 2018)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off i915.enable_guc=2",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  },
+
+  "MacPro6,1": {
+    "name": "Mac Pro (Late 2013)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off",
+    "wifi": "brcmfmac",
+    "audio": "standard",
+    "confirmed": false
+  },
+  "MacPro7,1": {
+    "name": "Mac Pro (Late 2019)",
+    "kernel": "linux-zen",
+    "params": "acpi_osi=Darwin acpi_mask_gpe=0x57 pcie_aspm=off",
+    "wifi": "brcmfmac",
+    "audio": "cs8409-github-install",
+    "confirmed": false
+  }
+}
