@@ -1,0 +1,17 @@
+# Build artifacts
+selahos-work/
+selahos-iso-output/
+*.iso
+*.log
+
+# VM disk images — never commit these (can be multi-GB)
+*.qcow2
+*.vmdk
+*.vdi
+*.vhd
+*.vhdx
+*.img
+
+# Python cache
+__pycache__/
+*.pyc
