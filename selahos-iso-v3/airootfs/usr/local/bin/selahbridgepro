@@ -7,7 +7,7 @@
 #  Launch: selahbridgepro
 # ═══════════════════════════════════════════════════════════════════════════════
 
-import sys, os, subprocess, shutil, hashlib, datetime
+import sys, os, subprocess, shutil, hashlib, datetime, json
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QLabel, QPushButton, QFrame, QTextEdit, QScrollArea,
     QComboBox, QSlider, QListWidget, QListWidgetItem, QSizePolicy,
     QGridLayout, QLineEdit, QMessageBox, QStackedWidget, QSpacerItem,
+    QDialog, QDialogButtonBox, QFileDialog, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPalette
@@ -760,6 +761,327 @@ class DiagnoseTab(QWidget):
         self._worker.start()
 
 
+APPS_REGISTRY = Path.home() / ".config" / "selahbridgepro" / "apps.json"
+WINAPP_LOG_DIR = Path("/var/log/selahbridgepro")
+
+
+def _load_apps() -> list:
+    try:
+        return json.loads(APPS_REGISTRY.read_text()) if APPS_REGISTRY.exists() else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _save_apps(apps: list):
+    APPS_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    APPS_REGISTRY.write_text(json.dumps(apps, indent=2))
+
+
+def _detect_electron(exe_path: str) -> bool:
+    app_dir = Path(exe_path).parent
+    markers = [
+        app_dir / "resources" / "app.asar",
+        app_dir / "resources" / "electron.asar",
+        app_dir / "LICENSES.chromium.html",
+    ]
+    if any(m.exists() for m in markers):
+        return True
+    resources = app_dir / "resources"
+    if resources.is_dir() and any(resources.glob("*.asar")):
+        return True
+    return False
+
+
+class AddAppDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Windows App")
+        self.setMinimumWidth(520)
+        self.setStyleSheet(parent.styleSheet() if parent else "")
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(14)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        layout.addWidget(_label("Add Windows App", C["gold"], bold=True, size=14))
+        layout.addWidget(_divider())
+
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        grid.setColumnMinimumWidth(0, 90)
+
+        grid.addWidget(_label("Name:", C["muted"]), 0, 0)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("e.g. Spark Desktop")
+        grid.addWidget(self.name_edit, 0, 1, 1, 2)
+
+        grid.addWidget(_label(".exe Path:", C["muted"]), 1, 0)
+        self.exe_edit = QLineEdit()
+        self.exe_edit.setPlaceholderText("/home/user/.wine-selah-apps/drive_c/…/App.exe")
+        grid.addWidget(self.exe_edit, 1, 1)
+        btn_browse = QPushButton("Browse…")
+        btn_browse.setObjectName("secondary")
+        btn_browse.setFixedWidth(80)
+        btn_browse.clicked.connect(self._browse)
+        grid.addWidget(btn_browse, 1, 2)
+
+        grid.addWidget(_label("Prefix:", C["muted"]), 2, 0)
+        self.prefix_edit = QLineEdit()
+        self.prefix_edit.setPlaceholderText("apps")
+        self.prefix_edit.setText("apps")
+        grid.addWidget(self.prefix_edit, 2, 1, 1, 2)
+
+        self.electron_check = QCheckBox("Electron app (auto-detected)")
+        self.electron_check.setStyleSheet(f"color: {C['parch']};")
+        grid.addWidget(self.electron_check, 3, 1, 1, 2)
+
+        layout.addLayout(grid)
+
+        self.detect_lbl = _label("", C["muted"], size=11)
+        layout.addWidget(self.detect_lbl)
+
+        layout.addWidget(_divider())
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.setStyleSheet(f"color: {C['parch']};")
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.exe_edit.textChanged.connect(self._on_exe_changed)
+        self._result_app: dict | None = None
+
+    def _browse(self):
+        start = str(Path.home())
+        for candidate in sorted(Path.home().glob(".wine-selah-*/drive_c")):
+            start = str(candidate)
+            break
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Windows Executable", start,
+            "Windows Executables (*.exe);;All Files (*)")
+        if path:
+            self.exe_edit.setText(path)
+
+    def _on_exe_changed(self, text: str):
+        if not text or not Path(text).exists():
+            self.detect_lbl.setText("")
+            return
+        is_e = _detect_electron(text)
+        self.electron_check.setChecked(is_e)
+        self.detect_lbl.setText(
+            f"Detected: {'Electron app' if is_e else 'Standard Win32 app'}")
+        if not self.name_edit.text():
+            self.name_edit.setText(Path(text).stem.replace("-", " ").replace("_", " ").title())
+        if not self.prefix_edit.text() or self.prefix_edit.text() == "apps":
+            m = __import__("re").search(r"\.wine-selah-([^/]+)/drive_c", text)
+            if m:
+                self.prefix_edit.setText(m.group(1))
+
+    def _on_accept(self):
+        name = self.name_edit.text().strip()
+        exe  = self.exe_edit.text().strip()
+        if not name or not exe:
+            QMessageBox.warning(self, "Missing fields", "Name and exe path are required.")
+            return
+        if not Path(exe).exists():
+            QMessageBox.warning(self, "Not found", f"File not found:\n{exe}")
+            return
+        self._result_app = {
+            "name":     name,
+            "exe":      exe,
+            "prefix":   self.prefix_edit.text().strip() or "apps",
+            "electron": self.electron_check.isChecked(),
+        }
+        self.accept()
+
+    def result_app(self) -> dict | None:
+        return self._result_app
+
+
+class WindowsAppsTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(16)
+
+        root.addWidget(_label("Windows Apps", C["gold"], bold=True, size=15))
+        root.addWidget(_label(
+            "Run any Windows .exe through SelahBridgePro Wine. "
+            "Electron apps are auto-detected and launched with the EBADF stdio fix.",
+            C["muted"], size=12))
+        root.addWidget(_divider())
+
+        body = QHBoxLayout()
+        body.setSpacing(16)
+
+        # Left: app list + add/remove
+        left = QVBoxLayout()
+        left.setSpacing(8)
+        left.addWidget(_label("Registered Apps", C["muted"], size=11))
+        self.app_list = QListWidget()
+        self.app_list.setMinimumWidth(200)
+        self.app_list.setMaximumWidth(260)
+        left.addWidget(self.app_list, stretch=1)
+        btn_row = QHBoxLayout()
+        self.btn_add    = QPushButton("Add App")
+        self.btn_add.setFixedHeight(32)
+        self.btn_remove = QPushButton("Remove")
+        self.btn_remove.setObjectName("secondary")
+        self.btn_remove.setFixedHeight(32)
+        btn_row.addWidget(self.btn_add)
+        btn_row.addWidget(self.btn_remove)
+        left.addLayout(btn_row)
+        body.addLayout(left)
+
+        # Right: detail + actions
+        right = QVBoxLayout()
+        right.setSpacing(10)
+
+        detail = QFrame()
+        detail.setObjectName("card")
+        detail.setMinimumHeight(130)
+        dl = QGridLayout(detail)
+        dl.setContentsMargins(14, 12, 14, 12)
+        dl.setSpacing(6)
+        dl.setColumnMinimumWidth(0, 80)
+        dl.addWidget(_label("Name:",   C["muted"], size=11), 0, 0)
+        dl.addWidget(_label("Exe:",    C["muted"], size=11), 1, 0)
+        dl.addWidget(_label("Prefix:", C["muted"], size=11), 2, 0)
+        dl.addWidget(_label("Type:",   C["muted"], size=11), 3, 0)
+        self.det_name   = _label("—", C["parch"])
+        self.det_exe    = _label("—", C["muted"], size=11)
+        self.det_prefix = _label("—", C["parch"])
+        self.det_type   = _label("—", C["teal"])
+        self.det_exe.setWordWrap(True)
+        for row, lbl in enumerate(
+                (self.det_name, self.det_exe, self.det_prefix, self.det_type)):
+            dl.addWidget(lbl, row, 1)
+        right.addWidget(detail)
+
+        action_row = QHBoxLayout()
+        self.btn_launch   = QPushButton("Launch")
+        self.btn_launch.setObjectName("launch")
+        self.btn_launch.setFixedHeight(36)
+        self.btn_viewlog  = QPushButton("View Log")
+        self.btn_viewlog.setObjectName("secondary")
+        self.btn_viewlog.setFixedHeight(36)
+        action_row.addWidget(self.btn_launch)
+        action_row.addWidget(self.btn_viewlog)
+        action_row.addStretch()
+        right.addLayout(action_row)
+
+        right.addWidget(_label("Launch Output", C["muted"], size=11))
+        self.log = _log_panel()
+        right.addWidget(self.log, stretch=1)
+
+        self.status_lbl = _label("Select an app to launch.", C["muted"], size=11)
+        right.addWidget(self.status_lbl)
+
+        body.addLayout(right, stretch=1)
+        root.addLayout(body, stretch=1)
+
+        self.btn_add.clicked.connect(self._add_app)
+        self.btn_remove.clicked.connect(self._remove_app)
+        self.btn_launch.clicked.connect(self._launch_app)
+        self.btn_viewlog.clicked.connect(self._view_log)
+        self.app_list.currentRowChanged.connect(self._on_selection)
+
+        self._apps: list = []
+        self._refresh_list()
+
+    def _refresh_list(self):
+        self._apps = _load_apps()
+        self.app_list.clear()
+        for app in self._apps:
+            item = QListWidgetItem(f"  {app['name']}")
+            item.setForeground(__import__("PyQt6.QtGui", fromlist=["QColor"]).QColor(C["parch"]))
+            self.app_list.addItem(item)
+        self._on_selection(self.app_list.currentRow())
+
+    def _on_selection(self, row: int):
+        if 0 <= row < len(self._apps):
+            app = self._apps[row]
+            self.det_name.setText(app["name"])
+            self.det_exe.setText(app["exe"])
+            self.det_prefix.setText(app.get("prefix", "apps"))
+            self.det_type.setText("Electron app" if app.get("electron") else "Win32 app")
+            self.btn_launch.setEnabled(True)
+            self.btn_remove.setEnabled(True)
+            self.btn_viewlog.setEnabled(True)
+        else:
+            self.det_name.setText("—")
+            self.det_exe.setText("—")
+            self.det_prefix.setText("—")
+            self.det_type.setText("—")
+            self.btn_launch.setEnabled(False)
+            self.btn_remove.setEnabled(False)
+            self.btn_viewlog.setEnabled(False)
+
+    def _add_app(self):
+        dlg = AddAppDialog(self.window())
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            app = dlg.result_app()
+            if app:
+                self._apps.append(app)
+                _save_apps(self._apps)
+                self._refresh_list()
+                self.app_list.setCurrentRow(len(self._apps) - 1)
+
+    def _remove_app(self):
+        row = self.app_list.currentRow()
+        if row < 0:
+            return
+        name = self._apps[row]["name"]
+        reply = QMessageBox.question(
+            self, "Remove App",
+            f"Remove '{name}' from SelahBridgePro?\n(The app itself is not uninstalled.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self._apps.pop(row)
+            _save_apps(self._apps)
+            self._refresh_list()
+
+    def _launch_app(self):
+        row = self.app_list.currentRow()
+        if row < 0:
+            return
+        app = self._apps[row]
+        cmd = [
+            "selahbridge-winapp",
+            "--name",   app["name"],
+            "--prefix", app.get("prefix", "apps"),
+            app["exe"],
+        ]
+        self.status_lbl.setText(f"Launching {app['name']}…")
+        _log_append(self.log, f"→ {' '.join(cmd)}")
+        subprocess.Popen(cmd)
+        _log_append(self.log, f"✓  {app['name']} launched — log: "
+                    f"/var/log/selahbridgepro/winapp-{app['name'].replace(' ', '-')}.log")
+
+    def _view_log(self):
+        row = self.app_list.currentRow()
+        if row < 0:
+            return
+        app    = self._apps[row]
+        slug   = app["name"].replace(" ", "-")
+        log_f  = WINAPP_LOG_DIR / f"winapp-{slug}.log"
+        alt_f  = Path(f"/tmp/winapp-{slug}.log")
+        target = log_f if log_f.exists() else (alt_f if alt_f.exists() else None)
+        if target:
+            try:
+                text = target.read_text(errors="replace")
+                lines = text.splitlines()[-120:]
+                self.log.setPlainText("\n".join(lines))
+                self.log.verticalScrollBar().setValue(
+                    self.log.verticalScrollBar().maximum())
+                self.status_lbl.setText(f"Log: {target}")
+            except OSError as e:
+                self.status_lbl.setText(f"✗ Could not read log: {e}")
+        else:
+            self.status_lbl.setText("No log yet — launch the app first.")
+
+
 class LicenseTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -880,10 +1202,12 @@ class SelahBridgeProWindow(QMainWindow):
         self.audio_tab    = AudioTab()
         self.midi_tab     = MidiTab()
         self.diagnose_tab = DiagnoseTab()
+        self.apps_tab     = WindowsAppsTab()
         self.license_tab  = LicenseTab()
 
         tabs.addTab(self.home_tab,     "  Home  ")
         tabs.addTab(self.daws_tab,     "  DAWs  ")
+        tabs.addTab(self.apps_tab,     "  Windows Apps  ")
         tabs.addTab(self.audio_tab,    "  Audio  ")
         tabs.addTab(self.midi_tab,     "  MIDI  ")
         tabs.addTab(self.diagnose_tab, "  Diagnose  ")

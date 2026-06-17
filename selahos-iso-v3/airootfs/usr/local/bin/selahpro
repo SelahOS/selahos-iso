@@ -28,7 +28,10 @@ SUPPORT = "support@selahtechnologies.com"
 PROFILE_DIR  = Path("/etc/selahbridgepro/profiles")
 LIC_DIR      = Path("/etc/selahbridgepro")
 LIC_FILE     = LIC_DIR / "license"
-TRIAL_FILE   = LIC_DIR / "trial.conf"
+# Per-user data (trial start) lives in ~/.local so regular users can write it.
+# System license file stays in /etc (written by root via --activate).
+_USER_DATA_DIR = Path.home() / ".local/share/selahbridgepro"
+TRIAL_FILE   = _USER_DATA_DIR / "trial.conf"
 TRIAL_DAYS   = 14
 
 # License secret loaded at runtime from /etc/selahbridgepro/.keydata
@@ -57,7 +60,7 @@ BANNER = f"""\
 {GOLD}{BOLD}
   ╔══════════════════════════════════════════════════════════════╗
   ║        SelahBridgePro™  v{VERSION}  —  Creator DAW Layer         ║
-  ║   Wine · DXVK · SelahASIO · USB MIDI · for SelahOS           ║
+  ║  Wine · DXVK · VKD3D-Proton · SelahASIO · USB MIDI          ║
   ╚══════════════════════════════════════════════════════════════╝
 {RESET}"""
 
@@ -75,6 +78,42 @@ KNOWN_DAWS = {
     "mpcstudio":       {"name": "MPC Software",       "exe": "MPC.exe",                   "profile": "mpc"},
     "mpc2":            {"name": "MPC Software",       "exe": "MPC.exe",                   "profile": "mpc"},
     "mpc3":            {"name": "MPC Software",       "exe": "MPC.exe",                   "profile": "mpc"},
+    # ── Studio One ──────────────────────────────────────────────────────────
+    # Installed in ~/.wine (global prefix). DXVK required: Studio One 7 uses
+    # Direct3D 11 for its GPU UI; without it the GPU check reports "Windows 10
+    # required" even though Wine already reports Windows 10 in the registry.
+    "studioone":       {"name": "Studio One 7",
+                        "exe": str(Path.home() / ".wine/drive_c/Program Files/PreSonus/Studio One 7/Studio One.exe"),
+                        "profile": "studioone",
+                        "_prefix": str(Path.home() / ".wine")},
+    "studio one":      {"name": "Studio One 7",
+                        "exe": str(Path.home() / ".wine/drive_c/Program Files/PreSonus/Studio One 7/Studio One.exe"),
+                        "profile": "studioone",
+                        "_prefix": str(Path.home() / ".wine")},
+    "s1":              {"name": "Studio One 7",
+                        "exe": str(Path.home() / ".wine/drive_c/Program Files/PreSonus/Studio One 7/Studio One.exe"),
+                        "profile": "studioone",
+                        "_prefix": str(Path.home() / ".wine")},
+    # ── Windows apps (non-DAW) ───────────────────────────────────────────────
+    # These use the "apps" profile: no DXVK/VKD3D, no ASIO, XWayland forced.
+    # "_prefix" overrides the Wine prefix (apps installed in ~/.wine, not ~/.wine-selah-apps).
+    # "_log"    names the log file under /var/log/selahbridgepro/.
+    "spark desktop":   {"name": "Spark Desktop",  "profile": "apps",
+                        "_prefix": str(Path.home() / ".wine"),
+                        "_log": "winapp-Spark-Desktop.log",
+                        # --disable-gpu: prevents repeated GPU-process crashes under XWayland
+                        # that cause Electron to terminate the app.
+                        "_args": ["--disable-gpu"],
+                        "exe": str(Path.home() / ".wine/drive_c/users" /
+                                   os.environ.get("USER", Path.home().name) /
+                                   "AppData/Local/Programs/SparkDesktop/Spark Desktop.exe")},
+    "spark":           {"name": "Spark Desktop",  "profile": "apps",
+                        "_prefix": str(Path.home() / ".wine"),
+                        "_log": "winapp-Spark-Desktop.log",
+                        "_args": ["--disable-gpu"],
+                        "exe": str(Path.home() / ".wine/drive_c/users" /
+                                   os.environ.get("USER", Path.home().name) /
+                                   "AppData/Local/Programs/SparkDesktop/Spark Desktop.exe")},
 }
 
 def ok(msg):    print(f"  {TEAL}✓{RESET} {PARCH}{msg}{RESET}")
@@ -134,8 +173,8 @@ def _check_license() -> bool:
         except (ValueError, OSError):
             pass
 
-    # First run — write trial start
-    LIC_DIR.mkdir(parents=True, exist_ok=True, mode=0o755)
+    # First run — write trial start to user-writable dir
+    _USER_DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o755)
     TRIAL_FILE.write_text(now.isoformat())
     os.chmod(TRIAL_FILE, 0o644)
     info(f"Trial started — {TRIAL_DAYS} days free. Machine ID: {_machine_id()}")
@@ -180,23 +219,31 @@ def cmd_install(daw_name: str | None, existing_prefix: str | None = None, instal
     hdr("SelahBridgePro Install")
     _check_license()
 
-    # 1. Ensure wine-staging is present
-    if not shutil.which("wine"):
-        warn("wine-staging not found — installing via pacman...")
-        _run_cmd("Installing wine-staging", "sudo", "pacman", "-S", "--noconfirm",
-                 "wine-staging", "wine-mono", "wine-gecko", "winetricks",
-                 "dxvk-async-git", "wineasio",
-                 "lib32-pipewire-jack", "pipewire-jack", check=False)
-
-    # selahauth browser dependency
-    if not _pyqt6_webengine_available():
-        _run_cmd("Installing selahauth dependency (python-pyqt6-webengine)",
-                 "sudo", "pacman", "-S", "--noconfirm",
-                 "python-pyqt6-webengine", check=False)
+    # Delegate all system-level package installation to selahbridge-install,
+    # which handles: multilib enable, Wine, Vulkan drivers, DXVK (dxvk-mingw),
+    # VKD3D-Proton (vkd3d-proton-bin), PipeWire JACK, WineASIO, virtual MIDI.
+    installer = shutil.which("selahbridge-install")
+    if installer:
+        info("Launching SelahBridgePro runtime installer...")
+        result = subprocess.run([installer], check=False)
+        if result.returncode != 0:
+            warn("Runtime installer reported issues — see output above.")
     else:
-        ok("wine-staging present")
+        warn("selahbridge-install not found — running minimal fallback install")
+        if not shutil.which("wine"):
+            _run_cmd("Installing Wine runtime",
+                     "sudo", "pacman", "-S", "--noconfirm",
+                     "wine-staging", "wine-mono", "wine-gecko", "winetricks",
+                     check=False)
+        else:
+            ok("Wine runtime present")
 
-    # 2. Register WineASIO
+        if not _pyqt6_webengine_available():
+            _run_cmd("Installing selahauth dependency (python-pyqt6-webengine)",
+                     "sudo", "pacman", "-S", "--noconfirm",
+                     "python-pyqt6-webengine", check=False)
+
+    # Register WineASIO COM server in the user's Wine prefix
     _run_cmd("Configuring SelahASIO", "selah-asio-config", "--install", check=False)
 
     # 3. Apply udev rules (reload)
@@ -403,9 +450,14 @@ def cmd_launch(daw_name: str, exe_override: str | None = None):
     buffer = int(profile_env.get("SELAH_AUDIO_BUFFER", "256"))
     latency_ms = (buffer / rate) * 1000
 
-    prefix = Path.home() / f".wine-selah-{daw['profile']}"
-    if not prefix.exists():
-        prefix = Path.home() / ".wine-selah"
+    # Allow per-app prefix override (e.g. Spark lives in ~/.wine, not ~/.wine-selah-apps)
+    prefix_override = daw.get("_prefix")
+    if prefix_override:
+        prefix = Path(prefix_override).expanduser()
+    else:
+        prefix = Path.home() / f".wine-selah-{daw['profile']}"
+        if not prefix.exists():
+            prefix = Path.home() / ".wine-selah"
 
     launch_env = {
         **os.environ,
@@ -425,6 +477,12 @@ def cmd_launch(daw_name: str, exe_override: str | None = None):
         launch_env["WINEDLLOVERRIDES"] = (
             profile_env["WINEDLLOVERRIDES"] + ";winemenubuilder.exe=d"
         )
+
+    # Profile may override DISPLAY/WAYLAND_DISPLAY; also honour env vars.
+    if "DISPLAY" in profile_env:
+        launch_env["DISPLAY"] = profile_env["DISPLAY"]
+    if "WAYLAND_DISPLAY" in profile_env:
+        launch_env["WAYLAND_DISPLAY"] = profile_env.get("WAYLAND_DISPLAY", "")
 
     exe = exe_override or daw["exe"]
     info(f"Profile:  {daw['profile']}.profile")
@@ -466,8 +524,31 @@ def cmd_launch(daw_name: str, exe_override: str | None = None):
 
     # Launch via selahwine (which wraps wine-staging)
     selahwine = shutil.which("selahwine") or "selahwine"
-    cmd = [selahwine, "--profile", daw["profile"], exe]
+    extra_args = daw.get("_args", [])
+    cmd = [selahwine, "--profile", daw["profile"], exe] + extra_args
     info(f"Running: {' '.join(cmd)}")
+
+    # Fix EBADF: when launched from a desktop environment (KDE app launcher),
+    # fds 1 and 2 may be closed.  Electron/Node.js tries to wrap them as
+    # sockets and throws "Error: open EBADF".  Redirect them to the app log
+    # before exec so Wine inherits valid file descriptors.
+    log_name = daw.get("_log", f"winapp-{daw['name'].replace(' ', '-')}.log")
+    log_dir  = Path("/var/log/selahbridgepro")
+    log_path = log_dir / log_name
+    try:
+        is_tty = os.isatty(1) and os.isatty(2)
+    except OSError:
+        is_tty = False
+    if not is_tty:
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+            fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+            os.dup2(fd, 1)
+            os.dup2(fd, 2)
+            os.close(fd)
+        except OSError:
+            pass  # best-effort; proceed even if log redirect fails
+
     try:
         os.execve(selahwine, cmd, launch_env)
     except FileNotFoundError:
@@ -503,10 +584,11 @@ def cmd_diagnose(verbose=False):
     # WineASIO
     chk("wineasio",
         lambda: bool(subprocess.run(
-            ["find", "/usr/lib", "/usr/lib32", "-name", "wineasio.dll.so"],
+            ["find", "/usr/lib", "/usr/lib32", "/usr/local/lib",
+             "-name", "wineasio*.dll.so", "-o", "-name", "wineasio64.dll.so"],
             capture_output=True).stdout.strip()),
         "installed", "not installed",
-        "sudo pacman -S wineasio")
+        "yay -S wineasio")
 
     # PipeWire
     chk("PipeWire",
@@ -529,13 +611,31 @@ def cmd_diagnose(verbose=False):
         "active", "not running",
         "systemctl --user start pipewire pipewire-pulse")
 
-    # DXVK
-    chk("DXVK / dxvk-async",
+    # DXVK (D3D9/10/11 -> Vulkan)  — installed via AUR dxvk-mingw
+    chk("DXVK (D3D9/10/11)",
         lambda: bool(subprocess.run(
-            ["find", "/usr/share", "-name", "dxgi.dll", "-o", "-name", "d3d11.dll"],
+            ["find", "/usr/share/dxvk", "/usr/share/dxvk-mingw",
+             "/usr/share/dxvk-async", "-name", "d3d11.dll"],
             capture_output=True).stdout.strip()),
         "found", "not found",
-        "sudo pacman -S dxvk-async-git")
+        "yay -S dxvk-mingw")
+
+    # VKD3D-Proton (D3D12 -> Vulkan) — installed via AUR vkd3d-proton-bin
+    chk("VKD3D-Proton (D3D12)",
+        lambda: bool(subprocess.run(
+            ["find", "/usr/share/vkd3d-proton", "/usr/share/vkd3d-proton-mingw",
+             "/usr/lib/vkd3d-proton", "-name", "d3d12.dll"],
+            capture_output=True).stdout.strip()),
+        "found", "not found",
+        "yay -S vkd3d-proton-bin")
+
+    # Vulkan driver
+    chk("Vulkan ICD / driver",
+        lambda: bool(subprocess.run(
+            ["find", "/usr/share/vulkan/icd.d", "-name", "*.json"],
+            capture_output=True).stdout.strip()),
+        "found", "not found",
+        "sudo pacman -S vulkan-intel  (or vulkan-radeon for AMD)")
 
     # Realtime limits
     chk("realtime audio limits",

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-#  selahwine — SelahWine v1 Runtime Wrapper
-#  Wine-staging fork layer for SelahBridgePro
+#  selahwine — SelahWine v2 Runtime Wrapper
+#  Wine runtime layer for SelahBridgePro
 #  Selah Technologies LLC — Copyright (C) 2026
 #
 #  Usage: selahwine [--profile <name>] <wine-args...>
 #         selahwine --list-profiles
 #         selahwine --version
 #
-#  Enables: Fsync + Esync, DXVK async, creator-optimized registry,
-#           PipeWire JACK bridge, disabled telemetry/crash reporting.
+#  Provides: Fsync + Esync, DXVK (D3D9/10/11→Vulkan), VKD3D-Proton
+#            (D3D12→Vulkan), WineASIO, PipeWire JACK bridge,
+#            creator-optimized registry, disabled telemetry.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -23,7 +24,7 @@ RED=$'\033[38;2;185;122;111m'
 BOLD=$'\033[1m'
 RESET=$'\033[0m'
 
-SELAHWINE_VERSION="1.0.0"
+SELAHWINE_VERSION="2.0.0"
 PROFILE_DIR="/etc/selahbridgepro/profiles"
 DEFAULT_PROFILE="${PROFILE_DIR}/default.profile"
 SELAHPRO_CONF="/etc/selahbridgepro/selahbridgepro.conf"
@@ -32,14 +33,14 @@ info()  { printf '  %s→ %s%s\n' "$MUTED" "$1" "$RESET" >&2; }
 warn()  { printf '  %s⚠  %s%s\n' "$RED" "$1" "$RESET" >&2; }
 die()   { printf '\n%s✗  %s%s\n' "$RED" "$1" "$RESET" >&2; exit 1; }
 
-# ── Locate wine-staging binary ────────────────────────────────────────────────
+# ── Locate Wine binary ────────────────────────────────────────────────────────
 _find_wine() {
-    for candidate in /usr/bin/wine /usr/bin/wine-staging wine; do
+    for candidate in /usr/bin/wine-staging /usr/bin/wine wine; do
         if command -v "$candidate" &>/dev/null; then
             echo "$candidate"; return
         fi
     done
-    die "wine-staging not found. Run: selahpro install --runtime"
+    die "wine not found. Run: selahpro install --runtime"
 }
 
 # ── Load profile variables ────────────────────────────────────────────────────
@@ -48,6 +49,125 @@ _load_profile() {
     [[ -f "$profile_file" ]] || die "Profile not found: $profile_file"
     # shellcheck disable=SC1090
     source "$profile_file"
+}
+
+# ── Locate DXVK DLL directory ─────────────────────────────────────────────────
+# Returns the x64 DLL dir, or empty string if DXVK is not installed.
+_find_dxvk() {
+    for dir in \
+        /usr/share/dxvk/x64 \
+        /usr/share/dxvk-async/x64 \
+        /usr/share/dxvk-mingw/x64; do
+        [[ -f "${dir}/d3d11.dll" ]] && echo "$dir" && return
+    done
+    echo ""
+}
+
+_find_dxvk32() {
+    for dir in \
+        /usr/share/dxvk/x32 \
+        /usr/share/dxvk-async/x32 \
+        /usr/share/dxvk-mingw/x32; do
+        [[ -f "${dir}/d3d11.dll" ]] && echo "$dir" && return
+    done
+    echo ""
+}
+
+# ── Locate VKD3D-Proton DLL directory ────────────────────────────────────────
+_find_vkd3d_proton() {
+    for dir in \
+        /usr/share/vkd3d-proton/x64 \
+        /usr/share/vkd3d-proton-mingw/x64 \
+        /usr/lib/vkd3d-proton/x64; do
+        [[ -f "${dir}/d3d12.dll" ]] && echo "$dir" && return
+    done
+    echo ""
+}
+
+_find_vkd3d_proton32() {
+    for dir in \
+        /usr/share/vkd3d-proton/x32 \
+        /usr/share/vkd3d-proton-mingw/x32 \
+        /usr/lib/vkd3d-proton/x32; do
+        [[ -f "${dir}/d3d12.dll" ]] && echo "$dir" && return
+    done
+    echo ""
+}
+
+# ── Install DXVK into Wine prefix ─────────────────────────────────────────────
+# Copies DXVK DLLs into prefix/drive_c/windows/system32 (64-bit) and
+# syswow64 (32-bit). Uses a stamp file so this only runs when the DXVK
+# version changes, not on every launch.
+_setup_dxvk() {
+    local wineprefix="$1"
+    local dxvk64
+    local dxvk32
+    dxvk64="$(_find_dxvk)"
+    dxvk32="$(_find_dxvk32)"
+
+    [[ -n "$dxvk64" ]] || return 0   # DXVK not installed system-wide — skip
+
+    local stamp="${wineprefix}/.selahwine-dxvk"
+    local version_tag
+    version_tag="$(stat -c '%Y' "${dxvk64}/d3d11.dll" 2>/dev/null || echo "0")"
+
+    # Skip if already set up with this version
+    if [[ -f "$stamp" ]] && grep -qF "$version_tag" "$stamp" 2>/dev/null; then
+        return 0
+    fi
+
+    info "Installing DXVK into Wine prefix..."
+
+    local sys32="${wineprefix}/drive_c/windows/system32"
+    local syswow="${wineprefix}/drive_c/windows/syswow64"
+    mkdir -p "$sys32" "$syswow"
+
+    # 64-bit DLLs → system32
+    for dll in d3d9.dll d3d10.dll d3d10_1.dll d3d10core.dll d3d11.dll dxgi.dll; do
+        [[ -f "${dxvk64}/${dll}" ]] && cp -f "${dxvk64}/${dll}" "${sys32}/${dll}"
+    done
+
+    # 32-bit DLLs → syswow64
+    if [[ -n "$dxvk32" ]]; then
+        for dll in d3d9.dll d3d10.dll d3d10_1.dll d3d10core.dll d3d11.dll dxgi.dll; do
+            [[ -f "${dxvk32}/${dll}" ]] && cp -f "${dxvk32}/${dll}" "${syswow}/${dll}"
+        done
+    fi
+
+    printf '%s\n' "$version_tag" > "$stamp"
+}
+
+# ── Install VKD3D-Proton into Wine prefix ─────────────────────────────────────
+# Copies vkd3d-proton's d3d12.dll into the prefix, replacing stock vkd3d.
+# VKD3D-Proton has far better D3D12 coverage than the upstream vkd3d package
+# (required for DirectML/ONNX Runtime, DX12 games, modern Electron ML).
+_setup_vkd3d_proton() {
+    local wineprefix="$1"
+    local vkd64
+    local vkd32
+    vkd64="$(_find_vkd3d_proton)"
+    vkd32="$(_find_vkd3d_proton32)"
+
+    [[ -n "$vkd64" ]] || return 0   # vkd3d-proton not installed — skip
+
+    local stamp="${wineprefix}/.selahwine-vkd3d-proton"
+    local version_tag
+    version_tag="$(stat -c '%Y' "${vkd64}/d3d12.dll" 2>/dev/null || echo "0")"
+
+    if [[ -f "$stamp" ]] && grep -qF "$version_tag" "$stamp" 2>/dev/null; then
+        return 0
+    fi
+
+    info "Installing VKD3D-Proton (D3D12) into Wine prefix..."
+
+    local sys32="${wineprefix}/drive_c/windows/system32"
+    local syswow="${wineprefix}/drive_c/windows/syswow64"
+    mkdir -p "$sys32" "$syswow"
+
+    cp -f "${vkd64}/d3d12.dll" "${sys32}/d3d12.dll"
+    [[ -n "$vkd32" ]] && cp -f "${vkd32}/d3d12.dll" "${syswow}/d3d12.dll"
+
+    printf '%s\n' "$version_tag" > "$stamp"
 }
 
 # ── Apply creator-optimized registry defaults ────────────────────────────────
@@ -86,7 +206,6 @@ context.modules = [
     }
 ]
 EOF
-    # Signal PipeWire to reload if running
     if pidof pipewire &>/dev/null; then
         systemctl --user reload pipewire 2>/dev/null || true
     fi
@@ -97,6 +216,7 @@ _build_env() {
     local rate="${SELAH_AUDIO_RATE:-48000}"
     local buffer="${SELAH_AUDIO_BUFFER:-256}"
 
+    # ── Wine core ────────────────────────────────────────────────────────────
     export WINEESYNC="${WINEESYNC:-1}"
     export WINEFSYNC="${WINEFSYNC:-1}"
     export WINE_LARGE_ADDRESS_AWARE="${WINE_LARGE_ADDRESS_AWARE:-1}"
@@ -104,28 +224,62 @@ _build_env() {
     export WINEDEBUG="${WINEDEBUG:--all}"
     export WINEARCH="${WINEARCH:-win64}"
 
-    # DXVK async shader compilation
+    # ── DXVK (D3D9 / D3D10 / D3D11 → Vulkan) ────────────────────────────────
     export DXVK_ASYNC="${DXVK_ASYNC:-1}"
     export DXVK_FRAME_RATE="${DXVK_FRAME_RATE:-0}"
     export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
     export DXVK_STATE_CACHE="${DXVK_STATE_CACHE:-1}"
+    export DXVK_ENABLE_NVAPI=0          # not NVIDIA — disable NVAPI shim
+    export DXVK_FILTER_DEVICE_NAME=""   # use whatever GPU Vulkan finds
 
-    # PipeWire JACK latency negotiation
+    # ── VKD3D-Proton (D3D12 → Vulkan) ────────────────────────────────────────
+    # upload_hvv: faster host-visible VRAM uploads (safe on all hardware)
+    # descriptor_buffer: VK_EXT_descriptor_buffer for lower CPU overhead
+    #   (omit if driver doesn't support it — vkd3d-proton auto-disables)
+    export VKD3D_CONFIG="${VKD3D_CONFIG:-upload_hvv}"
+    export VKD3D_FEATURE_LEVEL="${VKD3D_FEATURE_LEVEL:-12_0}"
+    export VKD3D_LOG_LEVEL="${VKD3D_LOG_LEVEL:-none}"
+    # Tell vkd3d-proton to use the same Vulkan device Vulkan picks (no filter)
+    export VKD3D_FILTER_DEVICE=""
+
+    # ── PipeWire JACK latency negotiation ────────────────────────────────────
     export PIPEWIRE_LATENCY="${buffer}/${rate}"
 
-    # Route Wine's ShellExecute URL calls to selahauth instead of system browser.
-    # Wine's winebrowser binary checks $BROWSER before falling back to xdg-open.
+    # ── Route Wine ShellExecute URL calls through selahauth ──────────────────
     export BROWSER="selahauth"
 
-    # DLL overrides
-    export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-wineasio=n,b}"
-
-    # Disable Wine telemetry (winemenubuilder, winedbg crash dialogs)
-    export WINEDLLOVERRIDES="${WINEDLLOVERRIDES};winemenubuilder.exe=d"
-    export WINE_DISABLE_CRASH_REPORT=1
-
-    # Realtime scheduling hint for Wine audio threads
+    # ── Realtime scheduling hint for Wine audio threads ───────────────────────
     export WINE_RT_PRIO="${WINE_RT_PRIO:-88}"
+
+    # ── Build WINEDLLOVERRIDES ────────────────────────────────────────────────
+    # Start with whatever the profile declared (may be empty).
+    local overrides="${WINEDLLOVERRIDES:-}"
+
+    # DXVK: force native DLLs so Wine uses the DXVK copies in system32,
+    # not its own WineD3D implementation.
+    # Skipped when SELAH_DXVK_ENABLED=0 (e.g. apps profile — crashes Electron).
+    if [[ -n "$(_find_dxvk)" && "${SELAH_DXVK_ENABLED:-1}" != "0" ]]; then
+        local dxvk_ovr="d3d9=n;d3d10=n;d3d10_1=n;d3d10core=n;d3d11=n;dxgi=n"
+        overrides="${overrides:+${overrides};}${dxvk_ovr}"
+    fi
+
+    # VKD3D-Proton: force native d3d12 so Wine uses vkd3d-proton, not
+    # stock vkd3d or the WARP fallback.
+    # Skipped when SELAH_VKD3D_ENABLED=0 (e.g. apps profile).
+    if [[ -n "$(_find_vkd3d_proton)" && "${SELAH_VKD3D_ENABLED:-1}" != "0" ]]; then
+        overrides="${overrides:+${overrides};}d3d12=n"
+    fi
+
+    # WineASIO — only if the profile enables ASIO
+    if [[ "${SELAH_ASIO_ENABLED:-1}" == "1" ]]; then
+        overrides="${overrides:+${overrides};}wineasio=n,b"
+    fi
+
+    # Always suppress Wine's menu-builder so app installs don't create
+    # spurious .desktop entries on the host.
+    overrides="${overrides:+${overrides};}winemenubuilder.exe=d"
+
+    export WINEDLLOVERRIDES="$overrides"
 }
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
@@ -150,12 +304,16 @@ while [[ $# -gt 0 ]]; do
             printf '%s%sAvailable SelahWine profiles:%s\n' "$GOLD" "$BOLD" "$RESET"
             for f in "${PROFILE_DIR}"/*.profile; do
                 base="$(basename "$f" .profile)"
-                printf '  %s%-14s%s %s%s%s\n' "$TEAL" "$base" "$RESET" "$MUTED" "$f" "$RESET"
+                printf '  %s%-20s%s %s%s%s\n' "$TEAL" "$base" "$RESET" "$MUTED" "$f" "$RESET"
             done
             exit 0
             ;;
         --version)
-            printf 'SelahWine %s (wine-staging runtime)\n' "$SELAHWINE_VERSION"
+            printf 'SelahWine %s\n' "$SELAHWINE_VERSION"
+            dxvk_dir="$(_find_dxvk)"
+            vkd_dir="$(_find_vkd3d_proton)"
+            printf '  DXVK:          %s\n' "${dxvk_dir:-not installed}"
+            printf '  VKD3D-Proton:  %s\n' "${vkd_dir:-not installed (falling back to stock vkd3d)}"
             exit 0
             ;;
         *)
@@ -179,7 +337,15 @@ if [[ ! -d "$WINEPREFIX" ]]; then
     WINEPREFIX="$WINEPREFIX" wineboot --init &>/dev/null || true
 fi
 
+# Install / update graphics translation layers into the prefix
+[[ "${SELAH_DXVK_ENABLED:-1}" != "0" ]] && _setup_dxvk         "$WINEPREFIX"
+[[ "${SELAH_VKD3D_ENABLED:-1}" != "0" ]] && _setup_vkd3d_proton "$WINEPREFIX"
+
 _apply_registry "$WINEPREFIX"
 
 WINE_BIN="$(_find_wine)"
+# KDE launches via app.slice which sets oom_score_adj=200 — wine and all its
+# child processes (CrBrowserMain, SparkCore, etc.) get killed under pressure
+# even with swap available. Reset to 0; children inherit this value.
+echo 0 > /proc/self/oom_score_adj 2>/dev/null || true
 exec "$WINE_BIN" "${WINE_ARGS[@]}"

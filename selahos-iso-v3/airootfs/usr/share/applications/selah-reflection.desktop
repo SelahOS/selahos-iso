@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Selah Reflection
+Comment=Pause. Reflect. Study the Word.
+Exec=xiphos
+Icon=xiphos
+Terminal=false
+Categories=Education;Spirituality;
+Keywords=bible;scripture;faith;study;reflection;

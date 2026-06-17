@@ -178,7 +178,28 @@ step "Ensuring correct group membership..."
 usermod -aG audio,realtime,input,storage,wheel "$REAL_USER" 2>/dev/null || true
 ok "Groups updated"
 
-# ── 9. Rebuild GRUB ──────────────────────────────────────────
+# ── 9. Swap (zram + disk swapfile) ───────────────────────────
+step "Configuring swap..."
+cp "$AIROOTFS/etc/systemd/zram-generator.conf" /etc/systemd/zram-generator.conf
+systemctl enable --now systemd-zram-setup@zram0.service 2>/dev/null || true
+ok "zram swap enabled (4 GiB, lz4)"
+
+if [ ! -f /swapfile ]; then
+    fallocate -l 16G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    ok "16 GiB swapfile created at /swapfile"
+else
+    ok "swapfile already exists, skipping"
+fi
+if ! grep -q "/swapfile" /etc/fstab; then
+    echo '/swapfile none swap defaults,pri=10 0 0' >> /etc/fstab
+    ok "swapfile added to /etc/fstab"
+fi
+swapon /swapfile -p 10 2>/dev/null || true
+ok "Swap: zram (priority 100) + 16 GiB disk (priority 10)"
+
+# ── 10. Rebuild GRUB ─────────────────────────────────────────
 step "Rebuilding GRUB config..."
 grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
 ok "GRUB rebuilt"
