@@ -1,0 +1,137 @@
+[
+  {
+    "app": "Ableton Live 12 Suite",
+    "publisher": "Ableton",
+    "approach": "wine-daw-profile",
+    "selahpro_daw": "ableton",
+    "wine_config": {
+      "prefix": "~/.wine-selah-ableton",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "notes": "Built into selahpro KNOWN_DAWS — selahpro install ableton"
+    },
+    "confirmed": true
+  },
+  {
+    "app": "FL Studio",
+    "publisher": "Image-Line",
+    "approach": "wine-daw-profile",
+    "selahpro_daw": "flstudio",
+    "wine_config": {
+      "prefix": "~/.wine-selah-flstudio",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "notes": "Built into selahpro KNOWN_DAWS — selahpro install flstudio"
+    },
+    "confirmed": true
+  },
+  {
+    "app": "REAPER",
+    "publisher": "Cockos",
+    "approach": "wine-daw-profile",
+    "selahpro_daw": "reaper",
+    "wine_config": {
+      "prefix": "~/.wine-selah-reaper",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true
+    },
+    "confirmed": true
+  },
+  {
+    "app": "Pro Tools",
+    "publisher": "Avid",
+    "approach": "wine-daw-profile",
+    "selahpro_daw": "protools",
+    "wine_config": {
+      "prefix": "~/.wine-selah-protools",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "notes": "Runtime profile is in production use. iLok/Avid Link activation flow is NOT yet verified end-to-end — partial entry."
+    },
+    "confirmed": false
+  },
+  {
+    "app": "Digital Performer",
+    "publisher": "MOTU",
+    "approach": "wine-daw-profile",
+    "selahpro_daw": "digitalperformer",
+    "wine_config": {
+      "prefix": "~/.wine-selah-digitalperformer",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "tricks": ["vcredist2022"],
+      "dll_overrides": "msvcp140=n,b;vcruntime140=n,b;vcruntime140_1=n,b;ucrtbase=n,b;wineasio=n,b;msacm32=n,b",
+      "notes": "motuDNSResponder service disabled via registry patch (post-install) to prevent the authorization hang. Built into selahpro install dp."
+    },
+    "confirmed": true
+  },
+  {
+    "app": "MPC Software",
+    "publisher": "Akai",
+    "approach": "wine-daw-profile",
+    "selahpro_daw": "mpc",
+    "wine_config": {
+      "prefix": "~/.wine-selah-mpc",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "tricks": ["vcredist2019", "dotnet48", "d3dx9", "directx9"],
+      "notes": "HID passthrough required for MPC Studio 2 display/LEDs — see selahpro midi passthrough."
+    },
+    "confirmed": true
+  },
+  {
+    "app": "Studio One 7",
+    "publisher": "PreSonus",
+    "approach": "wine-daw-profile",
+    "selahpro_daw": "studioone",
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "dxvk": true,
+      "notes": "DXVK required — Studio One 7's GPU UI uses Direct3D 11; without it the app reports 'Windows 10 required' even though Wine reports win10."
+    },
+    "confirmed": true
+  },
+  {
+    "app": "Spark Desktop",
+    "publisher": "Readdle",
+    "approach": "wine-electron-fixes",
+    "linux_check": "https://sparkmailapp.com/linux → 404, no native Linux build. No AUR/Flatpak package found.",
+    "web_fallback": null,
+    "selahpro_daw": "spark",
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "dxvk": false,
+      "asio": false,
+      "tricks": [],
+      "args": ["--disable-gpu"],
+      "notes": "ESYNC/FSYNC and DXVK disabled — both cause SparkCore's Electron/Swift subprocess to crash or hang on window creation. XWayland forced (native Wayland driver drops the window). --disable-gpu prevents repeated GPU-process crashes. See selahos-iso-v3 apps.profile."
+    },
+    "confirmed": true
+  },
+  {
+    "app": "iLok License Manager",
+    "publisher": "PACE Anti-Piracy",
+    "approach": "wine-generic-prefix",
+    "linux_check": "No native Linux client. iLok.com account/licensing pages work in any browser, but the License Manager app itself is Windows/Mac only.",
+    "web_fallback": null,
+    "wine_config": {
+      "prefix": "ilok",
+      "tricks": ["corefonts", "vcrun2022", "dotnet48"],
+      "dxvk": false,
+      "winversion": "win10",
+      "notes": "Small .NET utility, no GPU/ASIO requirements expected. Not yet run end-to-end on SelahOS. Try: selahpro install-app ilok <installer.exe>"
+    },
+    "confirmed": false
+  }
+]

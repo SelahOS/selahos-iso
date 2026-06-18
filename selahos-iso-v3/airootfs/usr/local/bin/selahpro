@@ -10,10 +10,16 @@
 #  selahpro midi list
 #  selahpro midi passthrough <device>
 #  selahpro audio config [--rate N] [--buffer N]
+#  selahpro prefix create|list|delete <name>
+#  selahpro run <prefix> <exe>
+#  selahpro install-app <name> <exe>
+#  selahpro find-app <name>
+#  selahpro web-app <name> <url>
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -121,6 +127,13 @@ def info(msg):  print(f"  {MUTED}→ {msg}{RESET}")
 def warn(msg):  print(f"  {RED}⚠  {PARCH}{msg}{RESET}")
 def die(msg):   print(f"\n{RED}✗  {msg}{RESET}", file=sys.stderr); sys.exit(1)
 def hdr(msg):   print(f"\n{GOLD}{BOLD}══  {msg}  ══{RESET}")
+
+def _lsusb(*args):
+    """Run lsusb, returning None if usbutils is not installed (PC hardware often lacks it)."""
+    try:
+        return subprocess.run(["lsusb", *args], capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -705,10 +718,11 @@ def cmd_midi_list():
         ["find", "/dev/bus/usb", "-type", "c"],
         capture_output=True, text=True, check=False)
 
-    akai_result = subprocess.run(
-        ["lsusb", "-d", "09e8:"],
-        capture_output=True, text=True, check=False)
-    if akai_result.stdout.strip():
+    akai_result = _lsusb("-d", "09e8:")
+    if akai_result is None:
+        warn("lsusb not found (usbutils not installed) — Akai detection skipped")
+        info("Install: sudo pacman -S usbutils")
+    elif akai_result.stdout.strip():
         ok("Akai USB devices found:")
         for line in akai_result.stdout.strip().splitlines():
             print(f"    {PARCH}{line}{RESET}")
@@ -742,8 +756,12 @@ def cmd_midi_passthrough(device: str):
     dev_key = device.lower().replace(" ", "-")
     if dev_key not in device_map:
         # Try by lsusb name
-        lsusb = subprocess.run(["lsusb"], capture_output=True, text=True, check=False)
-        info(f"Connected USB devices:\n{lsusb.stdout}")
+        lsusb = _lsusb()
+        if lsusb is None:
+            warn("lsusb not found (usbutils not installed) — cannot list connected USB devices")
+            info("Install: sudo pacman -S usbutils")
+        else:
+            info(f"Connected USB devices:\n{lsusb.stdout}")
         info(f"Known device IDs: {', '.join(device_map.keys())}")
         die(f"Unknown device '{device}'. Pass the key from the list above.")
 
@@ -751,12 +769,14 @@ def cmd_midi_passthrough(device: str):
     info(f"VID:PID = {vid}:{pid}")
 
     # Find the USB device path
-    result = subprocess.run(["lsusb", "-d", f"{vid}:{pid}"],
-                             capture_output=True, text=True, check=False)
-    if not result.stdout.strip():
+    result = _lsusb("-d", f"{vid}:{pid}")
+    if result is None:
+        warn("lsusb not found (usbutils not installed) — skipping device presence check")
+        info("Install: sudo pacman -S usbutils")
+    elif not result.stdout.strip():
         die(f"Device {vid}:{pid} not connected. Plug it in and retry.")
-
-    ok(f"Device found: {result.stdout.strip()}")
+    else:
+        ok(f"Device found: {result.stdout.strip()}")
 
     # Reload udev to ensure rules are applied
     subprocess.run(["sudo", "udevadm", "control", "--reload-rules"],
@@ -886,6 +906,195 @@ def cmd_audio_config(rate: int, buffer: int):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  GENERIC WINE PREFIXES (non-DAW Windows apps — iLok License Manager, installers, etc.)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PREFIXES_DIR = Path.home() / ".selahbridgepro" / "prefixes"
+
+def cmd_prefix_create(name: str):
+    """Create an isolated Wine prefix for a Windows app."""
+    prefix_dir = PREFIXES_DIR / name
+    if prefix_dir.exists():
+        info(f"Prefix '{name}' already exists at {prefix_dir}")
+        return
+    hdr(f"Creating Wine Prefix: {name}")
+    prefix_dir.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "WINEPREFIX": str(prefix_dir), "WINEARCH": "win64"}
+    subprocess.run(["wineboot", "--init"], env=env, check=False, capture_output=True)
+    ok(f"Created prefix '{name}' at {prefix_dir}")
+
+def cmd_prefix_list():
+    """List all SelahBridgePro-managed Wine prefixes."""
+    hdr("SelahBridgePro Wine Prefixes")
+    prefixes = sorted(p for p in PREFIXES_DIR.glob("*") if p.is_dir()) if PREFIXES_DIR.exists() else []
+    if not prefixes:
+        info("No prefixes created yet — run: selahpro prefix create <name>")
+        return
+    for p in prefixes:
+        print(f"    {TEAL}{p.name:<24}{RESET} {MUTED}{p}{RESET}")
+
+def cmd_prefix_delete(name: str):
+    """Remove a Wine prefix."""
+    prefix_dir = PREFIXES_DIR / name
+    if not prefix_dir.exists():
+        die(f"Prefix '{name}' not found. Run: selahpro prefix list")
+    shutil.rmtree(prefix_dir)
+    ok(f"Deleted prefix '{name}'")
+
+def cmd_run(prefix_name: str, exe_path: str):
+    """Run a Windows executable inside a specific prefix."""
+    _check_license()
+    prefix_dir = PREFIXES_DIR / prefix_name
+    if not prefix_dir.exists():
+        die(f"Prefix '{prefix_name}' not found. Run: selahpro prefix create {prefix_name}")
+    exe = Path(exe_path).expanduser().resolve()
+    if not exe.exists():
+        die(f"File not found: {exe}")
+
+    hdr(f"Running in prefix '{prefix_name}'")
+    info(f"Exe: {exe}")
+    env = {**os.environ, "WINEPREFIX": str(prefix_dir)}
+    subprocess.run(["wine", str(exe)], env=env, check=False)
+
+def cmd_install_app(name: str, exe_path: str):
+    """Full workflow: create a prefix, apply general Windows-app fixes, run the installer."""
+    _check_license()
+    exe = Path(exe_path).expanduser().resolve()
+    if not exe.exists():
+        die(f"Installer not found: {exe}")
+
+    hdr(f"Installing {name}")
+    cmd_prefix_create(name)
+    prefix_dir = PREFIXES_DIR / name
+    env = {**os.environ, "WINEPREFIX": str(prefix_dir)}
+
+    # Common dependencies most Windows installers/utilities expect.
+    info("Installing common dependencies (corefonts, vcrun2022)...")
+    subprocess.run(["winetricks", "-q", "corefonts", "vcrun2022"],
+                   env=env, check=False, capture_output=True)
+
+    info(f"Running installer: {exe.name}")
+    info("Complete the installer window, then close it to continue.")
+    subprocess.run(["wine", str(exe)], env=env, check=False)
+    ok(f"'{name}' set up in prefix at {prefix_dir}")
+    info(f"Run it again with: selahpro run {name} <path-to-exe-inside-prefix>")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  UNIVERSAL APP DETECTION (native / Flatpak / AUR / web — checked before Wine)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+APP_COMPAT_DB = Path("/usr/share/selahos/app-compat-db.json")
+
+def _load_compat_db() -> list[dict]:
+    if not APP_COMPAT_DB.exists():
+        return []
+    try:
+        return json.loads(APP_COMPAT_DB.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+
+def _search_pacman(query: str) -> bool | None:
+    if not shutil.which("pacman"):
+        return None
+    r = subprocess.run(["pacman", "-Ss", query], capture_output=True, text=True, check=False)
+    return bool(r.stdout.strip())
+
+def _search_aur(query: str) -> bool | None:
+    yay = shutil.which("yay")
+    if not yay:
+        return None
+    r = subprocess.run([yay, "-Ss", "--aur", query], capture_output=True, text=True, check=False)
+    return bool(r.stdout.strip())
+
+def _search_flatpak(query: str) -> bool | None:
+    if not shutil.which("flatpak"):
+        return None
+    r = subprocess.run(["flatpak", "search", query], capture_output=True, text=True, check=False)
+    return bool(r.stdout.strip()) and "No matches found" not in r.stdout
+
+def cmd_find_app(name: str):
+    """Check native/Flatpak/AUR/web alternatives before recommending Wine."""
+    hdr(f"Searching for: {name}")
+
+    native = _search_pacman(name)
+    aur    = _search_aur(name)
+    flat   = _search_flatpak(name)
+    entry  = next((e for e in _load_compat_db() if e.get("app", "").lower() == name.lower()), None)
+
+    def line(label, found):
+        sym = f"{TEAL}✓{RESET}" if found else (f"{MUTED}?{RESET}" if found is None else f"{MUTED}–{RESET}")
+        txt = "Found" if found else ("no tool to check" if found is None else "Not found")
+        print(f"  {sym} {PARCH}{label:<16}{RESET} {MUTED}{txt}{RESET}")
+
+    line("Native Linux:", native)
+    line("AUR:", aur)
+    line("Flatpak:", flat)
+
+    web  = entry.get("web_fallback") if entry else None
+    wine = entry.get("wine_config", {}) if entry else {}
+    print(f"  {TEAL + '✓' + RESET if web else MUTED + '–' + RESET} {PARCH}{'Web wrapper:':<16}{RESET} "
+          f"{MUTED}{web or 'Not available'}{RESET}")
+    if entry:
+        print(f"  {TEAL}✓{RESET} {PARCH}{'Wine compatible:':<16}{RESET} {MUTED}Yes ({entry.get('approach', 'unknown')}){RESET}")
+    else:
+        print(f"  {MUTED}?{RESET} {PARCH}{'Wine compatible:':<16}{RESET} {MUTED}Unknown — not in app-compat-db.json{RESET}")
+
+    print()
+    profile = entry.get("selahpro_daw") if entry else None
+    if native or aur:
+        info("Recommendation: install from official repos/AUR — no Wine needed")
+    elif web:
+        info(f"Recommendation: use web wrapper — selahpro web-app \"{entry['app']}\" \"{web}\"")
+    elif profile:
+        info(f"Recommendation: Wine — selahpro install {profile}  (then: selahpro launch {profile})")
+    elif wine:
+        info(f"Recommendation: Wine — selahpro install-app {wine.get('prefix', name.lower())} <installer.exe>")
+    else:
+        info("No known alternative — check WineHQ AppDB: https://appdb.winehq.org")
+
+def cmd_web_app(name: str, url: str):
+    """Wrap a web app as a desktop app via nativefier."""
+    hdr(f"Creating Web App: {name}")
+
+    nativefier = shutil.which("nativefier")
+    if not nativefier:
+        die("nativefier not found. Install: sudo npm install -g nativefier")
+
+    safe_name = re.sub(r"[^A-Za-z0-9]+", "", name) or "WebApp"
+    apps_dir = Path.home() / "Applications"
+    apps_dir.mkdir(parents=True, exist_ok=True)
+
+    info(f"Running nativefier for {url} ...")
+    result = subprocess.run([nativefier, "--name", safe_name, url, str(apps_dir)], check=False)
+    if result.returncode != 0:
+        die("nativefier failed — see output above")
+
+    candidates = sorted(apps_dir.glob(f"{safe_name}-linux-*"))
+    if not candidates:
+        die(f"nativefier finished but no output directory found under {apps_dir}")
+    exe = candidates[-1] / safe_name
+    if not exe.exists():
+        warn(f"Expected binary not found at {exe} — check {candidates[-1]}")
+
+    desktop_dir = Path.home() / ".local/share/applications"
+    desktop_dir.mkdir(parents=True, exist_ok=True)
+    desktop_file = desktop_dir / f"{safe_name.lower()}.desktop"
+    desktop_file.write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        f"Name={name}\n"
+        f"Comment={name} (web)\n"
+        f"Exec={exe}\n"
+        "Icon=internet-mail\n"
+        "Terminal=false\n"
+        "Categories=Network;\n"
+    )
+    ok(f"Desktop entry created: {desktop_file}")
+    info(f"Launch from your application menu, or run: {exe}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  ARGUMENT PARSER
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -907,6 +1116,11 @@ def build_parser() -> argparse.ArgumentParser:
             f"  {GOLD}selahpro midi list{RESET}                 List MIDI devices\n"
             f"  {GOLD}selahpro midi passthrough mpc{RESET}      Activate MPC Studio 2 HID passthrough\n"
             f"  {GOLD}selahpro audio config --buffer 128{RESET} Configure low-latency audio\n"
+            f"  {GOLD}selahpro prefix create ilok{RESET}       Create a Wine prefix for iLok License Manager\n"
+            f"  {GOLD}selahpro run ilok ~/Downloads/iLok.exe{RESET}  Run an .exe inside that prefix\n"
+            f"  {GOLD}selahpro install-app ilok ~/Downloads/iLok.exe{RESET}  Create + install in one step\n"
+            f"  {GOLD}selahpro find-app \"Spark\"{RESET}          Check native/Flatpak/AUR/web before using Wine\n"
+            f"  {GOLD}selahpro web-app \"Spark Mail\" \"https://mail.sparkmailapp.com\"{RESET}  Wrap a web app\n"
         )
     )
     p.add_argument("--version", action="version", version=f"selahpro {VERSION}")
@@ -959,6 +1173,36 @@ def build_parser() -> argparse.ArgumentParser:
                            help="Sample rate in Hz (default: 48000)")
     audio_cfg.add_argument("--buffer", type=int, default=256,
                            help="Buffer size in samples (default: 256)")
+
+    # prefix
+    prefix = sub.add_parser("prefix", help="Manage isolated Wine prefixes for Windows apps")
+    prefix_sub = prefix.add_subparsers(dest="prefix_cmd")
+    prefix_create = prefix_sub.add_parser("create", help="Create a new Wine prefix")
+    prefix_create.add_argument("name", help="Prefix name (e.g. ilok)")
+    prefix_sub.add_parser("list", help="List all Wine prefixes")
+    prefix_delete = prefix_sub.add_parser("delete", help="Remove a Wine prefix")
+    prefix_delete.add_argument("name", help="Prefix name to delete")
+
+    # run
+    run = sub.add_parser("run", help="Run a Windows .exe inside a specific prefix")
+    run.add_argument("prefix", help="Prefix name")
+    run.add_argument("exe", help="Path to the .exe to run")
+
+    # install-app
+    install_app = sub.add_parser("install-app",
+                                  help="Create a prefix and install a Windows app (auto-configured)")
+    install_app.add_argument("name", help="App name (used as the prefix name)")
+    install_app.add_argument("exe", help="Path to the installer .exe")
+
+    # find-app
+    find_app = sub.add_parser("find-app",
+                               help="Check native/Flatpak/AUR/web alternatives before using Wine")
+    find_app.add_argument("name", help="App name to search for")
+
+    # web-app
+    web_app = sub.add_parser("web-app", help="Wrap a web app as a desktop app (via nativefier)")
+    web_app.add_argument("name", help="Display name for the app")
+    web_app.add_argument("url", help="URL to wrap")
 
     return p
 
@@ -1016,13 +1260,15 @@ def main():
 
         # ── Devices ────────────────────────────────────────────────────────
         print()
-        akai = subprocess.run(["lsusb", "-d", "09e8:"],
-                              capture_output=True, text=True, check=False)
-        akai_lines = [l.strip() for l in akai.stdout.splitlines() if l.strip()]
-        dev_color = TEAL if akai_lines else MUTED
-        print(f"  {MUTED}Devices:{RESET}     {dev_color}{len(akai_lines)} Akai device(s) connected{RESET}")
-        for line in akai_lines:
-            print(f"    {DIM}{line}{RESET}")
+        akai = _lsusb("-d", "09e8:")
+        if akai is None:
+            print(f"  {MUTED}Devices:{RESET}     {MUTED}not detected (usbutils not installed — run: sudo pacman -S usbutils){RESET}")
+        else:
+            akai_lines = [l.strip() for l in akai.stdout.splitlines() if l.strip()]
+            dev_color = TEAL if akai_lines else MUTED
+            print(f"  {MUTED}Devices:{RESET}     {dev_color}{len(akai_lines)} Akai device(s) connected{RESET}")
+            for line in akai_lines:
+                print(f"    {DIM}{line}{RESET}")
 
         # ── DAW prefixes ───────────────────────────────────────────────────
         prefixes = sorted(p for p in Path.home().glob(".wine-selah-*") if p.is_dir())
@@ -1067,6 +1313,23 @@ def main():
             cmd_audio_config(args.rate, args.buffer)
         else:
             build_parser().parse_args(["audio", "--help"])
+    elif cmd == "prefix":
+        if args.prefix_cmd == "create":
+            cmd_prefix_create(args.name)
+        elif args.prefix_cmd == "list":
+            cmd_prefix_list()
+        elif args.prefix_cmd == "delete":
+            cmd_prefix_delete(args.name)
+        else:
+            build_parser().parse_args(["prefix", "--help"])
+    elif cmd == "run":
+        cmd_run(args.prefix, args.exe)
+    elif cmd == "install-app":
+        cmd_install_app(args.name, args.exe)
+    elif cmd == "find-app":
+        cmd_find_app(args.name)
+    elif cmd == "web-app":
+        cmd_web_app(args.name, args.url)
     else:
         print(BANNER)
         parser.print_help()

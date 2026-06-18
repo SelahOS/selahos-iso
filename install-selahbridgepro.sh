@@ -130,6 +130,19 @@ install -Dm644 "$SRC/usr/share/selahbridgepro/selahwine-dp-fixes.reg" \
                /usr/share/selahbridgepro/selahwine-dp-fixes.reg
 ok "selahwine-dp-fixes.reg"
 
+install -Dm644 "$SRC/usr/share/selahos/app-compat-db.json" \
+               /usr/share/selahos/app-compat-db.json
+ok "app-compat-db.json"
+
+# nativefier (selahpro web-app) — not packaged for Arch, install via npm
+if ! command -v nativefier &>/dev/null; then
+    info "Installing nativefier (selahpro web-app)..."
+    npm install -g nativefier --silent 2>/dev/null || \
+        warn "nativefier install failed — selahpro web-app will be unavailable"
+else
+    ok "nativefier ready"
+fi
+
 # ── Step 5: Desktop entries ───────────────────────────────────────────────────
 hdr "Installing desktop entries"
 
@@ -154,6 +167,16 @@ update-desktop-database /usr/share/applications 2>/dev/null || true
 
 # ── Step 6: udev MIDI rules ───────────────────────────────────────────────────
 hdr "Installing USB MIDI udev rules"
+
+# usbutils (lsusb) is required for Akai device detection in `selahpro --status`
+# and `selahpro midi`. Not always present on PC hardware (non-Apple).
+if ! pacman -Qi usbutils &>/dev/null; then
+    info "Installing usbutils (lsusb)..."
+    pacman -S --noconfirm --needed usbutils 2>/dev/null || \
+        warn "usbutils install failed — selahpro will skip Akai USB detection"
+else
+    ok "usbutils ready"
+fi
 
 install -Dm644 "$SRC/etc/udev/rules.d/99-selah-midi.rules" \
                /etc/udev/rules.d/99-selah-midi.rules
