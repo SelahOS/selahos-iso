@@ -1,0 +1,181 @@
+# Maintainer: SelahOS Contributors <support@selahtechnologies.com>
+
+pkgname=selahos-device-editors
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Device editor applications for SelahOS (Akai Professional controllers)"
+arch=('x86_64')
+url="https://github.com/SelahOS/selahos-iso"
+license=('GPL3')
+depends=('python' 'python-pyqt6' 'python-mido')
+optdepends=(
+    'python-pyqt6: GUI framework'
+    'python-mido: MIDI support'
+)
+makedepends=('git')
+source=("https://github.com/SelahOS/selahos-iso/releases/download/v${pkgver}/device-editors-v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir"
+
+    # Install editor scripts
+    install -Dm 755 "device-editors-${pkgver}/usr/local/bin/selahos-device-editors" \
+        "$pkgdir/usr/local/bin/selahos-device-editors"
+
+    # Install Python modules
+    install -Dm 644 device-editors-${pkgver}/usr/local/lib/selahos/*.py \
+        -t "$pkgdir/usr/local/lib/selahos/"
+
+    # Install desktop entry
+    mkdir -p "$pkgdir/usr/share/applications"
+    cat > "$pkgdir/usr/share/applications/selahos-device-editors.desktop" << 'EOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SelahOS Device Editors
+Comment=Control Akai Professional MIDI controllers
+Exec=selahos-device-editors
+Icon=selahos
+Categories=AudioVideo;Mixer;Audio;
+Keywords=midi;akai;controller;mpk;mpc;
+EOF
+
+    # Install man page
+    mkdir -p "$pkgdir/usr/share/man/man1"
+    cat > "$pkgdir/usr/share/man/man1/selahos-device-editors.1" << 'EOF'
+.TH SELAHOS-DEVICE-EDITORS 1 "June 2026" "SelahOS 1.0" "User Commands"
+.SH NAME
+selahos-device-editors \- Device editor applications for SelahOS
+.SH SYNOPSIS
+.B selahos-device-editors
+[\fIOPTION\fR]
+.SH DESCRIPTION
+SelahOS Device Editors provide native GUI control for Akai Professional controllers
+including MPK mini IV, MPC Studio 2, LPD8 mk2/mk3, MPK261, MPD226, and APC mini.
+.SH OPTIONS
+.TP
+.BR menu
+Show device selection menu (default)
+.TP
+.BR mpk,\ mpk_mini_iv
+Launch MPK mini IV editor
+.TP
+.BR mpc,\ mpc_studio2
+Launch MPC Studio 2 editor
+.TP
+.BR lpd8,\ lpd8_mk2
+Launch LPD8 mk2 editor
+.TP
+.BR mpk261
+Launch MPK261 editor
+.TP
+.BR lpd8_mk3
+Launch LPD8 mk3 editor (with RGB support)
+.TP
+.BR mpd226
+Launch MPD226 editor
+.TP
+.BR apc,\ apc_mini
+Launch APC mini editor
+.SH EXAMPLES
+.TP
+selahos-device-editors mpk
+Launch MPK mini IV editor
+.TP
+selahos-device-editors
+Show menu and choose device
+.SH AUTHOR
+SelahOS Contributors <support@selahtechnologies.com>
+.SH SEE ALSO
+.BR selahos-device-bridge (1)
+EOF
+
+    # Install documentation
+    mkdir -p "$pkgdir/usr/share/doc/selahos-device-editors"
+    cat > "$pkgdir/usr/share/doc/selahos-device-editors/README" << 'EOF'
+# SelahOS Device Editors
+
+Native device editor applications for Akai Professional controllers on Linux.
+
+## Installation
+
+This package provides 7 device editor applications:
+- MPK mini IV (25 keys, 8 pads, 8 knobs)
+- MPC Studio 2 (16-pad grid, transport controls)
+- LPD8 mk2 (8-pad compact, 8 knobs)
+- MPK261 (61-key keyboard, 16-pad grid)
+- LPD8 mk3 (8 RGB pads, 8 knobs)
+- MPD226 (16-pad grid, 8 faders)
+- APC mini (64-pad grid 8×8)
+
+## Usage
+
+Launch the menu:
+  $ selahos-device-editors
+
+Launch specific editor:
+  $ selahos-device-editors mpk_mini_iv
+  $ selahos-device-editors mpc_studio2
+
+## Requirements
+
+- Python 3.8+
+- PyQt6
+- python-mido
+- lsusb (for device detection)
+
+## Dependencies
+
+Install with:
+  $ sudo pacman -S python-pyqt6 python-mido usbutils
+
+Or use the provided installation script:
+  $ python /usr/local/lib/selahos/install.py
+
+## Features
+
+✓ Real-time USB device detection
+✓ Live connection status indicators
+✓ Hardware-accurate control layouts
+✓ SelahOS dark theme with gold accents
+✓ No external dependencies (PyQt6 only)
+
+## Support
+
+GitHub: https://github.com/SelahOS/selahos-iso
+Issues: https://github.com/SelahOS/selahos-iso/issues
+EOF
+}
+
+post_install() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║     SelahOS Device Editors - Installation Complete          ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "Installation Options:"
+    echo ""
+    echo "  Quick Start:"
+    echo "    $ selahos-device-editors"
+    echo ""
+    echo "  Install Dependencies:"
+    echo "    $ python /usr/local/lib/selahos/install.py"
+    echo ""
+    echo "  Specific Editor:"
+    echo "    $ selahos-device-editors mpk_mini_iv"
+    echo ""
+    echo "For more information:"
+    echo "    $ man selahos-device-editors"
+    echo ""
+}
+
+post_upgrade() {
+    echo "SelahOS Device Editors updated to $pkgver"
+}
+
+post_remove() {
+    echo "SelahOS Device Editors removed."
+    echo "To completely remove configuration:"
+    echo "  rm -rf ~/.config/selahos/"
+}

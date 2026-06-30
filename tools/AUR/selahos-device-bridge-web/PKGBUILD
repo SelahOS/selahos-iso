@@ -1,0 +1,154 @@
+# Maintainer: SelahOS Contributors <support@selahtechnologies.com>
+
+pkgname=selahos-device-bridge-web
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Web interface for SelahOS Device Bridge (Vue.js frontend)"
+arch=('any')
+url="https://github.com/SelahOS/selahos-iso"
+license=('GPL3')
+depends=('python-fastapi' 'python-uvicorn')
+optdepends=(
+    'selahos-device-editors: GUI device editors'
+    'selahos-device-scripting: Macro automation'
+)
+makedepends=('nodejs' 'npm')
+source=("https://github.com/SelahOS/selahos-iso/releases/download/v${pkgver}/device-editors-web-v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir"
+
+    # Create web root directory
+    install -d "$pkgdir/usr/share/selahos/device-bridge/web"
+
+    # Install built frontend
+    cp -r device-editors-web-${pkgver}/dist/* \
+        "$pkgdir/usr/share/selahos/device-bridge/web/"
+
+    # Create systemd service
+    install -Dm 644 /dev/stdin "$pkgdir/etc/systemd/system/selahos-device-bridge.service" << 'EOF'
+[Unit]
+Description=SelahOS Device Bridge Web Service
+After=network.target
+
+[Service]
+Type=simple
+User=selahos
+WorkingDirectory=/var/lib/selahos/device-bridge
+ExecStart=uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create nginx configuration
+    install -Dm 644 /dev/stdin "$pkgdir/etc/nginx/sites-available/selahos-device-bridge" << 'EOF'
+server {
+    listen 80;
+    server_name localhost;
+
+    # Web interface
+    location / {
+        root /usr/share/selahos/device-bridge/web;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API proxy
+    location /api {
+        proxy_pass http://localhost:8000/api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+
+    # WebSocket proxy
+    location /ws {
+        proxy_pass http://localhost:8000/ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_read_timeout 86400;
+    }
+}
+EOF
+
+    # Install documentation
+    install -Dm 644 /dev/stdin "$pkgdir/usr/share/doc/selahos-device-bridge-web/README" << 'EOF'
+# SelahOS Device Bridge Web Interface
+
+Vue.js frontend for real-time device control and MIDI management.
+
+## Installation
+
+This package provides the web interface only. The backend (FastAPI)
+must be installed separately:
+  $ pacman -S selahos-device-editors
+
+## Setup
+
+1. Start the backend:
+   $ systemctl start selahos-device-bridge
+
+2. Open browser:
+   http://localhost:8000
+
+3. (Optional) Configure nginx:
+   $ sudo systemctl start nginx
+
+## Features
+
+✓ Device browser with connection status
+✓ MIDI port explorer
+✓ Real-time system monitoring
+✓ Settings configuration
+✓ WebSocket live updates
+✓ Responsive Vue.js interface
+
+## Configuration
+
+Edit `/etc/nginx/sites-available/selahos-device-bridge`
+to customize server settings.
+
+## Performance
+
+- Development: npm run dev
+- Production: npm run build
+- Served by FastAPI or nginx
+
+## Support
+
+https://github.com/SelahOS/selahos-iso/issues
+EOF
+}
+
+post_install() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║   SelahOS Device Bridge Web - Installation Complete         ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "Web Interface installed at:"
+    echo "  /usr/share/selahos/device-bridge/web"
+    echo ""
+    echo "To use:"
+    echo "  1. Install backend: pacman -S selahos-device-editors"
+    echo "  2. Start service: systemctl start selahos-device-bridge"
+    echo "  3. Open browser: http://localhost:8000"
+    echo ""
+    echo "To enable on boot:"
+    echo "  systemctl enable selahos-device-bridge"
+    echo ""
+}
+
+post_upgrade() {
+    echo "SelahOS Device Bridge Web updated to $pkgver"
+    echo "Restart service: systemctl restart selahos-device-bridge"
+}
+
+post_remove() {
+    echo "SelahOS Device Bridge Web removed."
+}
