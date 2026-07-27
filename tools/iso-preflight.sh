@@ -160,10 +160,17 @@ grep -qs "'usbutils'" "$SFS/usr/local/bin/selah-setup" \
 # compiled module for at least one of the two shipped kernels means the
 # fix (installing via customize_airootfs.sh instead of packages.x86_64)
 # is working; zero anywhere means it silently regressed again.
-if find "$SFS/usr/lib/modules" -iname "snd-hda-codec-cs8409.ko*" 2>/dev/null | grep -q .; then
-    ok "CS8409 driver (snd-hda-codec-cs8409) compiled for at least one kernel"
+# NOTE: don't just search for snd-hda-codec-cs8409.ko anywhere under
+# /usr/lib/modules — the STOCK in-tree kernel already ships a module by
+# that exact name (generic CS8409 support, not the Apple-patched one),
+# so that alone is a false positive. Check the dkms build log itself.
+DKMS_LOG="$(find "$SFS/var/lib/dkms/snd_hda_macbookpro" -iname "make.log" 2>/dev/null | sort | tail -1)"
+if [ -z "$DKMS_LOG" ]; then
+    bad "CS8409 driver: no dkms build was ever attempted in this ISO — check customize_airootfs.sh's pacman -U snd-hda-macbookpro-dkms-git*.pkg.tar.zst step ran"
+elif grep -qi "^Error\|exit code: [^0]" "$DKMS_LOG"; then
+    bad "CS8409 driver: dkms build attempted but failed — see $(echo "$DKMS_LOG" | sed "s|$SFS||")"
 else
-    bad "CS8409 driver never compiled for any kernel in this build — check customize_airootfs.sh's pacman -S snd-hda-macbookpro-dkms-git step ran with network"
+    ok "CS8409 driver (snd_hda_macbookpro) dkms-built successfully for at least one kernel"
 fi
 
 echo

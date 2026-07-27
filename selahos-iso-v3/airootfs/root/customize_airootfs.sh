@@ -210,10 +210,25 @@ fi
 # silently there (package "installed", module never actually built, for
 # every kernel, confirmed via dkms status on the dev machine going back to
 # whenever this package was first added). mkarchiso runs this script via
-# arch-chroot, which DOES bind-mount resolv.conf, so pacman -S here gets a
-# real DKMS build. DO NOT move this back into packages.x86_64.
-pacman -S --noconfirm --needed snd-hda-macbookpro-dkms-git || \
-    echo "WARNING: snd-hda-macbookpro-dkms-git install/dkms build failed — CS8409 audio (MacBook Pro 14,1) will not work on this ISO"
+# arch-chroot, which DOES bind-mount resolv.conf, so this gets a real DKMS
+# build. DO NOT move this back into packages.x86_64.
+#
+# Installed via `pacman -U` from a bundled local file, not `pacman -S` from
+# a repo: this package only ever existed in the build machine's local-repo
+# (file:// path, build-time only — see airootfs/etc/pacman.conf), which
+# isn't reachable from inside this arch-chroot at all (chroot changes the
+# filesystem root; the host path simply doesn't exist in here). The .pkg
+# is copied into airootfs/root/ at profile-source time instead so pacman
+# can install it with zero repo/network dependency for the resolve step —
+# only the dkms hook's own kernel-source download needs network.
+PKG="$(ls /root/snd-hda-macbookpro-dkms-git-*.pkg.tar.zst 2>/dev/null | head -1)"
+if [ -n "$PKG" ]; then
+    pacman -U --noconfirm --needed "$PKG" || \
+        echo "WARNING: snd-hda-macbookpro-dkms-git install/dkms build failed — CS8409 audio (MacBook Pro 14,1) will not work on this ISO"
+    rm -f "$PKG"
+else
+    echo "WARNING: snd-hda-macbookpro-dkms-git-*.pkg.tar.zst not found in /root — was it copied into airootfs/root/?"
+fi
 
 # ── Step 19: Purge build-time junk ────────────────────────────
 # Guard against __pycache__/.pyc (e.g. from a stray `python -m py_compile`
