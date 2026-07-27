@@ -26,7 +26,10 @@ SUPPORT = "support@selahtechnologies.com"
 PROFILE_DIR = Path("/etc/selahbridgepro/profiles")
 LIC_DIR     = Path("/etc/selahbridgepro")
 LIC_FILE    = LIC_DIR / "license"
-TRIAL_FILE  = LIC_DIR / "trial.conf"
+# Per-user data (trial start) lives in ~/.local so regular users can write it.
+# System license file stays in /etc (written by root via selahpro --activate).
+_USER_DATA_DIR = Path.home() / ".local/share/selahbridgepro"
+TRIAL_FILE  = _USER_DATA_DIR / "trial.conf"
 TRIAL_DAYS  = 14
 # License secret loaded at runtime — not stored in source control.
 # Deployed to /etc/selahbridgepro/.keydata at ISO build time.
@@ -207,7 +210,11 @@ def _license_status() -> tuple[str, str]:
     """Returns (status_label, detail_string)."""
     mid = _machine_id()
     if LIC_FILE.exists():
-        if LIC_FILE.read_text().strip() == _expected_key(mid):
+        try:
+            stored = LIC_FILE.read_text().strip()
+        except OSError:
+            stored = ""
+        if stored and stored == _expected_key(mid):
             return ("licensed", "Activated on this machine")
     if TRIAL_FILE.exists():
         try:
@@ -216,7 +223,7 @@ def _license_status() -> tuple[str, str]:
             if rem > 0:
                 return ("trial", f"{rem} day(s) remaining")
             return ("expired", "Trial expired")
-        except ValueError:
+        except (ValueError, OSError):
             pass
     return ("notstarted", "No trial started yet")
 
@@ -1161,9 +1168,15 @@ class LicenseTab(QWidget):
         mid = _machine_id()
         expected = _expected_key(mid)
         if key == expected:
-            LIC_DIR.mkdir(parents=True, exist_ok=True)
-            LIC_FILE.write_text(key)
-            os.chmod(LIC_FILE, 0o600)
+            try:
+                LIC_DIR.mkdir(parents=True, exist_ok=True)
+                LIC_FILE.write_text(key)
+                os.chmod(LIC_FILE, 0o640)
+            except OSError:
+                self.act_result.setText(
+                    f"✗  Permission denied — run:  sudo selahpro --activate {key}")
+                self.act_result.setStyleSheet(f"color: {C['red']}; font-size: 12px;")
+                return
             self.act_result.setText("✓  Activated successfully!")
             self.act_result.setStyleSheet(f"color: {C['teal']}; font-size: 12px;")
             self._refresh_status()
@@ -1241,9 +1254,12 @@ def main():
     # Start trial on first run if not yet licensed
     status, _ = _license_status()
     if status == "notstarted":
-        LIC_DIR.mkdir(parents=True, exist_ok=True)
-        TRIAL_FILE.write_text(datetime.date.today().isoformat())
-        os.chmod(TRIAL_FILE, 0o600)
+        try:
+            _USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+            TRIAL_FILE.write_text(datetime.date.today().isoformat())
+            os.chmod(TRIAL_FILE, 0o644)
+        except OSError:
+            pass  # badge shows "No trial" — never block the GUI on this
 
     win = SelahBridgeProWindow()
     win.show()

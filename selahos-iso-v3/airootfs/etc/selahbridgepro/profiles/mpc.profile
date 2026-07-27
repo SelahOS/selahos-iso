@@ -2,12 +2,13 @@
 # Akai MPC Software 2.x / 3.x via Wine
 #
 # Hardware: MPC Studio 2 (VID:09e8 PID:004a)
-# Display and RGB pad LED control require hidraw access — granted by
-# /etc/udev/rules.d/99-selah-midi.rules (SUBSYSTEM=="hidraw" block).
+# Device is USB-Audio class only (Control + MIDI Streaming) — no vendor/HID
+# interface exists. Display and RGB pad LED control go over MIDI SysEx on
+# the "MPC Studio MPC Private" ALSA port, not raw USB/hidraw.
 #
 # Required setup:
 #   selahpro install mpc    (runs winetricks deps automatically)
-#   selahpro midi passthrough mpc   (ensures hidraw udev rules are active)
+#   selahpro midi passthrough mpc   (ensures USB MIDI udev rules are active)
 
 # ── Wine runtime ─────────────────────────────────────────────────
 WINEESYNC=1
@@ -42,6 +43,6 @@ SELAH_MIDI_SYSEX=1
 SELAH_HID_PASSTHROUGH=1
 
 # ── MPC Software executable ──────────────────────────────────────
-SELAH_DAW_EXE="MPC.exe"
+SELAH_DAW_EXE="MPC 3.exe"
 SELAH_DAW_NAME="MPC Software"
-SELAH_INSTALL_PATH="C:/Program Files/Akai Professional/MPC"
+SELAH_INSTALL_PATH="C:/Program Files/Akai Pro/MPC 3"

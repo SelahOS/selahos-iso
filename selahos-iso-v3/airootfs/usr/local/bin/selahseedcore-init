@@ -7,7 +7,12 @@ sleep 10
 MANUFACTURER=$(dmidecode -s system-manufacturer 2>/dev/null)
 if echo "$MANUFACTURER" | grep -qi "apple"; then
     logger "SelahSeedCore: Apple hardware detected"
-    systemctl start selah-wifi-wake.service 2>/dev/null
+    # The PCIe wake sequence is a BCM4350 (14e4:43a3) workaround only.
+    # On other chips it removes the Wi-Fi card from the PCI bus and
+    # reloads brcmfmac, which cannot drive e.g. the BCM4331 — dead Wi-Fi.
+    if grep -qs 0x43a3 /sys/bus/pci/devices/*/device; then
+        systemctl start selah-wifi-wake.service 2>/dev/null
+    fi
     systemctl start bluetooth-init-delay.service 2>/dev/null
     systemctl start mbpfan 2>/dev/null
     systemctl start tlp 2>/dev/null

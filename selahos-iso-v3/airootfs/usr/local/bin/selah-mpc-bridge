@@ -50,17 +50,39 @@ MPC_STUDIO2_PID2  = 0x004A   # primary (confirmed by user hardware)
 MPC_PORT_PATTERNS = ["MPC Studio MPC Public", "MPC Studio 2", "MPC Studio2",
                      "Akai MPC Studio 2", "MPC Studio (USB MIDI)", "MPC Studio"]
 
-# Virtual ALSA port names the DAW will see
-VIRTUAL_PORT_DAW  = "SelahMPC"           # DAW reads pads/knobs from here
-VIRTUAL_PORT_LEDS = "SelahMPC Feedback"  # DAW writes LED commands here
+# Virtual ALSA port names the DAW will see.
+# Named to resemble the real hardware ("MPC Studio 2") rather than the
+# bridge's own identity ("SelahMPC") -- testing whether vendor software
+# gates "hardware recognized" state on the connected MIDI port's NAME
+# matching an expected pattern, separate from whether the SysEx handshake
+# itself succeeds (which was already proven to survive Wine's MIDI layer
+# intact -- see project_mpc_studio2_wine_midi_survives_2026-07-02 memory).
+# Deliberately distinct from the raw device's own ALSA names ("MPC Studio
+# MPC Public/Private/MIDI Port") to avoid ambiguous duplicate entries in
+# Wine's MIDI device list.
+VIRTUAL_PORT_DAW  = "MPC Studio 2"           # DAW reads pads/knobs from here
+VIRTUAL_PORT_LEDS = "MPC Studio 2"           # app writes LEDs/handshake here -- SAME
+                                             # name as the input on purpose: MPC
+                                             # Software pairs a MIDI in+out by matching
+                                             # name before it will run its handshake.
 
 PID_FILE      = Path("/tmp/selah-mpc-bridge.pid")
 DEFAULT_CFG   = Path("/etc/selah-mpc/mpc-studio2.conf")
 LOG_FILE      = Path("/var/log/selah-mpc-bridge.log")
 
-# MPC Studio 2 sends pad notes starting at note 36 (C2) by default.
-# Pads 1-16 = notes 36-51 on channel 1 (factory default).
-MPC_PAD_INPUT_ROOT = 36
+# MPC Studio 2's factory pad layout is a GM-percussion-style assignment, not
+# a contiguous block from a single root note. Confirmed empirically 2026-06-21
+# by capturing all 16 pads in physical order (bottom row to top row, L to R):
+# pad 4 = note 82 (Shaker), pad 14 = note 55 (Splash) -- well outside any
+# contiguous range, matching General MIDI percussion key names (36=Kick,
+# 38=Snare, 42=Closed HH, 49=Crash, 51=Ride, etc).
+MPC_STUDIO2_PAD_NOTES = [
+    37, 36, 42, 82,   # pads  1- 4 (bottom row)
+    40, 38, 46, 44,   # pads  5- 8
+    48, 47, 45, 43,   # pads  9-12
+    49, 55, 51, 53,   # pads 13-16 (top row)
+]
+NOTE_TO_PAD_INDEX  = {note: i for i, note in enumerate(MPC_STUDIO2_PAD_NOTES)}
 MPC_PAD_COUNT      = 16
 
 # ── Scales (semitone intervals from root) ──────────────────────────────────────
@@ -156,18 +178,18 @@ port_names = MPC Studio 2,MPC Studio2,Akai MPC Studio 2
 reconnect_interval = 2
 
 [midi]
-# MIDI channel the MPC sends pad notes on (1-16; MPC factory default: 1)
-pad_channel = 1
+# MIDI channel the MPC sends pad notes on (1-16; confirmed empirically: 10)
+pad_channel = 10
 # MIDI channel for knob CC output forwarded to DAW (1-16)
 cc_channel = 1
 # MIDI channel the bridge listens on for LED feedback FROM the DAW
 feedback_channel = 1
 
 [pads]
-# Note the MPC hardware sends for pad 1 (bottom-left physical pad).
-# MPC Studio 2 factory default: 36 (C2). Run 'selah-mpc-bridge monitor'
-# and hit pad 1 to confirm if your unit differs.
-input_root = 36
+# Input pad notes are NOT configurable here -- the MPC Studio 2's factory
+# layout is a fixed, non-contiguous GM-percussion-style note set (confirmed
+# empirically; see MPC_STUDIO2_PAD_NOTES in this script). Run
+# 'selah-mpc-bridge monitor' to see raw notes if you need to verify.
 # ── Output mapping ──
 # layout:  passthrough  — notes forwarded unchanged
 #          chromatic    — pad 1 → root_note, pad 2 → root_note+1, etc.
@@ -238,37 +260,38 @@ def find_port(midi_obj, patterns: List[str]) -> Optional[int]:
     return None
 
 
-def build_note_map(layout: str, input_root: int, output_root: int,
+def build_note_map(layout: str, output_root: int,
                    scale: str, transpose: int) -> dict:
     """
     Build a dict mapping incoming pad note → outgoing note.
-    Covers the 16 pads (input_root … input_root+15).
+    Input notes come from MPC_STUDIO2_PAD_NOTES (the hardware's real,
+    non-contiguous factory layout), in physical pad order.
     """
     mapping = {}
     if layout == "passthrough":
-        for i in range(MPC_PAD_COUNT):
-            mapping[input_root + i] = input_root + i
+        for note in MPC_STUDIO2_PAD_NOTES:
+            mapping[note] = note
         return mapping
 
     if layout == "drum":
-        for i in range(MPC_PAD_COUNT):
-            mapping[input_root + i] = max(0, min(127, output_root + i + transpose))
+        for i, note in enumerate(MPC_STUDIO2_PAD_NOTES):
+            mapping[note] = max(0, min(127, output_root + i + transpose))
         return mapping
 
     if layout in ("chromatic", "scale"):
         intervals = (SCALES.get(scale, SCALES["chromatic"])
                      if layout == "scale"
                      else list(range(12)))
-        for i in range(MPC_PAD_COUNT):
+        for i, note in enumerate(MPC_STUDIO2_PAD_NOTES):
             octave   = i // len(intervals)
             degree   = i % len(intervals)
             out_note = output_root + octave * 12 + intervals[degree] + transpose
-            mapping[input_root + i] = max(0, min(127, out_note))
+            mapping[note] = max(0, min(127, out_note))
         return mapping
 
     # Unknown layout — passthrough
-    for i in range(MPC_PAD_COUNT):
-        mapping[input_root + i] = input_root + i
+    for note in MPC_STUDIO2_PAD_NOTES:
+        mapping[note] = note
     return mapping
 
 
@@ -310,6 +333,13 @@ class MPCBridge:
         self._midiout_daw:  Optional[rtmidi.MidiOut] = None  # virtual out → DAW
         self._midiin_leds:  Optional[rtmidi.MidiIn]  = None  # virtual in ← DAW
 
+        # Long-lived port-enumeration handles, reused across every poll tick.
+        # Creating a fresh rtmidi object per tick leaks an ALSA seq client
+        # each time (rtmidi doesn't release the underlying client deterministically
+        # on `del`), which starves /dev/snd/seq for the whole system over time.
+        self._probe_in  = rtmidi.MidiIn()
+        self._probe_out = rtmidi.MidiOut()
+
         self._apply_config()
 
     # ── Config ────────────────────────────────────────────────────────────────
@@ -325,7 +355,6 @@ class MPCBridge:
         self._cc_ch          = c.getint("midi", "cc_channel",        fallback=1)
         self._fb_ch          = c.getint("midi", "feedback_channel",  fallback=1)
 
-        self._input_root     = c.getint("pads", "input_root",        fallback=36)
         layout               = c.get   ("pads", "layout",            fallback="passthrough")
         root_note            = c.getint("pads", "root_note",         fallback=36)
         scale                = c.get   ("pads", "scale",             fallback="pentatonic_minor")
@@ -349,8 +378,7 @@ class MPCBridge:
         except (ValueError, IndexError):
             self._pad_hit_rgb = (127, 64, 0)
 
-        self._note_map = build_note_map(
-            layout, self._input_root, root_note, scale, transpose)
+        self._note_map = build_note_map(layout, root_note, scale, transpose)
 
         self.log.info("Config: layout=%s root=%d scale=%s curve=%s pads=%d",
                       layout, root_note, scale, vcurve_name, len(self._note_map))
@@ -372,26 +400,23 @@ class MPCBridge:
 
     def _open_mpc_ports(self) -> bool:
         try:
-            mi = rtmidi.MidiIn()
-            mo = rtmidi.MidiOut()
-
-            in_idx  = find_port(mi, self._port_patterns)
-            out_idx = find_port(mo, self._port_patterns)
+            in_idx  = find_port(self._probe_in, self._port_patterns)
+            out_idx = find_port(self._probe_out, self._port_patterns)
 
             if in_idx is None:
-                del mi, mo
                 return False
 
+            mi = rtmidi.MidiIn()
             mi.open_port(in_idx)
             mi.ignore_types(sysex=False, timing=False, active_sense=True)
             self._midiin_mpc = mi
 
             if out_idx is not None:
+                mo = rtmidi.MidiOut()
                 mo.open_port(out_idx)
                 self._midiout_mpc = mo
                 self.log.info("MPC Studio 2 connected (in=%d out=%d)", in_idx, out_idx)
             else:
-                del mo
                 self.log.info("MPC Studio 2 connected (in=%d; no output port)",
                               in_idx)
             return True
@@ -439,7 +464,7 @@ class MPCBridge:
 
                 # Mirror LED: light up on hit, off on release
                 if self._mirror_pads and self._midiout_mpc:
-                    pad_idx = note - self._input_root
+                    pad_idx = NOTE_TO_PAD_INDEX.get(note, -1)
                     if self._use_sysex_rgb and 0 <= pad_idx < MPC_PAD_COUNT:
                         if msg_type == 0x90 and vel > 0:
                             r, g, b = self._pad_hit_rgb
@@ -515,9 +540,7 @@ class MPCBridge:
                     self.log.info("Config reloaded")
 
                 # Check if device is still present
-                probe = rtmidi.MidiIn()
-                still_up = find_port(probe, self._port_patterns) is not None
-                del probe
+                still_up = find_port(self._probe_in, self._port_patterns) is not None
 
                 if not still_up:
                     self.log.warning("MPC Studio 2 disconnected — waiting to reconnect")
