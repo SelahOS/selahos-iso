@@ -1297,7 +1297,7 @@ class InstallThread(QThread):
         preflight_output = ''
         if _os.path.exists('/mnt/usr/local/bin/selah-preflight-check'):
             pf = subprocess.run(
-                ['arch-chroot', '/mnt', 'selah-preflight-check'],
+                ['arch-chroot', '/mnt', '/usr/local/bin/selah-preflight-check'],
                 capture_output=True, text=True)
             preflight_exit = pf.returncode
             preflight_output = (pf.stdout or '') + (pf.stderr or '')

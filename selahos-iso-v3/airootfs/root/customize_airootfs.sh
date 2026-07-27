@@ -202,4 +202,15 @@ else
     echo "SelahSeedCore: Non-Apple hardware — skipping Mac-specific services"
 fi
 
+# ── Step 18: Purge build-time junk ────────────────────────────
+# Guard against __pycache__/.pyc (e.g. from a stray `python -m py_compile`
+# during dev, or any pacman hook that compiles installed scripts) and
+# editor backup files shipping in the squashfs. iso-preflight.sh has
+# checked for exactly this set since SELAH-40; this is what actually
+# prevents it, run last so it catches anything earlier steps produced.
+find /usr/local /usr/share/selahos -depth \
+    \( -name '__pycache__' -o -name '*.pyc' -o -name '*.pyo' \
+       -o -name '*.bak' -o -name '*.orig' -o -name '*~' \) \
+    -exec rm -rf {} + 2>/dev/null || true
+
 # SelahSeedCore runs via KDE autostart desktop entry only
