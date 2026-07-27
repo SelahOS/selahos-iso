@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Repair
+GenericName=System Repair
+Comment=Verify and repair SelahOS apps, theme, fastfetch and services
+Exec=konsole -e sudo /usr/local/bin/selah-repair
+Icon=tools-wizard
+Terminal=false
+Categories=System;Settings;
+Keywords=SelahOS;repair;fix;theme;recovery;
+StartupNotify=true

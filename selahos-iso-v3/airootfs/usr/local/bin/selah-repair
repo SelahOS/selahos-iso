@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-repair — SelahOS post-install repair / completion tool
+#
+# Verifies and repairs the SelahOS pieces the installer is
+# responsible for, on an already-installed system:
+#
+#   1. exec bits on /usr/local/bin/selah*          (SELAH-40)
+#   2. device editor suite under /usr/local/lib/selahos
+#   3. theme + branding payload (Kvantum, plasma theme, SDDM
+#      theme, icons, wallpapers, color schemes, konsole profile)
+#   4. fastfetch config (/etc/xdg/fastfetch, skel, profile.d)
+#   5. /etc/skel/.config synced into every real user's home
+#      (no-clobber — never overwrites a user's own settings)
+#   6. selah*.desktop menu entries
+#   7. services: NetworkManager, selah-wifi-driver
+#   8. required packages (fastfetch, kvantum, python-mido, …)
+#      — installed via pacman when the network allows
+#
+# If a component's files are missing from this system entirely,
+# plug in a SelahOS install USB: it is used as the donor
+# (the compressed live image on it contains every file).
+#
+# Usage:
+#   sudo selah-repair            repair everything fixable
+#   sudo selah-repair --check    report only, change nothing
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+set -uo pipefail
+
+CHECK=0
+[ "${1:-}" = "--check" ] && CHECK=1
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "selah-repair must run as root:  sudo selah-repair"
+    exit 1
+fi
+if [ -d /run/archiso ]; then
+    echo "This is the live session — everything is already baked in here."
+    echo "Boot the installed system and run selah-repair there."
+    exit 1
+fi
+
+FIXED=0; MISSING=0; OK=0
+DONOR=""
+DONOR_ISO_MNT=""
+DONOR_SFS_MNT=""
+
+say_ok()   { echo "  OK      $1"; OK=$((OK+1)); }
+say_fix()  { echo "  FIXED   $1"; FIXED=$((FIXED+1)); }
+say_miss() { echo "  MISSING $1"; MISSING=$((MISSING+1)); }
+
+cleanup() {
+    [ -n "$DONOR_SFS_MNT" ] && umount "$DONOR_SFS_MNT" 2>/dev/null
+    [ -n "$DONOR_ISO_MNT" ] && umount "$DONOR_ISO_MNT" 2>/dev/null
+    [ -n "$DONOR_SFS_MNT" ] && rmdir "$DONOR_SFS_MNT" 2>/dev/null
+    [ -n "$DONOR_ISO_MNT" ] && rmdir "$DONOR_ISO_MNT" 2>/dev/null
+}
+trap cleanup EXIT
+
+# Mount an attached SelahOS USB's live image as donor, if present
+find_donor() {
+    [ -n "$DONOR" ] && return 0
+    local part
+    part=$(lsblk -rpno NAME,LABEL 2>/dev/null | awk '$2 ~ /^SELAHOS_/ {print $1; exit}')
+    [ -n "$part" ] || return 1
+    DONOR_ISO_MNT=$(mktemp -d)
+    mount -o ro "$part" "$DONOR_ISO_MNT" 2>/dev/null || { rmdir "$DONOR_ISO_MNT"; DONOR_ISO_MNT=""; return 1; }
+    local sfs="$DONOR_ISO_MNT/arch/x86_64/airootfs.sfs"
+    [ -f "$sfs" ] || { umount "$DONOR_ISO_MNT"; rmdir "$DONOR_ISO_MNT"; DONOR_ISO_MNT=""; return 1; }
+    DONOR_SFS_MNT=$(mktemp -d)
+    mount -o loop,ro "$sfs" "$DONOR_SFS_MNT" 2>/dev/null || { rmdir "$DONOR_SFS_MNT"; DONOR_SFS_MNT=""; umount "$DONOR_ISO_MNT"; rmdir "$DONOR_ISO_MNT"; DONOR_ISO_MNT=""; return 1; }
+    DONOR="$DONOR_SFS_MNT"
+    echo "  (donor: SelahOS USB $part)"
+    return 0
+}
+
+# ensure_dir <path>  — path must exist and be non-empty; else copy from donor
+ensure_dir() {
+    local d="$1"
+    if [ -d "$d" ] && [ -n "$(ls -A "$d" 2>/dev/null)" ]; then
+        say_ok "$d"
+        return 0
+    fi
+    if [ "$CHECK" = 1 ]; then say_miss "$d"; return 1; fi
+    if find_donor && [ -d "$DONOR$d" ]; then
+        mkdir -p "$d"
+        cp -r "$DONOR$d/." "$d/"
+        say_fix "$d (from USB)"
+    else
+        say_miss "$d — plug in a SelahOS install USB and re-run"
+    fi
+}
+
+# ensure_file <path>
+ensure_file() {
+    local f="$1"
+    if [ -f "$f" ]; then say_ok "$f"; return 0; fi
+    if [ "$CHECK" = 1 ]; then say_miss "$f"; return 1; fi
+    if find_donor && [ -f "$DONOR$f" ]; then
+        mkdir -p "$(dirname "$f")"
+        cp "$DONOR$f" "$f"
+        say_fix "$f (from USB)"
+    else
+        say_miss "$f — plug in a SelahOS install USB and re-run"
+    fi
+}
+
+echo "SelahOS Repair — $( [ "$CHECK" = 1 ] && echo 'CHECK ONLY' || echo 'repairing' )"
+
+echo
+echo "[1/8] SelahOS app executables"
+shopt -s nullglob
+for f in /usr/local/bin/selah*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.bak) continue ;; esac
+    if [ -x "$f" ]; then
+        say_ok "$(basename "$f")"
+    elif [ "$CHECK" = 1 ]; then
+        say_miss "$(basename "$f") not executable"
+    else
+        chmod 755 "$f" && say_fix "$(basename "$f") +x"
+    fi
+done
+
+echo
+echo "[2/8] Device editor suite"
+ensure_dir /usr/local/lib/selahos/device-bridge
+ensure_file /usr/local/bin/selahos-device-editors
+if [ "$CHECK" = 0 ]; then
+    chmod 755 /usr/local/bin/selahos-device-editors \
+              /usr/local/lib/selahos/device-bridge/selahos-device-editors \
+              /usr/local/lib/selahos/device-bridge/lib/*.sh 2>/dev/null
+fi
+
+echo
+echo "[3/8] Theme and branding"
+for d in /usr/share/icons/selahos /usr/share/Kvantum/Selah \
+         /usr/share/plasma/look-and-feel /usr/share/sddm/themes/selahos \
+         /usr/share/wallpapers/selahos /usr/share/selahos; do
+    ensure_dir "$d"
+done
+ensure_file /usr/share/color-schemes/SelahOS.colors
+ensure_file /usr/share/konsole/SelahOS.profile
+if [ ! -f /etc/sddm.conf.d/10-selah-theme.conf ] && [ "$CHECK" = 0 ]; then
+    mkdir -p /etc/sddm.conf.d
+    printf '[Theme]\nCurrent=selahos\n' > /etc/sddm.conf.d/10-selah-theme.conf
+    say_fix "/etc/sddm.conf.d/10-selah-theme.conf"
+else
+    [ -f /etc/sddm.conf.d/10-selah-theme.conf ] && say_ok "SDDM theme config" || say_miss "SDDM theme config"
+fi
+
+echo
+echo "[4/8] Fastfetch"
+ensure_dir  /etc/xdg/fastfetch
+ensure_dir  /etc/skel/.config/fastfetch
+ensure_file /etc/profile.d/50-selahos-fastfetch.sh
+ensure_file /etc/skel/.bashrc
+
+echo
+echo "[5/8] User configuration (skel -> homes, no-clobber)"
+for home in /home/*; do
+    [ -d "$home" ] || continue
+    user=$(basename "$home")
+    id "$user" >/dev/null 2>&1 || continue
+    if [ "$CHECK" = 1 ]; then
+        [ -d "$home/.config/fastfetch" ] && say_ok "$user has fastfetch config" \
+                                         || say_miss "$user missing skel config"
+        continue
+    fi
+    cp -rn /etc/skel/. "$home/" 2>/dev/null
+    chown -R "$user:$user" "$home"
+    say_fix "$user (skel synced, ownership fixed)"
+done
+
+echo
+echo "[6/8] Menu entries"
+n=$(ls /usr/share/applications/selah*.desktop 2>/dev/null | wc -l)
+if [ "$n" -ge 10 ]; then
+    say_ok "$n selah menu entries"
+elif [ "$CHECK" = 1 ]; then
+    say_miss "only $n selah menu entries"
+elif find_donor; then
+    for d in "$DONOR"/usr/share/applications/selah*.desktop; do
+        base=$(basename "$d")
+        case "$base" in selahos-install.desktop|selah-setup.desktop) continue ;; esac
+        [ -f "/usr/share/applications/$base" ] || { cp "$d" /usr/share/applications/; say_fix "$base"; }
+    done
+else
+    say_miss "menu entries — plug in a SelahOS install USB and re-run"
+fi
+
+echo
+echo "[7/8] Services"
+for svc in NetworkManager selah-wifi-driver; do
+    if systemctl is-enabled "$svc" >/dev/null 2>&1; then
+        say_ok "$svc enabled"
+    elif [ ! -f "/etc/systemd/system/$svc.service" ] && \
+         [ ! -f "/usr/lib/systemd/system/$svc.service" ]; then
+        if [ "$CHECK" = 0 ] && find_donor && [ -f "$DONOR/etc/systemd/system/$svc.service" ]; then
+            cp "$DONOR/etc/systemd/system/$svc.service" /etc/systemd/system/
+            systemctl enable "$svc" >/dev/null 2>&1 && say_fix "$svc (unit from USB, enabled)"
+        else
+            say_miss "$svc unit not present"
+        fi
+    elif [ "$CHECK" = 1 ]; then
+        say_miss "$svc not enabled"
+    else
+        systemctl enable "$svc" >/dev/null 2>&1 && say_fix "$svc enabled"
+    fi
+done
+
+echo
+echo "[8/8] Packages"
+PKGS=(fastfetch kvantum kvantum-qt5 python-pyqt6 python-mido python-rtmidi)
+missing_pkgs=()
+for p in "${PKGS[@]}"; do
+    pacman -Qq "$p" >/dev/null 2>&1 && say_ok "$p" || { say_miss "$p"; missing_pkgs+=("$p"); }
+done
+if [ "${#missing_pkgs[@]}" -gt 0 ] && [ "$CHECK" = 0 ]; then
+    if ping -c1 -W3 archlinux.org >/dev/null 2>&1; then
+        echo "  installing: ${missing_pkgs[*]}"
+        if pacman -Sy --noconfirm --needed "${missing_pkgs[@]}"; then
+            say_fix "packages installed"
+        else
+            echo "  pacman failed — check /var/log/pacman.log"
+        fi
+    else
+        echo "  no network — connect and re-run to install: ${missing_pkgs[*]}"
+    fi
+fi
+
+echo
+echo "──────────────────────────────────────────────"
+echo "Result: $OK ok, $FIXED fixed, $MISSING still missing"
+if [ "$MISSING" -gt 0 ] && [ -z "$DONOR" ]; then
+    echo "Tip: plug in a SelahOS install USB and re-run — it will be"
+    echo "used as the donor for any files this system never received."
+fi
+if [ "$FIXED" -gt 0 ]; then
+    echo "Log out and back in (or reboot) to see theme changes."
+fi
+exit 0
