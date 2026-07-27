@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=APC mini Editor
+GenericName=Hardware Controller Editor
+Comment=64-pad grid editor for Akai APC mini
+Exec=/usr/local/bin/selahos-device-editors apc_mini
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=SelahOS;MIDI;controller;Akai;
+StartupNotify=true

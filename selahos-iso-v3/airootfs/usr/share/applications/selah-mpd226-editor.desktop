@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MPD226 Editor
+GenericName=Hardware Controller Editor
+Comment=16-pad and 8-fader editor for Akai MPD226
+Exec=/usr/local/bin/selahos-device-editors mpd226
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=SelahOS;MIDI;controller;Akai;
+StartupNotify=true

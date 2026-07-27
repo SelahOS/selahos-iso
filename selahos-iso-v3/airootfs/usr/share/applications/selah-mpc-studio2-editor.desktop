@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MPC Studio 2 Editor
+GenericName=Hardware Controller Editor
+Comment=Pad, RGB and MIDI editor for Akai MPC Studio mk2
+Exec=/usr/local/bin/selahos-device-editors mpc_studio2
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=SelahOS;MIDI;controller;Akai;
+StartupNotify=true

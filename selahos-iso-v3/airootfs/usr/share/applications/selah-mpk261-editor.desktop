@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MPK261 Editor
+GenericName=Hardware Controller Editor
+Comment=Keyboard controller editor for Akai MPK261
+Exec=/usr/local/bin/selahos-device-editors mpk261
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=SelahOS;MIDI;controller;Akai;
+StartupNotify=true

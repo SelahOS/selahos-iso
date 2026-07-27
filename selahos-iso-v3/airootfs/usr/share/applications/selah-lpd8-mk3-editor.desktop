@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=LPD8 mk3 Editor
+GenericName=Hardware Controller Editor
+Comment=Pad editor with RGB support for Akai LPD8 mk3
+Exec=/usr/local/bin/selahos-device-editors lpd8_mk3
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=SelahOS;MIDI;controller;Akai;
+StartupNotify=true

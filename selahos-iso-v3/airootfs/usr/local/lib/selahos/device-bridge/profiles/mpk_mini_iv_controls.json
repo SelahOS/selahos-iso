@@ -1,0 +1,328 @@
+{
+  "device": {
+    "name": "Akai Professional MPK mini IV",
+    "usb_vid": "09E8",
+    "usb_pid": "005D",
+    "interface": "MI_01",
+    "version": "1.0.2"
+  },
+  "keyboard": {
+    "type": "velocity_sensitive_keys",
+    "count": 25,
+    "range_notes": {
+      "default_start": 36,
+      "default_end": 60,
+      "description": "C1 to C2 (middle octave)"
+    },
+    "features": {
+      "velocity_sensitive": true,
+      "pressure_sensitive": false,
+      "octave_transpose": {
+        "up": "OCT +",
+        "down": "OCT -",
+        "range": "±4 octaves"
+      },
+      "modes": [
+        "single_note",
+        "chords_mode",
+        "scales_mode"
+      ]
+    }
+  },
+  "pads": {
+    "type": "velocity_pressure_sensitive",
+    "count": 8,
+    "layout": "2x4 or 4x2 configurable",
+    "features": {
+      "velocity_sensitive": true,
+      "pressure_sensitive": true,
+      "rgb_backlit": true,
+      "modes": [
+        "notes_mode",
+        "cc_mode",
+        "program_change_mode"
+      ]
+    },
+    "default_mapping": {
+      "pad_1": { "note": 36, "channel": 0 },
+      "pad_2": { "note": 37, "channel": 0 },
+      "pad_3": { "note": 38, "channel": 0 },
+      "pad_4": { "note": 39, "channel": 0 },
+      "pad_5": { "note": 40, "channel": 0 },
+      "pad_6": { "note": 41, "channel": 0 },
+      "pad_7": { "note": 42, "channel": 0 },
+      "pad_8": { "note": 43, "channel": 0 }
+    },
+    "cc_mode": {
+      "pad_1": 1,
+      "pad_2": 2,
+      "pad_3": 3,
+      "pad_4": 4,
+      "pad_5": 5,
+      "pad_6": 6,
+      "pad_7": 7,
+      "pad_8": 8
+    }
+  },
+  "knobs": {
+    "type": "continuous_rotary",
+    "count": 8,
+    "features": {
+      "360_degree": true,
+      "assignable": true,
+      "modes": [
+        "absolute",
+        "relative"
+      ]
+    },
+    "default_cc_mapping": {
+      "knob_1": 42,
+      "knob_2": 43,
+      "knob_3": 44,
+      "knob_4": 45,
+      "knob_5": 46,
+      "knob_6": 47,
+      "knob_7": 48,
+      "knob_8": 49
+    },
+    "range": "0-127 (14-bit with MSB/LSB possible)",
+    "note": "Individual assignment per knob in Program Edit mode"
+  },
+  "encoder": {
+    "type": "push_encoder",
+    "count": 1,
+    "functions": [
+      "parameter_selection",
+      "parameter_value_change",
+      "menu_navigation"
+    ],
+    "cc_assignment": "configurable per mode"
+  },
+  "wheels": {
+    "pitch_wheel": {
+      "position": "left",
+      "cc": "pitch_bend",
+      "range": "±2 semitones (standard MIDI)"
+    },
+    "modulation_wheel": {
+      "position": "right",
+      "cc": 1,
+      "range": "0-127"
+    }
+  },
+  "buttons": {
+    "single_color_leds": [
+      {
+        "name": "SHIFT",
+        "function": "modifier_key",
+        "description": "Access secondary functions"
+      },
+      {
+        "name": "PLUGIN/DAW",
+        "function": "mode_toggle",
+        "description": "Toggle between Plugin and DAW modes"
+      },
+      {
+        "name": "USER PRESETS",
+        "function": "preset_selection",
+        "description": "Hold to open User Presets menu"
+      },
+      {
+        "name": "OCT -",
+        "function": "octave_transpose_down",
+        "description": "Decrease keyboard octave"
+      },
+      {
+        "name": "OCT +",
+        "function": "octave_transpose_up",
+        "description": "Increase keyboard octave"
+      },
+      {
+        "name": "PROG EDIT",
+        "function": "program_editor",
+        "description": "Edit MIDI assignments (hold SHIFT for access)"
+      },
+      {
+        "name": "ARP",
+        "function": "arpeggiator_enable",
+        "description": "Enable arpeggiator"
+      },
+      {
+        "name": "LATCH",
+        "function": "arpeggiator_latch",
+        "description": "Enable latch mode for arpeggiator"
+      },
+      {
+        "name": "FULL LEVEL",
+        "function": "velocity_mode",
+        "description": "Full velocity mode toggle (hold SHIFT)"
+      },
+      {
+        "name": "NOTE REPEAT",
+        "function": "note_repeat_enable",
+        "description": "Enable note repeat function"
+      },
+      {
+        "name": "BANK A/B",
+        "function": "bank_select",
+        "description": "Toggle between Bank A and Bank B for pads"
+      },
+      {
+        "name": "UNDO",
+        "function": "undo_action",
+        "description": "Undo last action"
+      },
+      {
+        "name": "REDO",
+        "function": "redo_action",
+        "description": "Redo last action (hold SHIFT)"
+      },
+      {
+        "name": "LOOP",
+        "function": "loop_playback",
+        "description": "Toggle loop playback (hold SHIFT for menu)"
+      }
+    ],
+    "bicolor_leds": [
+      {
+        "name": "STOP/PLAY",
+        "states": ["stop", "playing"],
+        "function": "transport_control"
+      },
+      {
+        "name": "RECORD",
+        "states": ["ready", "recording"],
+        "function": "record_arm"
+      }
+    ]
+  },
+  "display": {
+    "type": "color_lcd",
+    "size": "0.96 inch diagonal",
+    "resolution": "128x64 pixels",
+    "features": [
+      "real_time_feedback",
+      "parameter_display",
+      "preset_display",
+      "settings_menu"
+    ]
+  },
+  "midi_ports": [
+    {
+      "port": 1,
+      "name": "MPK Mini IV MIDI Port",
+      "direction": "output",
+      "data": ["keyboard", "pads", "pitch_wheel", "modulation_wheel", "sustain_pedal"],
+      "note": "Messages sent here are recorded/edited by Host DAW"
+    },
+    {
+      "port": 2,
+      "name": "MPK Mini IV DAW Port",
+      "direction": "output",
+      "data": ["interface_controls", "screen_controls", "transport_controls"],
+      "note": "Connect to DAW for control"
+    },
+    {
+      "port": 3,
+      "name": "MPK Mini IV Plugin Port",
+      "direction": "output",
+      "data": ["interface_controls", "screen_controls", "transport_controls"],
+      "note": "For Studio Instrument Collection (SIC) plugin control"
+    },
+    {
+      "port": 4,
+      "name": "MPK Mini IV Software Control Port",
+      "direction": "output",
+      "data": ["generic_cc_messages"],
+      "note": "Generic mapping for external software"
+    },
+    {
+      "port": 5,
+      "name": "MPK Mini IV Din Port",
+      "direction": "output",
+      "data": ["all_midi"],
+      "note": "Physical 5-pin MIDI output (configurable source)"
+    }
+  ],
+  "cc_assignments": {
+    "global": {
+      "modulation_wheel": 1,
+      "breath_controller": 2,
+      "foot_controller": 4,
+      "portamento_time": 5,
+      "data_entry_coarse": 6,
+      "channel_volume": 7,
+      "balance": 8,
+      "pan": 10,
+      "expression": 11,
+      "effect_control_1": 12,
+      "effect_control_2": 13
+    },
+    "device_specific": {
+      "knob_1": 42,
+      "knob_2": 43,
+      "knob_3": 44,
+      "knob_4": 45,
+      "knob_5": 46,
+      "knob_6": 47,
+      "knob_7": 48,
+      "knob_8": 49
+    }
+  },
+  "performance_features": {
+    "arpeggiator": {
+      "modes": ["up", "down", "exclusive", "inclusive", "ordered", "random"],
+      "time_divisions": ["1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T"],
+      "octave_range": "1-4",
+      "swing": "50-75%",
+      "gate": "10-99%",
+      "freeze_mode": true,
+      "latch_mode": true
+    },
+    "note_repeat": {
+      "time_divisions": ["1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T"],
+      "swing": "inherits_from_arpeggiator"
+    },
+    "chord_mode": {
+      "chord_types": [
+        "1-3-5 (triad)",
+        "+7 (seventh)",
+        "+7+9 (seventh_ninth)",
+        "Maj7 (major_seventh)",
+        "min7 (minor_seventh)",
+        "dom7 (dominant_seventh)"
+      ],
+      "modes": ["note_by_note", "chord_triggered_simultaneously"]
+    },
+    "scales_mode": {
+      "available_scales": [
+        "chromatic", "major", "melodic_minor", "harmonic_minor",
+        "major_pentatonic", "minor_pentatonic", "dorian", "phrygian",
+        "lydian", "mixolydian", "aeolian", "locrian", "blues",
+        "flamenco", "romanian", "hungarian", "persian", "bebop",
+        "whole_tone"
+      ],
+      "transposition": "±12 semitones"
+    }
+  },
+  "connectivity": {
+    "usb": {
+      "type": "USB Type-C",
+      "power": "bus_powered_or_external_5V_0.5A"
+    },
+    "sustain_pedal": {
+      "type": "1/4_inch_6.35mm_TS",
+      "polarity": "configurable_normal_or_inverted"
+    },
+    "midi_out": {
+      "type": "5_pin_DIN",
+      "direction": "output_only"
+    }
+  },
+  "firmware": {
+    "current_version": "1.0.2",
+    "updatable": true,
+    "requires": "Akai Professional MPK mini IV Firmware Updater v1.0.14",
+    "target_version": "1.41"
+  }
+}

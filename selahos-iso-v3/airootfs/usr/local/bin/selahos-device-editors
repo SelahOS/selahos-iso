@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# SelahOS Device Editors — thin wrapper so the launcher and the editor
+# .py files can live together under /usr/local/lib/selahos/device-bridge
+exec /usr/local/lib/selahos/device-bridge/selahos-device-editors "$@"

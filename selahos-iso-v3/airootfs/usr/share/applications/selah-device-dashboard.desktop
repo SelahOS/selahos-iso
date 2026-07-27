@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Device Dashboard
+GenericName=Hardware Controller Editor
+Comment=Central status dashboard for connected Selah devices
+Exec=python3 /usr/local/lib/selahos/device-bridge/selahos-central-dashboard.py
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=SelahOS;MIDI;controller;Akai;
+StartupNotify=true

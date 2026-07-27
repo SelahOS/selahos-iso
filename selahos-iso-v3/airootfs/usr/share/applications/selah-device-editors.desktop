@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Device Editors
+GenericName=Hardware Controller Editor
+Comment=Choose and launch a hardware controller editor
+Exec=/usr/local/bin/selahos-device-editors
+Icon=multimedia-player
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=SelahOS;MIDI;controller;Akai;
+StartupNotify=true
