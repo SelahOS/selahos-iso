@@ -223,8 +223,19 @@ fi
 # only the dkms hook's own kernel-source download needs network.
 PKG="$(ls /root/snd-hda-macbookpro-dkms-git-*.pkg.tar.zst 2>/dev/null | head -1)"
 if [ -n "$PKG" ]; then
+    # pacman's CheckSpace option statfs's the mount point for "/" to verify
+    # free space. This script is the first place in the whole build that
+    # runs pacman from inside a REAL arch-chroot (everything else uses
+    # pacstrap's --root mode, which never calls chroot() at all) — and
+    # CheckSpace can't resolve a mount point for "/" from inside an actual
+    # chroot, failing with "could not determine root mount point /" /
+    # "not enough free disk space" regardless of how much space is free.
+    # Disable it for just this one internal install, then restore it so
+    # the shipped pacman.conf is unchanged.
+    sed -i 's/^CheckSpace/#CheckSpace/' /etc/pacman.conf
     pacman -U --noconfirm --needed "$PKG" || \
         echo "WARNING: snd-hda-macbookpro-dkms-git install/dkms build failed — CS8409 audio (MacBook Pro 14,1) will not work on this ISO"
+    sed -i 's/^#CheckSpace/CheckSpace/' /etc/pacman.conf
     rm -f "$PKG"
 else
     echo "WARNING: snd-hda-macbookpro-dkms-git-*.pkg.tar.zst not found in /root — was it copied into airootfs/root/?"
