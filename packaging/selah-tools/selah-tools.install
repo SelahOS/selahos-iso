@@ -1,0 +1,10 @@
+post_install() {
+  echo ":: selah-wifi-driver picks the right Broadcom driver per chip."
+  echo "   On Broadcom machines enable it with:"
+  echo "     systemctl enable selah-wifi-driver"
+  echo "   (selah-wifi-wake is BCM4350-only and is started by selahseedcore-init.)"
+}
+
+post_upgrade() {
+  systemctl daemon-reload >/dev/null 2>&1 || true
+}

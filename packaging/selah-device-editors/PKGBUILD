@@ -1,0 +1,43 @@
+# Maintainer: Selah Technologies LLC <support@selahtechnologies.com>
+#
+# selah-device-editors — SelahOS hardware controller editor suite
+# (APC Mini, LPD8 mk2/mk3, MPC Studio 2, MPD226, MPK261 + dashboard).
+
+pkgname=selah-device-editors
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="SelahOS device editor suite for USB MIDI controllers"
+arch=('any')
+url="https://selahos.io"
+license=('custom')
+depends=(python python-pyqt6 python-mido python-rtmidi)
+options=(!strip)
+
+_airootfs="$startdir/../../selahos-iso-v3/airootfs"
+
+_desktops=(selah-apc-mini-editor selah-lpd8-mk2-editor selah-lpd8-mk3-editor
+           selah-mpc-studio2-editor selah-mpd226-editor selah-mpk261-editor
+           selah-device-dashboard selah-device-editors)
+
+package() {
+  local A="$_airootfs" d
+
+  # editor suite library tree
+  install -dm755 "$pkgdir/usr/local/lib/selahos/device-bridge"
+  cp -r "$A/usr/local/lib/selahos/device-bridge/." \
+        "$pkgdir/usr/local/lib/selahos/device-bridge/"
+  # normalize modes, then re-grant the executables (profiledef rule)
+  find "$pkgdir/usr/local/lib/selahos" -type d -exec chmod 755 {} +
+  find "$pkgdir/usr/local/lib/selahos" -type f -exec chmod 644 {} +
+  chmod 755 "$pkgdir/usr/local/lib/selahos/device-bridge/selahos-device-editors" \
+            "$pkgdir/usr/local/lib/selahos/device-bridge/lib/"*.sh
+
+  # launcher wrapper
+  install -Dm755 "$A/usr/local/bin/selahos-device-editors" \
+                 "$pkgdir/usr/local/bin/selahos-device-editors"
+
+  for d in "${_desktops[@]}"; do
+    install -Dm644 "$A/usr/share/applications/$d.desktop" \
+                   "$pkgdir/usr/share/applications/$d.desktop"
+  done
+}

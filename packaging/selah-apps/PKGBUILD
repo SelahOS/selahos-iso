@@ -1,0 +1,67 @@
+# Maintainer: Selah Technologies LLC <support@selahtechnologies.com>
+#
+# selah-apps — SelahOS DAW compatibility + audio application suite.
+# Payload is sourced directly from the airootfs tree (single source
+# of truth). NOTE: /etc/selahbridgepro/.keydata (license secret) is
+# deliberately NOT packaged — it is deployed at ISO build time only.
+
+pkgname=selah-apps
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="SelahOS DAW compatibility layer and audio application suite (SelahBridgePro, selahpro, MPC bridge)"
+arch=('any')
+url="https://selahos.io"
+license=('custom')
+depends=(python python-pyqt6 python-mido python-rtmidi alsa-utils wine)
+optdepends=('pipewire-jack: low-latency audio routing'
+            'xiphos: Selah Reflection study app')
+backup=(etc/selahbridgepro/selahbridgepro.conf
+        etc/selah-mpc/mpc-studio2.conf)
+options=(!strip)
+
+_airootfs="$startdir/../../selahos-iso-v3/airootfs"
+
+_bins=(selah-about selah-ai-detect selah-ai-setup selah-asio-config
+       selah-audio-fix selahauth selahbridge-detect selahbridge-install
+       selahbridgepro selahbridge-sandbox selahbridge-winapp
+       selah-mpc-bridge selah-mpc-led selah-mpc-snoop selah-mpk-mini-iv
+       selahpro selahwine)
+
+_desktops=(selahbridgepro selahauth selah-about selah-mpk-mini-iv
+           selah-reflection)
+
+package() {
+  local A="$_airootfs" b d
+
+  for b in "${_bins[@]}"; do
+    install -Dm755 "$A/usr/local/bin/$b" "$pkgdir/usr/local/bin/$b"
+  done
+
+  for d in "${_desktops[@]}"; do
+    install -Dm644 "$A/usr/share/applications/$d.desktop" \
+                   "$pkgdir/usr/share/applications/$d.desktop"
+  done
+
+  # hicolor app icons
+  ( cd "$A" && find usr/share/icons/hicolor -type f -name 'selah*' ) | \
+  while IFS= read -r f; do
+    install -Dm644 "$A/$f" "$pkgdir/$f"
+  done
+
+  # /etc payloads — everything EXCEPT .keydata / license / trial
+  install -Dm644 "$A/etc/selahbridgepro/selahbridgepro.conf" \
+                 "$pkgdir/etc/selahbridgepro/selahbridgepro.conf"
+  install -dm755 "$pkgdir/etc/selahbridgepro/profiles"
+  install -m644 "$A/etc/selahbridgepro/profiles/"*.profile \
+                "$pkgdir/etc/selahbridgepro/profiles/"
+  install -Dm644 "$A/etc/selah-mpc/mpc-studio2.conf" \
+                 "$pkgdir/etc/selah-mpc/mpc-studio2.conf"
+
+  # per-user MPC bridge service
+  install -Dm644 "$A/usr/lib/systemd/user/selah-mpc-bridge.service" \
+                 "$pkgdir/usr/lib/systemd/user/selah-mpc-bridge.service"
+
+  # app compatibility database
+  install -Dm644 "$A/usr/share/selahos/app-compat-db.json" \
+                 "$pkgdir/usr/share/selahos/app-compat-db.json"
+}

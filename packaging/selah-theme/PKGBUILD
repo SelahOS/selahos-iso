@@ -1,0 +1,55 @@
+# Maintainer: Selah Technologies LLC <support@selahtechnologies.com>
+#
+# selah-theme — SelahOS look & feel: Kvantum theme, Plasma theming,
+# SDDM theme, icon theme, wallpapers, color scheme, Konsole profile,
+# fastfetch branding, and /etc/skel defaults for new users.
+
+pkgname=selah-theme
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="SelahOS theme and branding (Kvantum, Plasma, SDDM, icons, wallpapers, fastfetch)"
+arch=('any')
+url="https://selahos.io"
+license=('custom')
+depends=(kvantum fastfetch)
+optdepends=('sddm: themed login screen'
+            'plasma-desktop: desktop theming')
+options=(!strip)
+
+_airootfs="$startdir/../../selahos-iso-v3/airootfs"
+
+_dirsync() {  # _dirsync <rel-path> — contents copy into $pkgdir, no nesting
+  local A="$_airootfs" rel="$1"
+  [ -d "$A/$rel" ] || return 0
+  install -dm755 "$pkgdir/$rel"
+  cp -r "$A/$rel/." "$pkgdir/$rel/"
+}
+
+package() {
+  local A="$_airootfs"
+
+  _dirsync usr/share/Kvantum
+  _dirsync usr/share/plasma
+  _dirsync usr/share/sddm/themes
+  _dirsync usr/share/icons/selahos
+  _dirsync usr/share/wallpapers
+  _dirsync usr/share/selahos/fastfetch
+  _dirsync etc/xdg/fastfetch
+  _dirsync etc/skel
+
+  install -Dm644 "$A/usr/share/color-schemes/SelahOS.colors" \
+                 "$pkgdir/usr/share/color-schemes/SelahOS.colors"
+  install -Dm644 "$A/usr/share/konsole/SelahOS.profile" \
+                 "$pkgdir/usr/share/konsole/SelahOS.profile"
+  install -Dm644 "$A/etc/profile.d/50-selahos-fastfetch.sh" \
+                 "$pkgdir/etc/profile.d/50-selahos-fastfetch.sh"
+
+  # SDDM theme selection (what selah-repair generates on installed systems)
+  install -dm755 "$pkgdir/etc/sddm.conf.d"
+  printf '[Theme]\nCurrent=selahos\n' > "$pkgdir/etc/sddm.conf.d/10-selah-theme.conf"
+  chmod 644 "$pkgdir/etc/sddm.conf.d/10-selah-theme.conf"
+
+  # normalize modes across the payload (content only, no executables here)
+  find "$pkgdir" -type d -exec chmod 755 {} +
+  find "$pkgdir" -type f -exec chmod 644 {} +
+}

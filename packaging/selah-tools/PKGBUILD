@@ -1,0 +1,71 @@
+# Maintainer: Selah Technologies LLC <support@selahtechnologies.com>
+#
+# selah-tools — SelahOS system maintenance tools: repair/recover,
+# OTA update wrapper, per-chip Broadcom Wi-Fi driver selection,
+# hardware detection, and the SelahSeedCore boot service.
+
+pkgname=selah-tools
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="SelahOS system tools (selah-repair, selah-update, Wi-Fi driver selection, recovery)"
+arch=('any')
+url="https://selahos.io"
+license=('custom')
+depends=(python networkmanager)
+backup=(etc/modprobe.d/selah-broadcom.conf
+        etc/modules-load.d/selah-wifi.conf)
+install=selah-tools.install
+options=(!strip)
+
+_airootfs="$startdir/../../selahos-iso-v3/airootfs"
+
+_bins=(selah-repair selah-recover selah-rescue selah-update
+       selah-wifi-driver selahos-hardware-detect selahos-memory-info
+       selahos-recovery-center selahseedcore-init)
+
+_desktops=(selah-repair selah-recover selahos-recovery-center)
+
+package() {
+  local A="$_airootfs" b d
+
+  for b in "${_bins[@]}"; do
+    install -Dm755 "$A/usr/local/bin/$b" "$pkgdir/usr/local/bin/$b"
+  done
+
+  for d in "${_desktops[@]}"; do
+    install -Dm644 "$A/usr/share/applications/$d.desktop" \
+                   "$pkgdir/usr/share/applications/$d.desktop"
+  done
+
+  # Wi-Fi: per-chip driver selection (SELAH-41 design)
+  install -Dm644 "$A/etc/systemd/system/selah-wifi-driver.service" \
+                 "$pkgdir/usr/lib/systemd/system/selah-wifi-driver.service"
+  install -Dm644 "$A/etc/systemd/system/selah-wifi-wake.service" \
+                 "$pkgdir/usr/lib/systemd/system/selah-wifi-wake.service"
+  install -Dm644 "$A/etc/modprobe.d/selah-broadcom.conf" \
+                 "$pkgdir/etc/modprobe.d/selah-broadcom.conf"
+  install -Dm644 "$A/etc/modules-load.d/selah-wifi.conf" \
+                 "$pkgdir/etc/modules-load.d/selah-wifi.conf"
+
+  # SelahSeedCore per-user boot service
+  install -Dm644 "$A/usr/lib/systemd/user/selahseedcore.service" \
+                 "$pkgdir/usr/lib/systemd/user/selahseedcore.service"
+
+  # hardware databases + docs
+  install -Dm644 "$A/usr/share/selahos/hardware-db.json" \
+                 "$pkgdir/usr/share/selahos/hardware-db.json"
+  install -Dm644 "$A/usr/local/share/selahos/mac-profiles.json" \
+                 "$pkgdir/usr/local/share/selahos/mac-profiles.json"
+  if [ -d "$A/usr/share/selahos/docs" ]; then
+    install -dm755 "$pkgdir/usr/share/selahos/docs"
+    cp -r "$A/usr/share/selahos/docs/." "$pkgdir/usr/share/selahos/docs/"
+    find "$pkgdir/usr/share/selahos/docs" -type d -exec chmod 755 {} +
+    find "$pkgdir/usr/share/selahos/docs" -type f -exec chmod 644 {} +
+  fi
+  if [ -d "$A/usr/share/selahos/audio-fix" ]; then
+    install -dm755 "$pkgdir/usr/share/selahos/audio-fix"
+    cp -r "$A/usr/share/selahos/audio-fix/." "$pkgdir/usr/share/selahos/audio-fix/"
+    find "$pkgdir/usr/share/selahos/audio-fix" -type d -exec chmod 755 {} +
+    find "$pkgdir/usr/share/selahos/audio-fix" -type f -exec chmod 644 {} +
+  fi
+}
