@@ -153,6 +153,19 @@ grep -qs "'usbutils'" "$SFS/usr/local/bin/selah-setup" \
     && ok "installer pacstraps usbutils (preflight's Bluetooth check needs lsusb)" \
     || bad "installer missing usbutils pacstrap"
 
+# 9. CS8409 audio (MacBook Pro 14,1): confirm the dkms module actually
+# compiled during THIS build, not just that the package is "installed" —
+# its build needs network, which pacstrap's own hook execution doesn't
+# have (see customize_airootfs.sh and packages.x86_64 comments). A
+# compiled module for at least one of the two shipped kernels means the
+# fix (installing via customize_airootfs.sh instead of packages.x86_64)
+# is working; zero anywhere means it silently regressed again.
+if find "$SFS/usr/lib/modules" -iname "snd-hda-codec-cs8409.ko*" 2>/dev/null | grep -q .; then
+    ok "CS8409 driver (snd-hda-codec-cs8409) compiled for at least one kernel"
+else
+    bad "CS8409 driver never compiled for any kernel in this build — check customize_airootfs.sh's pacman -S snd-hda-macbookpro-dkms-git step ran with network"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "PRE-FLIGHT PASSED — safe to flash"

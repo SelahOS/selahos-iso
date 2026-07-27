@@ -411,6 +411,11 @@ cpupower
 thermald
 irqbalance
 bolt
-snd-hda-macbookpro-dkms-git
+# snd-hda-macbookpro-dkms-git (CS8409 audio, MacBook Pro 14,1) is
+# deliberately NOT here — its dkms hook needs network to download kernel
+# source to patch against, and pacstrap does not bind-mount /etc/resolv.conf
+# into the target for its own alpm-hook execution (unlike arch-chroot,
+# which does). Installed instead inside customize_airootfs.sh, which mkarchiso
+# runs via arch-chroot and so actually has working DNS. See that script.
 xiphos
 bibletime

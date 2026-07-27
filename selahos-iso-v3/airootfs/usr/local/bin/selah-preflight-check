@@ -201,10 +201,22 @@ if ls /proc/asound/card*/codec#* &>/dev/null; then
     grep -lqi "CS8409" /proc/asound/card*/codec#* 2>/dev/null && CS8409_PRESENT=1
 fi
 if [ "$CS8409_PRESENT" -eq 1 ]; then
-    if lsmod 2>/dev/null | grep -q snd_hda_macbookpro; then
-        ok "CS8409 codec detected: snd_hda_macbookpro loaded"
+    # "installed" (pacman -Qi) is not proof the dkms build ever succeeded —
+    # its pre_build script needs network to download kernel source to patch
+    # against, and has silently failed to build for EVERY kernel before this
+    # was moved into customize_airootfs.sh (which runs via arch-chroot and
+    # gets a real resolv.conf, unlike pacstrap's own hook execution). Check
+    # dkms status for an actual build, not just the package being present.
+    BUILT=0
+    command -v dkms &>/dev/null && dkms status 2>/dev/null | grep -q "^snd_hda_macbookpro" && BUILT=1
+    LOADED=0
+    lsmod 2>/dev/null | grep -q snd_hda_macbookpro && LOADED=1
+    if [ "$BUILT" -eq 0 ]; then
+        bad "CS8409 codec detected but snd_hda_macbookpro was never dkms-built for any kernel — audio will not work (check /var/lib/dkms/snd_hda_macbookpro/*/build/make.log)"
+    elif [ "$LOADED" -eq 1 ]; then
+        ok "CS8409 codec detected: snd_hda_macbookpro built and loaded"
     else
-        bad "CS8409 codec detected but snd_hda_macbookpro is not loaded — audio will not work (run selah-audio-fix, then a full cold shutdown)"
+        warn "CS8409 codec detected: snd_hda_macbookpro built but not currently loaded — needs a full cold shutdown (not reboot) to take effect"
     fi
 fi
 

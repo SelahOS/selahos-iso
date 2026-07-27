@@ -202,7 +202,20 @@ else
     echo "SelahSeedCore: Non-Apple hardware — skipping Mac-specific services"
 fi
 
-# ── Step 18: Purge build-time junk ────────────────────────────
+# ── Step 18: CS8409 audio driver (snd-hda-macbookpro-dkms-git) ─
+# Deliberately NOT in packages.x86_64 (see that file). Its dkms hook runs
+# install.cirrus.driver.sh, which downloads the matching upstream kernel
+# source over the network to patch against — pacstrap does not bind-mount
+# /etc/resolv.conf for its own alpm-hook execution, so this always failed
+# silently there (package "installed", module never actually built, for
+# every kernel, confirmed via dkms status on the dev machine going back to
+# whenever this package was first added). mkarchiso runs this script via
+# arch-chroot, which DOES bind-mount resolv.conf, so pacman -S here gets a
+# real DKMS build. DO NOT move this back into packages.x86_64.
+pacman -S --noconfirm --needed snd-hda-macbookpro-dkms-git || \
+    echo "WARNING: snd-hda-macbookpro-dkms-git install/dkms build failed — CS8409 audio (MacBook Pro 14,1) will not work on this ISO"
+
+# ── Step 19: Purge build-time junk ────────────────────────────
 # Guard against __pycache__/.pyc (e.g. from a stray `python -m py_compile`
 # during dev, or any pacman hook that compiles installed scripts) and
 # editor backup files shipping in the squashfs. iso-preflight.sh has
