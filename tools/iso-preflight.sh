@@ -164,11 +164,20 @@ grep -qs "'usbutils'" "$SFS/usr/local/bin/selah-setup" \
 # /usr/lib/modules — the STOCK in-tree kernel already ships a module by
 # that exact name (generic CS8409 support, not the Apple-patched one),
 # so that alone is a false positive. Check the dkms build log itself.
-DKMS_LOG="$(find "$SFS/var/lib/dkms/snd_hda_macbookpro" -iname "make.log" 2>/dev/null | sort | tail -1)"
-if [ -z "$DKMS_LOG" ]; then
+# NOTE: the on-disk dkms tree is keyed by the /usr/src/<name> directory
+# name — "snd-hda-macbookpro" (hyphen) — NOT dkms.conf's internal
+# PACKAGE_NAME ("snd_hda_macbookpro", underscore). Got this wrong on the
+# first pass here and it produced a false FAIL against a build that had
+# actually succeeded (dkms had already promoted the log from the
+# in-progress build/make.log path to the final <kernelver>/<arch>/log/
+# path, which only happens on success — checked both possible locations
+# by searching the whole module tree rather than guessing one path).
+DKMS_LOGS="$(find "$SFS/var/lib/dkms/snd-hda-macbookpro" -iname "make.log" 2>/dev/null)"
+if [ -z "$DKMS_LOGS" ]; then
     bad "CS8409 driver: no dkms build was ever attempted in this ISO — check customize_airootfs.sh's pacman -U snd-hda-macbookpro-dkms-git*.pkg.tar.zst step ran"
-elif grep -qi "^Error\|exit code: [^0]" "$DKMS_LOG"; then
-    bad "CS8409 driver: dkms build attempted but failed — see $(echo "$DKMS_LOG" | sed "s|$SFS||")"
+elif echo "$DKMS_LOGS" | xargs grep -lE "^Error|exit code: [^0]" 2>/dev/null | grep -q .; then
+    bad_log="$(echo "$DKMS_LOGS" | xargs grep -lE '^Error|exit code: [^0]' 2>/dev/null | head -1)"
+    bad "CS8409 driver: dkms build attempted but failed — see $(echo "$bad_log" | sed "s|$SFS||")"
 else
     ok "CS8409 driver (snd_hda_macbookpro) dkms-built successfully for at least one kernel"
 fi
