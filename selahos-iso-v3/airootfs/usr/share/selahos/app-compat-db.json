@@ -11,7 +11,15 @@
       "asio": true,
       "notes": "Built into selahpro KNOWN_DAWS — selahpro install ableton"
     },
-    "confirmed": true
+    "confirmed": true,
+    "status": "verified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": [],
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
   },
   {
     "app": "FL Studio",
@@ -25,7 +33,15 @@
       "asio": true,
       "notes": "Built into selahpro KNOWN_DAWS — selahpro install flstudio"
     },
-    "confirmed": true
+    "confirmed": true,
+    "status": "verified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": [],
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
   },
   {
     "app": "REAPER",
@@ -38,7 +54,15 @@
       "winversion": "win10",
       "asio": true
     },
-    "confirmed": true
+    "confirmed": true,
+    "status": "verified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": [],
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
   },
   {
     "app": "Pro Tools",
@@ -52,7 +76,15 @@
       "asio": true,
       "notes": "Runtime profile is in production use. iLok/Avid Link activation flow is NOT yet verified end-to-end — partial entry."
     },
-    "confirmed": false
+    "confirmed": false,
+    "status": "partial",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["iLok/Avid Link activation flow not yet verified end-to-end"],
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
   },
   {
     "app": "Digital Performer",
@@ -68,7 +100,18 @@
       "dll_overrides": "msvcp140=n,b;vcruntime140=n,b;vcruntime140_1=n,b;ucrtbase=n,b;wineasio=n,b;msacm32=n,b",
       "notes": "motuDNSResponder service disabled via registry patch (post-install) to prevent the authorization hang. Built into selahpro install dp."
     },
-    "confirmed": true
+    "confirmed": true,
+    "status": "verified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": [
+      "motuDNSResponder (Bonjour service) hangs activation under Wine unless disabled via registry patch — handled automatically by selahpro install dp",
+      "msvcp140 null vtable crash on launch without vcrun2022 installed first"
+    ],
+    "confirmed_date": "2026-06-12",
+    "reported_by": "dbnoble"
   },
   {
     "app": "MPC Software",
@@ -83,7 +126,15 @@
       "tricks": ["vcredist2019", "dotnet48", "d3dx9", "directx9"],
       "notes": "HID passthrough required for MPC Studio 2 display/LEDs — see selahpro midi passthrough."
     },
-    "confirmed": true
+    "confirmed": true,
+    "status": "verified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Requires hidraw udev passthrough for Studio 2 display/LEDs — see selahpro midi passthrough mpc"],
+    "confirmed_date": "2026-06-03",
+    "reported_by": "dbnoble"
   },
   {
     "app": "Studio One 7",
@@ -98,7 +149,15 @@
       "dxvk": true,
       "notes": "DXVK required — Studio One 7's GPU UI uses Direct3D 11; without it the app reports 'Windows 10 required' even though Wine reports win10."
     },
-    "confirmed": true
+    "confirmed": true,
+    "status": "verified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Without DXVK, app incorrectly reports 'Windows 10 required' even though Wine already reports win10"],
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
   },
   {
     "app": "Spark Desktop",
@@ -117,7 +176,19 @@
       "args": ["--disable-gpu"],
       "notes": "ESYNC/FSYNC and DXVK disabled — both cause SparkCore's Electron/Swift subprocess to crash or hang on window creation. XWayland forced (native Wayland driver drops the window). --disable-gpu prevents repeated GPU-process crashes. See selahos-iso-v3 apps.profile."
     },
-    "confirmed": true
+    "confirmed": true,
+    "status": "verified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": ["--disable-gpu"],
+    "installer_type": "nsis-squirrel",
+    "known_issues": [
+      "ESYNC/FSYNC and DXVK both crash/hang the Electron+Swift subprocess — must stay disabled",
+      "Native Wayland driver drops the window — XWayland forced",
+      "Repeated GPU-process crashes unless launched with --disable-gpu"
+    ],
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
   },
   {
     "app": "iLok License Manager",
@@ -132,6 +203,422 @@
       "winversion": "win10",
       "notes": "Small .NET utility, no GPU/ASIO requirements expected. Not yet run end-to-end on SelahOS. Try: selahpro install-app ilok <installer.exe>"
     },
-    "confirmed": false
+    "confirmed": false,
+    "status": "untested",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Some iLok activation flows require a USB dongle with kernel-level DRM — those specific flows belong on the Tier 4 VM escape hatch, not Wine. Cloud/machine-based iLok activation is the Wine-compatible path."],
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "Native Access",
+    "publisher": "Native Instruments",
+    "approach": "wine-generic-prefix",
+    "selahpro_daw": null,
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": false,
+      "notes": "Shares the general ~/.wine prefix with Studio One, Spark Desktop, and other Native Instruments apps rather than an isolated per-app prefix — works today but predates the one-prefix-per-app policy."
+    },
+    "confirmed": false,
+    "status": "installed-unverified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Installed in the shared ~/.wine prefix, not isolated — a winemenubuilder desktop launcher exists confirming successful install, but functional use (downloading/activating a library) has not been personally confirmed yet."],
+    "installed_date": "2026-06-16",
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "Komplete Kontrol",
+    "publisher": "Native Instruments",
+    "approach": "wine-generic-prefix",
+    "selahpro_daw": null,
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "notes": "Installed via Native Access into the shared ~/.wine prefix."
+    },
+    "confirmed": false,
+    "status": "installed-unverified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Desktop launcher exists confirming install succeeded; standalone/VST plugin-host audio functionality not yet personally confirmed."],
+    "installed_date": "2026-06-16",
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "Kontakt 7",
+    "publisher": "Native Instruments",
+    "approach": "wine-generic-prefix",
+    "selahpro_daw": null,
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "notes": "Installed via Native Access into the shared ~/.wine prefix."
+    },
+    "confirmed": false,
+    "status": "installed-unverified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Desktop launcher exists confirming install succeeded; loading a library and producing audio not yet personally confirmed."],
+    "installed_date": "2026-06-16",
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "Kontakt",
+    "publisher": "Native Instruments",
+    "approach": "wine-generic-prefix",
+    "selahpro_daw": null,
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "notes": "Older Kontakt version, installed alongside Kontakt 7 via Native Access into the shared ~/.wine prefix."
+    },
+    "confirmed": false,
+    "status": "installed-unverified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Desktop launcher exists confirming install succeeded; functional testing not yet personally confirmed."],
+    "installed_date": "2026-06-16",
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "Reaktor 6",
+    "publisher": "Native Instruments",
+    "approach": "wine-generic-prefix",
+    "selahpro_daw": null,
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "notes": "Installed via Native Access into the shared ~/.wine prefix."
+    },
+    "confirmed": false,
+    "status": "installed-unverified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Desktop launcher exists confirming install succeeded; functional testing not yet personally confirmed."],
+    "installed_date": "2026-06-16",
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "Controller Editor",
+    "publisher": "Native Instruments",
+    "approach": "wine-generic-prefix",
+    "selahpro_daw": null,
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": false,
+      "notes": "MIDI controller mapping utility for NI hardware. Installed via Native Access into the shared ~/.wine prefix."
+    },
+    "confirmed": false,
+    "status": "installed-unverified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Needs USB HID access to NI controller hardware to be useful — not yet confirmed working with a connected device."],
+    "installed_date": "2026-06-16",
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "inMusic Software Center",
+    "publisher": "inMusic (Akai parent company)",
+    "approach": "wine-electron-fixes",
+    "selahpro_daw": null,
+    "wine_config": {
+      "prefix": "~/.wine",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": false,
+      "notes": "Electron-based app/license manager for inMusic brands (Akai, M-Audio, etc). Installed into the shared ~/.wine prefix."
+    },
+    "confirmed": false,
+    "status": "installed-unverified",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Electron-based — if it shows the same crash/hang symptoms as Spark Desktop, the fix is the same: disable ESYNC/FSYNC/DXVK and launch with --disable-gpu. Not yet confirmed either way."],
+    "installed_date": "2026-06-15",
+    "confirmed_date": null,
+    "reported_by": "dbnoble"
+  },
+  {
+    "app": "Audacity",
+    "publisher": "Audacity Team",
+    "approach": "native-linux",
+    "linux_check": "Native Linux build in official Arch/AUR repos — no Wine needed.",
+    "wine_config": null,
+    "confirmed": true,
+    "status": "verified",
+    "runtime": null,
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": [],
+    "confirmed_date": null,
+    "reported_by": "dbnoble",
+    "notes": "Tier 1 example — selahpro find-app should recommend the native package and never suggest Wine for this one."
+  },
+  {
+    "app": "Bitwig Studio",
+    "publisher": "Bitwig GmbH",
+    "approach": "native-linux",
+    "linux_check": "Ships an official native Linux build directly from bitwig.com — no Wine needed.",
+    "wine_config": null,
+    "confirmed": true,
+    "status": "verified",
+    "runtime": null,
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": [],
+    "confirmed_date": null,
+    "reported_by": "dbnoble",
+    "notes": "Tier 1 example — a DAW that needs zero Wine involvement at all."
+  },
+  {
+    "app": "Waves Central",
+    "publisher": "Waves Audio",
+    "approach": "wine-generic-prefix",
+    "wine_config": {
+      "prefix": "waves-central",
+      "tricks": ["corefonts", "vcrun2022"],
+      "winversion": "win10",
+      "asio": false
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Plugin licensing/activation network calls reported as the most common friction point in community Wine reports — not personally verified on SelahOS"],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge (forums/WineHQ-style reports), not SelahOS-specific testing. Treat as a starting point, not a guarantee."
+  },
+  {
+    "app": "Arturia Software Center",
+    "publisher": "Arturia",
+    "approach": "wine-generic-prefix",
+    "wine_config": {
+      "prefix": "arturia-software-center",
+      "tricks": ["corefonts", "vcrun2022"],
+      "winversion": "win10",
+      "asio": false
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["License/download manager — not personally verified on SelahOS"],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge, not SelahOS-specific testing."
+  },
+  {
+    "app": "UVI Workstation",
+    "publisher": "UVI",
+    "approach": "wine-generic-prefix",
+    "wine_config": {
+      "prefix": "uvi-workstation",
+      "tricks": ["corefonts", "vcrun2022"],
+      "winversion": "win10",
+      "asio": true
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Not personally verified on SelahOS"],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge, not SelahOS-specific testing."
+  },
+  {
+    "app": "Plugin Alliance Installation Manager",
+    "publisher": "Plugin Alliance",
+    "approach": "wine-generic-prefix",
+    "wine_config": {
+      "prefix": "plugin-alliance-im",
+      "tricks": ["corefonts", "vcrun2022", "dotnet48"],
+      "winversion": "win10",
+      "asio": false
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["License activation network calls reported as the main friction point — not personally verified on SelahOS"],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge, not SelahOS-specific testing."
+  },
+  {
+    "app": "Toontrack Product Manager",
+    "publisher": "Toontrack",
+    "approach": "wine-generic-prefix",
+    "wine_config": {
+      "prefix": "toontrack-product-manager",
+      "tricks": ["corefonts", "vcrun2022"],
+      "winversion": "win10",
+      "asio": false
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Not personally verified on SelahOS"],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge, not SelahOS-specific testing."
+  },
+  {
+    "app": "iZotope Product Portal",
+    "publisher": "iZotope",
+    "approach": "wine-generic-prefix",
+    "wine_config": {
+      "prefix": "izotope-product-portal",
+      "tricks": ["corefonts", "vcrun2022", "dotnet48"],
+      "winversion": "win10",
+      "asio": false
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["License activation network calls reported as the main friction point — not personally verified on SelahOS"],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge, not SelahOS-specific testing."
+  },
+  {
+    "app": "Spitfire Audio App",
+    "publisher": "Spitfire Audio",
+    "approach": "wine-electron-fixes",
+    "wine_config": {
+      "prefix": "spitfire-audio-app",
+      "tricks": [],
+      "winversion": "win10",
+      "asio": false,
+      "args": ["--disable-gpu"]
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": ["--disable-gpu"],
+    "installer_type": null,
+    "known_issues": ["Electron-based downloader/license app, same class of issue as Spark Desktop — ESYNC/FSYNC/DXVK likely need to stay disabled. Not personally verified on SelahOS."],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge plus pattern-matching to the already-verified Spark Desktop entry, not SelahOS-specific testing."
+  },
+  {
+    "app": "Splice Desktop",
+    "publisher": "Splice",
+    "approach": "wine-electron-fixes",
+    "wine_config": {
+      "prefix": "splice-desktop",
+      "tricks": [],
+      "winversion": "win10",
+      "asio": false,
+      "args": ["--disable-gpu"]
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": ["--disable-gpu"],
+    "installer_type": null,
+    "known_issues": ["Electron-based, same class of issue as Spark Desktop. Not personally verified on SelahOS."],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge plus pattern-matching to the already-verified Spark Desktop entry, not SelahOS-specific testing."
+  },
+  {
+    "app": "Cubase",
+    "publisher": "Steinberg",
+    "approach": "wine-daw-profile",
+    "wine_config": {
+      "prefix": "~/.wine-selah-cubase",
+      "winearch": "win64",
+      "winversion": "win10",
+      "asio": true,
+      "tricks": ["vcredist2022"]
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Steinberg's eLicenser/Soft-eLicenser DRM is widely reported in the Linux community as one of the harder schemes to get working under Wine — USB dongle versions are a Tier 4 (VM escape hatch) candidate, not Wine. Not personally verified on SelahOS."],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge, not SelahOS-specific testing."
+  },
+  {
+    "app": "Melodyne",
+    "publisher": "Celemony",
+    "approach": "wine-generic-prefix",
+    "wine_config": {
+      "prefix": "melodyne",
+      "tricks": ["corefonts", "vcrun2022"],
+      "winversion": "win10",
+      "asio": false
+    },
+    "confirmed": false,
+    "status": "community",
+    "runtime": "wine-staging",
+    "vkd3d": false,
+    "launch_flags": [],
+    "installer_type": null,
+    "known_issues": ["Activation/licensing flow not personally verified on SelahOS"],
+    "confirmed_date": null,
+    "reported_by": null,
+    "notes": "Based on general Wine-community knowledge, not SelahOS-specific testing."
   }
 ]

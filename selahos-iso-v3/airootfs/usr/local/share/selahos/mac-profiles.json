@@ -4,26 +4,31 @@
   "tiers": {
     "legacy": {
       "label": "Legacy Intel (2010–2012)",
+      "kernel": "linux-lts",
       "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off noapic i915.enable_psr=0",
       "grub_laptop_extra": "mem_sleep_default=deep"
     },
     "ivy_bridge": {
       "label": "Ivy Bridge (2012–2013)",
+      "kernel": "linux-lts",
       "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off i915.enable_psr=0",
       "grub_laptop_extra": "mem_sleep_default=deep"
     },
     "haswell": {
       "label": "Haswell (2013–2014)",
+      "kernel": "linux-lts",
       "grub_base": "pcie_aspm=off acpi_osi=Darwin video=efifb:off i915.enable_psr=0",
       "grub_laptop_extra": "mem_sleep_default=deep"
     },
     "broadwell": {
       "label": "Broadwell (2015)",
+      "kernel": "linux-lts",
       "grub_base": "pcie_aspm=off acpi_osi=Darwin nomodeset",
       "grub_laptop_extra": "mem_sleep_default=deep"
     },
     "skylake": {
       "label": "Skylake (2016)",
+      "kernel": "linux-lts",
       "grub_base": "pcie_aspm=off acpi_osi=Darwin i915.enable_psr=0 video=efifb:off",
       "grub_laptop_extra": "mem_sleep_default=deep"
     },
