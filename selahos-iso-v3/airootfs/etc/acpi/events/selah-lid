@@ -1,0 +1,5 @@
+# SELAH-49: fires selah-clamshell on every lid button transition.
+# selah-clamshell reads /proc/acpi/button/lid/*/state itself rather than
+# trusting acpid's event text, so this just needs to catch both directions.
+event=button/lid.*
+action=/usr/local/bin/selah-clamshell
