@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-wifi-driver
+#
+# Loads the correct Broadcom Wi-Fi driver for this machine.
+#
+# Every Broadcom Wi-Fi driver is blacklisted in
+# /etc/modprobe.d/selah-broadcom.conf so that none of them
+# auto-binds (blacklist only stops alias auto-loading — an
+# explicit "modprobe <name>" still works, which is what this
+# script does). Run by selah-wifi-driver.service before
+# NetworkManager starts.
+#
+#   brcmfmac — BCM4350 / 43602 / 4355 / 4364 / 4377  (Macs ~2015+)
+#   wl       — BCM4331 / 4360 / 4352 / 43224 / …      (Macs 2011–2014,
+#                                                      most PC cards)
+#
+# Non-Broadcom Wi-Fi (Intel, Atheros, …) is not touched.
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+
+set -u
+
+chip=""
+for dev in /sys/bus/pci/devices/*; do
+    [ -e "$dev/vendor" ] || continue
+    read -r vendor < "$dev/vendor"
+    [ "$vendor" = "0x14e4" ] || continue
+    read -r class < "$dev/class"
+    case "$class" in 0x0280*) ;; *) continue ;; esac
+    read -r chip < "$dev/device"
+    break
+done
+
+if [ -z "$chip" ]; then
+    logger -t selah-wifi-driver "no Broadcom Wi-Fi device present; nothing to do"
+    exit 0
+fi
+
+load() {
+    if modprobe "$1" 2>/dev/null; then
+        logger -t selah-wifi-driver "loaded $1 for Broadcom chip $chip"
+        return 0
+    fi
+    logger -t selah-wifi-driver "modprobe $1 FAILED for chip $chip"
+    return 1
+}
+
+wlan_appeared() {
+    local i n
+    for i in 1 2 3 4 5 6; do
+        for n in /sys/class/net/*; do
+            [ -d "$n/wireless" ] && return 0
+        done
+        sleep 1
+    done
+    return 1
+}
+
+case "$chip" in
+    # brcmfmac chips: BCM4350, BCM43602, BCM4355, BCM4364, BCM4377
+    0x43a3|0x43ba|0x43dc|0x4464|0x4488)
+        load brcmfmac
+        ;;
+    # wl chips: BCM4331, BCM4360, BCM4352, BCM43224, BCM43225, BCM4322, BCM4313
+    0x4331|0x43a0|0x43b1|0x4353|0x4357|0x432b|0x4727)
+        load wl
+        ;;
+    *)
+        # Unknown chip — try the modern in-kernel driver first,
+        # fall back to the vendor blob if no wireless interface shows up
+        load brcmfmac
+        if ! wlan_appeared; then
+            logger -t selah-wifi-driver "brcmfmac produced no wireless interface; falling back to wl"
+            modprobe -r brcmfmac 2>/dev/null || true
+            load wl
+        fi
+        ;;
+esac
+
+exit 0

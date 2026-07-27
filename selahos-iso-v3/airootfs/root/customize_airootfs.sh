@@ -103,16 +103,12 @@ EOF
 echo "ntsync" > /etc/modules-load.d/ntsync.conf
 
 # ── Step 9: Broadcom WiFi ─────────────────────────────────────
-echo "wl" > /etc/modules-load.d/broadcom-wl.conf
-cat > /etc/modprobe.d/broadcom-wl.conf << 'EOF'
-blacklist b43
-blacklist b43legacy
-blacklist ssb
-blacklist bcma
-blacklist brcm80211
-blacklist brcmfmac
-blacklist brcmsmac
-EOF
+# Driver selection is per-chip at boot (selah-wifi-driver.service);
+# static config lives in airootfs (/etc/modprobe.d/selah-broadcom.conf).
+# Writing a second modules-load/modprobe pair here previously
+# force-loaded wl AND brcmfmac together and blacklisted everything,
+# which killed Wi-Fi on BCM4331 Macs (MacBookPro9,2).
+systemctl enable selah-wifi-driver.service
 
 # ── Step 10: WiFi powersave fix ───────────────────────────────
 mkdir -p /etc/NetworkManager/conf.d

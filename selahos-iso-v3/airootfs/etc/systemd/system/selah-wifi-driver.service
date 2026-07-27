@@ -1,0 +1,14 @@
+[Unit]
+Description=SelahOS Broadcom Wi-Fi driver selection
+After=systemd-modules-load.service
+Before=NetworkManager.service
+ConditionPathExists=/usr/local/bin/selah-wifi-driver
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/selah-wifi-driver
+TimeoutStartSec=45
+
+[Install]
+WantedBy=multi-user.target
