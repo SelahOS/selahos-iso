@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-preflight-check — verify a LIVE or INSTALLED SelahOS
+# system for the exact failure classes the bake-fixes handoff
+# (2026-07-27) diagnosed on a real HP 230 G2: missing plymouth
+# hook with quiet/splash still set, the Qt5 stack missing, and
+# selahbridgepro/selah-apps unable to install.
+#
+# This is deliberately NOT the same tool as tools/iso-preflight.sh
+# (a build-host script that mounts a *built ISO's* squashfs before
+# it's ever flashed). This one runs in-place against a live root —
+# the live ISO session, a just-installed target via
+# `arch-chroot /mnt selah-preflight-check`, or a running installed
+# system (`selahpro preflight`) — so the same checks work at every
+# stage without needing a mounted image.
+#
+# Usage: selah-preflight-check   (no args; always checks /)
+# Exit codes: 0 = clean, 1 = warnings only, 2 = at least one FAIL
+# ============================================================
+set -uo pipefail
+
+fail=0
+warned=0
+ok()   { printf '  OK   %s\n'   "$1"; }
+bad()  { printf '  FAIL %s\n'   "$1"; fail=1; }
+warn() { printf '  WARN %s\n'   "$1"; warned=1; }
+
+echo "SelahOS pre-flight check — $(hostname 2>/dev/null || echo unknown)"
+echo
+
+# ── 1. Boot splash: plymouth hook vs quiet/splash consistency ─────────
+# (SELAH-36 / tonight's HP box: quiet+splash with no plymouth hook =
+# black screen with nothing drawn on it)
+CMDLINE=""
+[ -f /etc/default/grub ] && CMDLINE="$(grep -oP '^GRUB_CMDLINE_LINUX_DEFAULT="\K[^"]*' /etc/default/grub 2>/dev/null || true)"
+HAS_QUIET_SPLASH=0
+case " $CMDLINE " in *" quiet "*|*" splash "*) HAS_QUIET_SPLASH=1 ;; esac
+HAS_PLYMOUTH_HOOK=0
+if [ -f /etc/mkinitcpio.conf ] && grep -qs "plymouth" /etc/mkinitcpio.conf; then
+    HAS_PLYMOUTH_HOOK=1
+fi
+PLYMOUTH_INSTALLED=0
+pacman -Qq plymouth &>/dev/null && PLYMOUTH_INSTALLED=1
+
+if [ "$HAS_QUIET_SPLASH" -eq 1 ] && [ "$HAS_PLYMOUTH_HOOK" -eq 0 ]; then
+    bad "grub has quiet/splash but mkinitcpio.conf has no plymouth hook — black screen at boot"
+elif [ "$HAS_PLYMOUTH_HOOK" -eq 1 ] && [ "$PLYMOUTH_INSTALLED" -eq 0 ]; then
+    bad "mkinitcpio.conf has plymouth hook but plymouth package is not installed — mkinitcpio will fail"
+else
+    ok "boot splash config consistent (quiet/splash: $([ $HAS_QUIET_SPLASH = 1 ] && echo yes || echo no), plymouth hook: $([ $HAS_PLYMOUTH_HOOK = 1 ] && echo yes || echo no))"
+fi
+
+# ── 2. Qt5/QML stack (SDDM greeter + SelahOS theme, SELAH-36) ─────────
+missing_qt5=()
+for pkg in qt5-base qt5-declarative qt5-quickcontrols qt5-quickcontrols2 qt5-graphicaleffects qt5-svg; do
+    pacman -Qq "$pkg" &>/dev/null || missing_qt5+=("$pkg")
+done
+if [ "${#missing_qt5[@]}" -eq 0 ]; then
+    ok "Qt5/QML stack present (SDDM greeter can render)"
+else
+    bad "Qt5/QML stack incomplete — missing: ${missing_qt5[*]} (SDDM greets to a black screen)"
+fi
+
+# ── 3. SelahOS product repo + selahbridgepro/selah-apps ───────────────
+if [ -f /etc/pacman.conf ]; then
+    if grep -qs '^\[selahos\]' /etc/pacman.conf; then
+        ok "pacman.conf: [selahos] repo section active"
+        if command -v pacman &>/dev/null && pacman -Si selah-apps &>/dev/null; then
+            ok "selah-apps resolves via pacman"
+        else
+            warn "[selahos] repo section present but selah-apps did not resolve (repo unreachable or not synced — run pacman -Sy)"
+        fi
+    elif grep -qs '^#\[selahos\]' /etc/pacman.conf; then
+        warn "pacman.conf: [selahos] repo present but commented out — repo.selahos.io is not live yet (packaging/README.md roadmap step 2). selah-apps/selahbridgepro cannot install via pacman until this is enabled."
+    else
+        bad "pacman.conf has no [selahos] repo section at all — selahbridgepro/selah-apps can never install via pacman on this machine"
+    fi
+else
+    bad "/etc/pacman.conf missing entirely"
+fi
+# Loose-file install path (pre-packaging model) still counts as present
+if [ -x /usr/local/bin/selahbridgepro ]; then
+    ok "selahbridgepro present + executable (loose-file install)"
+elif pacman -Qq selah-apps &>/dev/null; then
+    ok "selah-apps package installed"
+else
+    warn "selahbridgepro/selah-apps not found on this system (may be expected pre-install)"
+fi
+
+# ── 4. exec bits on selah* tools + no junk files ───────────────────────
+for f in /usr/local/bin/selah*; do
+    [ -f "$f" ] || continue
+    [ -x "$f" ] || bad "not executable: $f"
+done
+junk=$(find /usr/local/bin /usr/local/lib/selahos \
+            -name '*.bak' -o -name '*.orig' -o -name '*~' \
+            -o -name '__pycache__' -o -name '*.pyc' 2>/dev/null)
+[ -z "$junk" ] && ok "no junk files in /usr/local" \
+    || bad "junk files present: $(echo "$junk" | tr '\n' ' ')"
+
+# ── 5. Broadcom Wi-Fi per-chip design (SELAH-41) ───────────────────────
+if [ -f /etc/modprobe.d/selah-broadcom.conf ]; then
+    grep -qs "blacklist brcmfmac" /etc/modprobe.d/selah-broadcom.conf \
+        && ok "brcmfmac blacklisted (per-chip selection)" || bad "brcmfmac not blacklisted"
+    if grep -hsvE '^\s*(#|$)' /etc/modules-load.d/*wifi*.conf /etc/modules-load.d/*broadcom*.conf 2>/dev/null | grep -q .; then
+        bad "a Wi-Fi driver is force-loaded in modules-load.d (bypasses per-chip selection)"
+    else
+        ok "no Wi-Fi driver force-loaded"
+    fi
+fi
+
+# ── 6. GPU: NVIDIA generation check (bake-fixes handoff Task 4) ───────
+# First pass, simple name-pattern match — not the final architecture.
+# Extend as SELAH-45's hardware-compat-db matures.
+GPU_LINE=""
+command -v lspci &>/dev/null && GPU_LINE="$(lspci -mm 2>/dev/null | grep -i 'VGA\|3D controller' | grep -i nvidia | head -1)"
+if [ -n "$GPU_LINE" ]; then
+    NOUVEAU_OK=0
+    pacman -Qq xf86-video-nouveau &>/dev/null && NOUVEAU_OK=1
+    if echo "$GPU_LINE" | grep -qiE 'GTX (10|9|7|6)[0-9]{2}|GT 10[0-9]{2}|Quadro [PMK][0-9]{3,4}'; then
+        if [ "$NOUVEAU_OK" -eq 1 ]; then
+            ok "NVIDIA GPU (Pascal-or-older class): nouveau DDX present — reduced-perf desktop expected, working"
+        else
+            bad "NVIDIA GPU (Pascal-or-older class) but xf86-video-nouveau not installed — likely no display driver at all"
+        fi
+    else
+        warn "NVIDIA GPU detected, generation not in the Pascal-or-older pattern list — nouveau support may be poor or absent; consider the proprietary nvidia package"
+    fi
+fi
+
+# ── 7. NetworkManager ───────────────────────────────────────────────────
+if command -v systemctl &>/dev/null; then
+    systemctl is-enabled NetworkManager &>/dev/null \
+        && ok "NetworkManager enabled" || bad "NetworkManager not enabled"
+fi
+
+echo
+if [ "$fail" -eq 1 ]; then
+    echo "PRE-FLIGHT FAILED — do not consider this system ready"
+    exit 2
+elif [ "$warned" -eq 1 ]; then
+    echo "PRE-FLIGHT PASSED WITH WARNINGS"
+    exit 1
+else
+    echo "PRE-FLIGHT PASSED — clean"
+    exit 0
+fi

@@ -48,6 +48,13 @@ gptfdisk
 plymouth
 sddm
 sddm-kcm
+# Qt5/QML stack required by the SDDM greeter + SelahOS theme (SELAH-36)
+qt5-base
+qt5-declarative
+qt5-quickcontrols
+qt5-quickcontrols2
+qt5-graphicaleffects
+qt5-svg
 
 # === KDE Plasma 6 ===
 plasma-desktop
@@ -121,6 +128,11 @@ vulkan-tools
 xf86-video-amdgpu
 xf86-video-intel
 xf86-video-vesa
+# SELAH-51 (bake-fixes handoff Task 4): nouveau is the safe out-of-the-box
+# default for non-Mac NVIDIA hardware (confirmed working, reduced-perf
+# fallback on a GTX 1050 Ti). Without this DDX package, X11/XWayland has
+# no driver for NVIDIA cards until the user manually installs one.
+xf86-video-nouveau
 nvidia-utils
 
 # === Wine + SelahBridge ===

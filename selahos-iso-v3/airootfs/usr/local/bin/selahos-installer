@@ -682,6 +682,8 @@ pacstrap -K /mnt base base-devel linux-zen linux-zen-headers linux-firmware \
     networkmanager sudo grub efibootmgr os-prober \
     pipewire pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse wireplumber \
     sddm plasma-meta kde-applications-meta \
+    qt5-base qt5-declarative qt5-quickcontrols qt5-quickcontrols2 \
+    qt5-graphicaleffects qt5-svg xf86-video-nouveau \
     nano vim git wget curl \
     intel-ucode amd-ucode
 
@@ -689,6 +691,13 @@ echo "=== Generating fstab ==="
 genfstab -U /mnt >> /mnt/etc/fstab
 
 echo "=== Configuring system ==="
+# bake-fixes handoff Task 2: copy the live ISO's pacman.conf forward too —
+# pacstrap's stock template has no SelahOS repo (and no multilib/chaotic-aur)
+[ -f /etc/pacman.conf ] && cp /etc/pacman.conf /mnt/etc/pacman.conf
+# Copy GRUB config from Live ISO (contains Mac-specific kernel parameters)
+cp /etc/default/grub /mnt/etc/default/grub 2>/dev/null || true
+sed -i 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/' /mnt/etc/default/grub
+
 # Timezone
 arch-chroot /mnt ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 arch-chroot /mnt hwclock --systohc
@@ -730,6 +739,7 @@ echo "%wheel ALL=(ALL) ALL" >> /mnt/etc/sudoers
 # Services
 arch-chroot /mnt systemctl enable NetworkManager
 arch-chroot /mnt systemctl enable sddm
+arch-chroot /mnt systemctl enable systemd-timesyncd
 
 # SelahOS branding
 cat > /mnt/etc/os-release << OSREL
@@ -743,9 +753,7 @@ VENDOR_NAME="Selah Technologies LLC"
 VENDOR_URL="https://selahtechnologies.io"
 OSREL
 
-# Fix GRUB distributor name and kernel parameters
-sed -i 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/' /mnt/etc/default/grub
-sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash i915.enable_psr=0 i915.enable_fbc=0"/' /mnt/etc/default/grub
+# GRUB config already copied and configured above
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
 
 echo "=== Installing bootloader ==="

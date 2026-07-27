@@ -10,6 +10,7 @@
 
 import sys
 import os
+import glob
 import re
 import subprocess
 import time
@@ -19,7 +20,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QStackedWidget,
     QFrame, QProgressBar, QSizePolicy, QScrollArea, QButtonGroup,
-    QRadioButton, QListWidget, QListWidgetItem, QAbstractItemView
+    QRadioButton, QListWidget, QListWidgetItem, QAbstractItemView,
+    QCheckBox, QPlainTextEdit
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QThread, pyqtSignal, QSize, QPropertyAnimation,
@@ -884,7 +886,10 @@ class HardwareScreen(QWidget):
 
 # ── Screen 5: Installation Progress ──────────────────────────
 class InstallScreen(QWidget):
-    done = pyqtSignal(bool, str)
+    # bake-fixes handoff Task 3: carries the post-install preflight result
+    # (exit code -1/0/1/2, output text) up to DoneScreen alongside the
+    # existing install success/error pair.
+    done = pyqtSignal(bool, str, int, str)
 
     def __init__(self):
         super().__init__()
@@ -987,7 +992,7 @@ class InstallScreen(QWidget):
 class InstallThread(QThread):
     step_update  = pyqtSignal(int, str)
     pct_update   = pyqtSignal(int)
-    done_signal  = pyqtSignal(bool, str)
+    done_signal  = pyqtSignal(bool, str, int, str)
 
     def __init__(self, config):
         super().__init__()
@@ -1003,7 +1008,7 @@ class InstallThread(QThread):
             self._install()
         except Exception as e:
             import traceback
-            self.done_signal.emit(False, traceback.format_exc())
+            self.done_signal.emit(False, traceback.format_exc(), -1, '')
 
     def _install(self):
         cfg      = self.config
@@ -1020,8 +1025,9 @@ class InstallThread(QThread):
             log.write(f"$ {' '.join(cmd) if isinstance(cmd, list) else cmd}\n")
             log.flush()
             r = subprocess.run(cmd, stdout=log, stderr=log, **kw)
-            if r.returncode != 0 and not kw.get('check', False):
-                pass
+            if r.returncode != 0:
+                log.write(f"WARNING: exit {r.returncode}: {cmd}\n")
+                log.flush()
             return r
 
         def chroot(cmd):
@@ -1078,12 +1084,39 @@ class InstallThread(QThread):
             with open(mirrorlist, 'w') as f:
                 f.write('Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n')
                 f.write('Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\n')
-        sh(['pacstrap', '-K', '/mnt',
+        base_pkgs = [
             'base', 'base-devel', 'linux-zen', 'linux-zen-headers', 'linux-firmware',
             'networkmanager', 'sudo', 'grub', 'efibootmgr', 'os-prober',
             'intel-ucode', 'amd-ucode',
             'nano', 'vim', 'git', 'wget', 'curl', 'python', 'python-pip',
-        ])
+            # selah-wifi-driver modprobes wl on BCM4331/4360-class chips —
+            # the module must exist on the installed system, not just the
+            # live ISO (packages.x86_64 ships it there). Builds via dkms
+            # against the headers above during pacstrap.
+            'broadcom-wl-dkms',
+        ]
+        if is_apple:
+            # SelahSeedCore can recommend linux-lts for older Mac GPUs (hardware-db.json
+            # "kernel": "linux-lts" entries, e.g. Broadwell/iMac16,2) -- it must actually be
+            # installed or the later grub-set-default call has no entry to point at and
+            # silently falls back to linux-zen, which doesn't have the same track record
+            # on that hardware.
+            base_pkgs += ['linux-lts', 'linux-lts-headers']
+            # SELAH-49 audit: _apply_seedcore below has ALWAYS unconditionally
+            # `systemctl enable`'d thermald/irqbalance/acpid on installed
+            # systems, but none of the three were ever pacstrapped here —
+            # only present on the live ISO (packages.x86_64). sh()/chroot()
+            # swallow nonzero exits into a log WARNING rather than failing
+            # the install, so this was a silent no-op on every Mac install
+            # until now. tlp and mbpfan are AUR-only (tlp-git/mbpfan-git,
+            # confirmed via this dev machine's /var/log/pacman.log — they
+            # were hand-built with makepkg and pacman -U'd locally, not
+            # pulled from a repo) and are NOT added here; wiring AUR
+            # packages into pacstrap needs its own design (local [selahos]
+            # repo hosting a build, or a makepkg step) — flagged as a
+            # follow-up, not fixed in this pass.
+            base_pkgs += ['acpid', 'thermald', 'irqbalance']
+        sh(['pacstrap', '-K', '/mnt'] + base_pkgs)
 
         # Step 4: KDE Plasma
         self._step(4)
@@ -1092,6 +1125,31 @@ class InstallThread(QThread):
             'sddm', 'sddm-kcm', 'kwin', 'breeze', 'breeze-gtk',
             'konsole', 'dolphin', 'kate', 'ark', 'gwenview', 'spectacle',
             'kscreen', 'kinfocenter', 'firefox', 'xdg-user-dirs',
+            # Match the live ISO's KDE application set (packages.x86_64) —
+            # anything the live session ships must survive onto the
+            # installed system or users see apps "disappear" after install
+            'dolphin-plugins', 'ffmpegthumbs', 'filelight', 'kcalc',
+            'kcharselect', 'kcolorchooser', 'kdeconnect', 'kdialog',
+            'kfind', 'kwalletmanager', 'okular', 'partitionmanager',
+            'kdeplasma-addons', 'kde-cli-tools', 'kde-gtk-config',
+            'plasma-systemmonitor', 'plasma-firewall', 'plasma-disks',
+            'kdenlive',
+            # selah-reflection.desktop is copied to the installed system
+            # and launches xiphos
+            'xiphos',
+            # SelahOS theming: Kvantum engine (the Selah theme is a
+            # Kvantum theme) and fastfetch (skel .bashrc + profile.d
+            # snippet invoke it; config ships via _apply_theme)
+            'kvantum', 'kvantum-qt5', 'fastfetch',
+            # SELAH-36: the custom SDDM theme is Qt5 QML; Plasma 6 is Qt6 and
+            # pulls in none of these, so SDDM greets to a black screen without them
+            'qt5-base', 'qt5-declarative', 'qt5-quickcontrols',
+            'qt5-quickcontrols2', 'qt5-graphicaleffects', 'qt5-svg',
+            # bake-fixes handoff Task 4: safe nouveau default for non-Mac
+            # NVIDIA hardware. Harmless if no NVIDIA GPU is present; without
+            # it, NVIDIA machines have no X11/XWayland driver at all until
+            # a user manually installs one post-boot.
+            'xf86-video-nouveau',
         ])
 
         # Step 5: Audio
@@ -1106,7 +1164,9 @@ class InstallThread(QThread):
         self._step(6)
         sh(['pacstrap', '-K', '/mnt',
             'wine-staging', 'winetricks', 'wine-mono', 'wine-gecko',
-            'python-pyqt6',
+            # python-mido/python-rtmidi: the device editors under
+            # /usr/local/lib/selahos/device-bridge import them at runtime
+            'python-pyqt6', 'python-mido', 'python-rtmidi',
         ])
 
         # Step 7: fstab
@@ -1117,6 +1177,14 @@ class InstallThread(QThread):
 
         # Step 8: Configure system
         self._step(8)
+        # bake-fixes handoff Task 2: pacstrap's stock /etc/pacman.conf has
+        # no SelahOS repo (and no multilib/chaotic-aur) — copy the live
+        # ISO's actual config forward so installed systems match what the
+        # ISO itself resolves packages against, instead of silently
+        # diverging. Same "copy forward, don't re-derive" fix already
+        # applied to /etc/default/grub.
+        if _os.path.exists('/etc/pacman.conf'):
+            sh(['cp', '/etc/pacman.conf', '/mnt/etc/pacman.conf'])
         chroot(['ln', '-sf', f'/usr/share/zoneinfo/{timezone}', '/etc/localtime'])
         chroot(['hwclock', '--systohc'])
         with open('/mnt/etc/locale.gen', 'a') as f:
@@ -1138,7 +1206,10 @@ class InstallThread(QThread):
             f'echo "root:{password}" | chpasswd'], capture_output=True)
         with open('/mnt/etc/sudoers', 'a') as f:
             f.write('%wheel ALL=(ALL:ALL) ALL\n')
-        for svc in ['NetworkManager', 'sddm', 'bluetooth', 'fstrim.timer']:
+        # systemd-timesyncd: Macs' RTC drifts badly; without NTP the first boot
+        # can land far enough in the past to break TLS/pacman signatures
+        for svc in ['NetworkManager', 'sddm', 'bluetooth', 'fstrim.timer',
+                    'systemd-timesyncd']:
             chroot(['systemctl', 'enable', svc])
 
         # Write SelahOS os-release
@@ -1159,24 +1230,57 @@ class InstallThread(QThread):
         # Copy files from live ISO if present
         _sbp = '/usr/local/bin/selahbridgepro'
         if _os.path.exists(_sbp):
-            sh(['cp', '-r', '/usr/local/bin/selah*', '/mnt/usr/local/bin/'], shell=False)
+            sh(['cp', '-r', *glob.glob('/usr/local/bin/selah*'),
+                '/mnt/usr/local/bin/'])
+            # mkarchiso strips modes not listed in profiledef.sh
+            # file_permissions (SELAH-40); guarantee exec bits regardless
+            sh(['chmod', '755', *glob.glob('/mnt/usr/local/bin/selah*')])
+            # Device editor suite (MPC Studio 2, APC mini, LPD8, MPD226,
+            # MPK261, dashboard) lives under /usr/local/lib/selahos
+            if _os.path.isdir('/usr/local/lib/selahos'):
+                sh(['mkdir', '-p', '/mnt/usr/local/lib'])
+                sh(['cp', '-r', '/usr/local/lib/selahos', '/mnt/usr/local/lib/'])
+                sh(['bash', '-c',
+                    'chmod 755 /mnt/usr/local/lib/selahos/device-bridge/selahos-device-editors '
+                    '/mnt/usr/local/lib/selahos/device-bridge/lib/*.sh 2>/dev/null || true'])
             sh(['cp', '-r', '/usr/share/selahbridgepro', '/mnt/usr/share/'])
             sh(['cp', '-r', '/etc/selahbridgepro', '/mnt/etc/'])
-            sh(['cp', '-r', '/usr/share/applications/selahbridgepro.desktop',
-                '/mnt/usr/share/applications/'])
+            if _os.path.exists('/etc/selah-mpc'):
+                sh(['cp', '-r', '/etc/selah-mpc', '/mnt/etc/'])
+            # Live-session launchers must not land on the installed system
+            _live_only = {'selahos-install.desktop', 'selah-setup.desktop'}
+            for _d in glob.glob('/usr/share/applications/selah*.desktop'):
+                if _os.path.basename(_d) not in _live_only:
+                    sh(['cp', _d, '/mnt/usr/share/applications/'])
 
         # Step 11: Bootloader
         self._step(11)
         chroot(['grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi',
                 '--bootloader-id=SelahOS', '--removable', '--recheck'])
         sh(['sed', '-i', 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/', '/mnt/etc/default/grub'])
+        if not is_apple:
+            # bake-fixes handoff Task 1: Apple installs get an explicit,
+            # known-good cmdline from _apply_seedcore above. Non-Apple
+            # installs previously fell through to whatever the pacstrap'd
+            # grub package's stock template shipped (its default includes
+            # "quiet", and if plymouth is ever added to packages.x86_64
+            # without a matching HOOKS entry this silently regresses into
+            # the SELAH-36 black-screen bug). Set it explicitly instead of
+            # assuming the template — this ISO ships no plymouth hook.
+            sh(['sed', '-i',
+                's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3"/',
+                '/mnt/etc/default/grub'])
         chroot(['grub-mkconfig', '-o', '/boot/grub/grub.cfg'])
         sh(['sed', '-i', 's/Arch Linux/SelahOS/g', '/mnt/boot/grub/grub.cfg'])
         if recommended_kernel == 'linux-lts':
-            import subprocess as _sp
-            _sp.run(['arch-chroot', '/mnt', 'grub-set-default',
-                     'Advanced options for SelahOS>SelahOS, with Linux linux-lts'],
-                    capture_output=True)
+            r = chroot(['grub-set-default',
+                        'Advanced options for SelahOS>SelahOS, with Linux linux-lts'])
+            if r.returncode != 0:
+                log.write("WARNING: grub-set-default for linux-lts failed (entry name "
+                          "mismatch or linux-lts not installed) -- system will boot "
+                          "whatever GRUB picks as entry 0, likely linux-zen, even "
+                          "though linux-lts was recommended for this hardware.\n")
+                log.flush()
 
         # Step 12: Desktop theme
         self._step(12)
@@ -1185,6 +1289,25 @@ class InstallThread(QThread):
         # Step 13: Cleanup
         self._step(13)
         chroot(['mkinitcpio', '-P'])
+
+        # bake-fixes handoff Task 3: run the preflight check against the
+        # freshly installed system before it's unmounted, so problems are
+        # caught before the user ever reboots into them, not after.
+        preflight_exit = -1
+        preflight_output = ''
+        if _os.path.exists('/mnt/usr/local/bin/selah-preflight-check'):
+            pf = subprocess.run(
+                ['arch-chroot', '/mnt', 'selah-preflight-check'],
+                capture_output=True, text=True)
+            preflight_exit = pf.returncode
+            preflight_output = (pf.stdout or '') + (pf.stderr or '')
+            log.write(f"\n=== selah-preflight-check (exit {preflight_exit}) ===\n{preflight_output}\n")
+            log.flush()
+
+        # Persist the install log to the target so post-reboot debugging
+        # doesn't depend on the live session's tmpfs
+        log.flush()
+        sh(['cp', '/tmp/selah-setup.log', '/mnt/var/log/selah-setup.log'])
         sh(['sync'])
         sh(['umount', '-R', '/mnt'])
 
@@ -1192,7 +1315,7 @@ class InstallThread(QThread):
         self._step(14)
         self.pct_update.emit(100)
         time.sleep(0.5)
-        self.done_signal.emit(True, '')
+        self.done_signal.emit(True, '', preflight_exit, preflight_output)
 
     def _apply_seedcore(self, chroot, sh):
         import shutil, os as _os, re as _re
@@ -1204,15 +1327,32 @@ class InstallThread(QThread):
             ('/etc/tlp.conf', '/mnt/etc/'),
             ('/etc/systemd/system/selah-wifi-wake.service',
              '/mnt/etc/systemd/system/'),
+            ('/etc/systemd/system/selah-wifi-driver.service',
+             '/mnt/etc/systemd/system/'),
+            ('/usr/local/bin/selah-wifi-driver', '/mnt/usr/local/bin/'),
+            # SELAH-49: sleep/lid handling + clamshell display handoff.
+            # Harmless dead config on lidless Macs (desktop iMacs never
+            # generate a lid event) so shipped unconditionally rather than
+            # gated on the battery flag.
+            ('/etc/systemd/logind.conf', '/mnt/etc/systemd/'),
+            ('/usr/local/bin/selah-clamshell', '/mnt/usr/local/bin/'),
+            ('/etc/acpi/events/selah-lid', '/mnt/etc/acpi/events/'),
         ]
         for src, dst in seed_files:
             if _os.path.exists(src):
+                _os.makedirs(dst, exist_ok=True)
                 sh(['cp', src, dst])
 
         profile = self.config.get('profile', {})
         battery = profile.get('battery', False)
 
-        services = ['selah-wifi-wake', 'thermald', 'irqbalance', 'acpid']
+        # selah-wifi-driver picks brcmfmac vs wl per chip on every boot.
+        # selah-wifi-wake (PCIe remove/rescan + brcmfmac reload) is a
+        # BCM4350-only workaround — on wl-driven chips like the
+        # MacBookPro9,2's BCM4331 it leaves the card driverless.
+        services = ['selah-wifi-driver', 'thermald', 'irqbalance', 'acpid']
+        if profile.get('wifi') == 'BCM4350':
+            services.append('selah-wifi-wake')
         if battery:
             services.append('tlp')
         for svc in services:
@@ -1230,15 +1370,18 @@ class InstallThread(QThread):
         except Exception:
             pass
 
-        if db_entry:
-            params = f"quiet splash {db_entry['params']}"
+        if isinstance(db_entry, dict):
+            # SELAH-36: no 'quiet splash' — installed system has no plymouth
+            # hook, i915 grabs the framebuffer with nothing to draw
+            params = db_entry.get('params', '').strip()
             recommended_kernel = db_entry.get('kernel', 'linux-zen')
         else:
             tier_name = profile.get('tier', 'kaby_lake')
             tier      = get_tier(tier_name)
             base      = tier.get('grub_base', 'pcie_aspm=off acpi_osi=Darwin video=efifb:off')
             extra     = tier.get('grub_laptop_extra', '') if battery else ''
-            params    = f'quiet splash {base} {extra}'.strip()
+            params    = f'{base} {extra}'.strip()
+            recommended_kernel = tier.get('kernel', 'linux-zen')
 
         grub_cfg = '/mnt/etc/default/grub'
         if _os.path.exists(grub_cfg):
@@ -1272,20 +1415,51 @@ class InstallThread(QThread):
 
     def _apply_theme(self, sh):
         import os as _os
+        # Copy CONTENTS (src/. -> dst/) so directories that already exist
+        # on the target (color-schemes, konsole ship with KDE packages)
+        # don't end up nested one level deep (color-schemes/color-schemes).
         theme_dirs = [
             '/usr/share/icons/selahos',
             '/usr/share/color-schemes',
             '/usr/share/konsole',
+            '/usr/share/Kvantum',
+            '/usr/share/plasma/desktoptheme',
+            '/usr/share/plasma/look-and-feel',
             '/usr/share/sddm/themes/selahos',
             '/usr/share/plymouth/themes/selahos',
             '/usr/share/wallpapers/selahos',
             '/usr/share/selahos',
             '/usr/local/share/selahos',
+            '/etc/xdg/fastfetch',
             '/etc/skel/.config',
         ]
         for d in theme_dirs:
-            if _os.path.exists(d):
-                sh(['cp', '-r', d, f'/mnt{d}'])
+            if _os.path.isdir(d):
+                sh(['mkdir', '-p', f'/mnt{d}'])
+                sh(['bash', '-c', f'cp -r {d}/. /mnt{d}/'])
+        # Single files the theme depends on (.bashrc runs fastfetch,
+        # profile.d snippet shows it on login shells)
+        for f_ in ['/etc/skel/.bashrc',
+                   '/etc/profile.d/50-selahos-fastfetch.sh']:
+            if _os.path.exists(f_):
+                sh(['mkdir', '-p', _os.path.dirname(f'/mnt{f_}')])
+                sh(['cp', f_, f'/mnt{f_}'])
+        # The user account is created in Step 8, BEFORE this skel copy —
+        # useradd -m populated the home from a still-empty skel, so the
+        # first user never saw the Selah theme/fastfetch config. Sync it
+        # into the existing home (no-clobber) and fix ownership.
+        username = self.config.get('username', '')
+        home = f'/mnt/home/{username}'
+        if username and _os.path.isdir(home):
+            sh(['bash', '-c', f'cp -rn /mnt/etc/skel/. {home}/'])
+            # SelahOS Repair icon on the desktop so a broken install can
+            # always be fixed without reaching for documentation
+            sh(['mkdir', '-p', f'{home}/Desktop'])
+            sh(['cp', '/usr/share/applications/selah-repair.desktop',
+                f'{home}/Desktop/'])
+            sh(['chmod', '755', f'{home}/Desktop/selah-repair.desktop'])
+            sh(['arch-chroot', '/mnt', 'chown', '-R',
+                f'{username}:{username}', f'/home/{username}'])
         # SDDM config
         sddm_conf = '/mnt/etc/sddm.conf.d/10-selah-theme.conf'
         _os.makedirs(_os.path.dirname(sddm_conf), exist_ok=True)
@@ -1295,10 +1469,12 @@ class InstallThread(QThread):
 
 # ── Screen 6: Complete ────────────────────────────────────────
 class DoneScreen(QWidget):
-    def __init__(self, success, message=''):
+    def __init__(self, success, message='', preflight_exit=-1, preflight_output=''):
         super().__init__()
         self.success = success
         self.message = message
+        self.preflight_exit = preflight_exit
+        self.preflight_output = preflight_output
         self._build()
 
     def _build(self):
@@ -1328,12 +1504,46 @@ class DoneScreen(QWidget):
             inst2.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(inst2)
 
+            # bake-fixes handoff Task 3: surface the post-install preflight
+            # result. A FAIL blocks the restart button until explicitly
+            # acknowledged; a WARN is shown but doesn't block (matches the
+            # script's own exit-code contract: 2 = fail, 1 = warn, 0 = clean).
+            ack_box = None
+            if self.preflight_exit in (1, 2):
+                is_fail = self.preflight_exit == 2
+                color = C['red'] if is_fail else C['gold']
+                summary_title = QLabel(
+                    'Pre-flight check found issues' if is_fail
+                    else 'Pre-flight check found warnings')
+                summary_title.setFont(QFont('Inter', 13, QFont.Weight.Bold))
+                summary_title.setStyleSheet(f"color: {color}; background: transparent;")
+                summary_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                layout.addWidget(summary_title)
+
+                out = QPlainTextEdit(self.preflight_output.strip() or '(no output)')
+                out.setReadOnly(True)
+                out.setFixedHeight(140)
+                out.setFont(QFont('JetBrains Mono', 10))
+                out.setStyleSheet(
+                    f"background: {C['bg2']}; color: {C['text2']}; "
+                    f"border: 1px solid {color}; border-radius: 8px; padding: 8px;")
+                layout.addWidget(out)
+
+                if is_fail:
+                    ack_box = QCheckBox('I understand this system has unresolved issues, and want to restart anyway')
+                    ack_box.setFont(QFont('Inter', 12))
+                    ack_box.setStyleSheet(f"color: {C['text2']}; background: transparent;")
+                    layout.addWidget(ack_box, alignment=Qt.AlignmentFlag.AlignCenter)
+
             layout.addSpacing(32)
 
             btn = QPushButton('Restart Now')
             btn.setFixedSize(200, 56)
             btn.setFont(QFont('Inter', 16, QFont.Weight.Bold))
             btn.clicked.connect(lambda: subprocess.run(['reboot']))
+            if ack_box is not None:
+                btn.setEnabled(False)
+                ack_box.toggled.connect(btn.setEnabled)
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
             layout.addStretch()
@@ -1485,8 +1695,8 @@ class SelahSetup(QMainWindow):
         self._goto(4)
         self.install.start(self.install_config)
 
-    def _install_done(self, success, msg):
-        done = DoneScreen(success, msg)
+    def _install_done(self, success, msg, preflight_exit=-1, preflight_output=''):
+        done = DoneScreen(success, msg, preflight_exit, preflight_output)
         self.stack.addWidget(done)
         self.stack.setCurrentWidget(done)
         self.step_label.setText('Complete' if success else 'Error')
@@ -1498,6 +1708,12 @@ def main():
     if os.geteuid() != 0:
         print("Selah Setup must be run as root.")
         print("Try: sudo selah-setup  or  kdesu selah-setup")
+        sys.exit(1)
+    # /run/archiso only exists on a live-ISO boot; refuse to run on an
+    # installed system, where Step 0 would wipe the boot disk
+    if not os.path.exists('/run/archiso'):
+        print("Selah Setup is the SelahOS installer and only runs from the live USB.")
+        print("This looks like an installed system — refusing to continue.")
         sys.exit(1)
     app = QApplication(sys.argv)
     app.setApplicationName('Selah Setup')
