@@ -390,6 +390,7 @@ sequoia-sq
 sg3_utils
 squashfs-tools
 terminus-font
+pciutils
 testdisk
 udftools
 usbmuxd

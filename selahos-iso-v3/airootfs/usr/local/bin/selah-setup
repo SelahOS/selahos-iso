@@ -1094,6 +1094,13 @@ class InstallThread(QThread):
             # live ISO (packages.x86_64 ships it there). Builds via dkms
             # against the headers above during pacstrap.
             'broadcom-wl-dkms',
+            # SELAH-50 addendum: selah-preflight-check's PCI/USB hardware
+            # scan (WiFi driver binding, Bluetooth chip, generic device
+            # enumeration) needs lspci/lsusb. Only pulled in as an indirect
+            # dependency on the live ISO — never pacstrapped here, so every
+            # installed system previously had neither, and those checks
+            # would have silently no-op'd post-install instead of running.
+            'pciutils', 'usbutils',
         ]
         if is_apple:
             # SelahSeedCore can recommend linux-lts for older Mac GPUs (hardware-db.json

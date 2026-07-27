@@ -144,6 +144,15 @@ grep -qs "'acpid'" "$SFS/usr/local/bin/selah-setup" \
     && ok "installer pacstraps acpid (selah-clamshell needs it running)" \
     || bad "installer missing acpid pacstrap — selah-clamshell will never fire on installed systems"
 
+# 8. SELAH-50 addendum: preflight's PCI/USB hardware scan needs lspci/lsusb
+# on the INSTALLED system, not just the live ISO
+grep -qs "'pciutils'" "$SFS/usr/local/bin/selah-setup" \
+    && ok "installer pacstraps pciutils (preflight's PCI scan needs lspci)" \
+    || bad "installer missing pciutils pacstrap — selah-preflight-check's hardware scan would silently no-op post-install"
+grep -qs "'usbutils'" "$SFS/usr/local/bin/selah-setup" \
+    && ok "installer pacstraps usbutils (preflight's Bluetooth check needs lsusb)" \
+    || bad "installer missing usbutils pacstrap"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "PRE-FLIGHT PASSED — safe to flash"

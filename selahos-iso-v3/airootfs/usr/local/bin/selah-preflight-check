@@ -6,6 +6,15 @@
 # hook with quiet/splash still set, the Qt5 stack missing, and
 # selahbridgepro/selah-apps unable to install.
 #
+# Extended same day (SELAH-50 addendum, morning) beyond GPU to the
+# general "hardware present but not properly driven" pattern that's
+# hit WiFi (SELAH-41), audio (CS8409), and Bluetooth firmware on this
+# project already: full PCI enumeration, WiFi driver-bound check,
+# CS8409 codec check, Broadcom Bluetooth firmware check. This is
+# Part 1's first slice toward SELAH-50 (SelahSeedCore GPU/PCIe
+# Detection & Safe First Boot) — SelahSeedCore itself is the intended
+# longer-term home for this logic, not a permanent fork of it.
+#
 # This is deliberately NOT the same tool as tools/iso-preflight.sh
 # (a build-host script that mounts a *built ISO's* squashfs before
 # it's ever flashed). This one runs in-place against a live root —
@@ -109,7 +118,29 @@ if [ -f /etc/modprobe.d/selah-broadcom.conf ]; then
     fi
 fi
 
-# ── 6. GPU: NVIDIA generation check (bake-fixes handoff Task 4) ───────
+# ── 6. Hardware bus scan (SELAH-50 addendum, 2026-07-27 morning) ──────
+# The pattern this project keeps hitting: hardware is present on the
+# PCI/USB bus but not properly driven — WiFi (BCM4350: wrong driver),
+# audio (CS8409: needs an out-of-tree driver), Bluetooth (BCM4350C0:
+# needs specific firmware), GPU (last night: needs a fallback driver).
+# This section generalizes past "GPU only" — GPU checks below are the
+# original bake-fixes handoff Task 4 logic, unchanged. Tracked against
+# SELAH-50 (SelahSeedCore GPU/PCIe Detection & Safe First Boot), not as
+# a disconnected effort — this preflight script is Part 1's first
+# slice; SelahSeedCore itself is the longer-term home for this logic.
+
+# 6.0 Full PCI enumeration — visibility first, even without a specific
+# check for a given device yet (SELAH-45's "say what's unknown, don't
+# pretend everything's fine" principle).
+if command -v lspci &>/dev/null; then
+    echo "  --- lspci -nn (full device list) ---"
+    lspci -nn 2>/dev/null | sed 's/^/  | /'
+    echo "  ---"
+else
+    warn "lspci not available — PCI device scan skipped entirely (pciutils not installed)"
+fi
+
+# 6.1 GPU: NVIDIA generation check (bake-fixes handoff Task 4)
 # First pass, simple name-pattern match — not the final architecture.
 # Extend as SELAH-45's hardware-compat-db matures.
 GPU_LINE=""
@@ -125,6 +156,82 @@ if [ -n "$GPU_LINE" ]; then
         fi
     else
         warn "NVIDIA GPU detected, generation not in the Pascal-or-older pattern list — nouveau support may be poor or absent; consider the proprietary nvidia package"
+    fi
+fi
+
+# 6.2 WiFi: Broadcom chip detected AND the correct driver actually
+# bound (not just installed/configured — a driver can be present and
+# still not be the one the kernel picked). Same chip->driver table as
+# selah-wifi-driver; keep both in sync if that table changes.
+if command -v lspci &>/dev/null; then
+    for dev in /sys/bus/pci/devices/*; do
+        [ -e "$dev/vendor" ] || continue
+        read -r vendor < "$dev/vendor" 2>/dev/null
+        [ "$vendor" = "0x14e4" ] || continue
+        read -r class < "$dev/class" 2>/dev/null
+        case "$class" in 0x0280*) ;; *) continue ;; esac
+        read -r chip < "$dev/device" 2>/dev/null
+
+        expected=""
+        case "$chip" in
+            0x43a3|0x43ba|0x43dc|0x4464|0x4488) expected="brcmfmac" ;;
+            0x4331|0x43a0|0x43b1|0x4353|0x4357|0x432b|0x4727) expected="wl" ;;
+            *) expected="" ;;
+        esac
+
+        bound="none"
+        [ -e "$dev/driver" ] && bound="$(basename "$(readlink -f "$dev/driver")")"
+
+        if [ -z "$expected" ]; then
+            warn "unrecognized Broadcom Wi-Fi chip $chip — bound driver: $bound (no known-issue entry; extend selah-wifi-driver's table)"
+        elif [ "$bound" = "$expected" ]; then
+            ok "Broadcom Wi-Fi chip $chip: $expected bound (correct)"
+        else
+            bad "Broadcom Wi-Fi chip $chip: expected $expected but $bound is bound — Wi-Fi likely non-functional"
+        fi
+        break
+    done
+fi
+
+# 6.3 Audio: CS8409 codec (MacBook Pro 14,1 and similar) needs the
+# out-of-tree snd_hda_macbookpro driver — detected via codec presence,
+# not machine identity, so this catches it regardless of DMI match.
+CS8409_PRESENT=0
+if ls /proc/asound/card*/codec#* &>/dev/null; then
+    grep -lqi "CS8409" /proc/asound/card*/codec#* 2>/dev/null && CS8409_PRESENT=1
+fi
+if [ "$CS8409_PRESENT" -eq 1 ]; then
+    if lsmod 2>/dev/null | grep -q snd_hda_macbookpro; then
+        ok "CS8409 codec detected: snd_hda_macbookpro loaded"
+    else
+        bad "CS8409 codec detected but snd_hda_macbookpro is not loaded — audio will not work (run selah-audio-fix, then a full cold shutdown)"
+    fi
+fi
+
+# 6.4 Bluetooth: Broadcom BT combo chip detected, but is the firmware
+# it needs actually present? A service can be "active" with no real
+# firmware loaded, exactly like SDDM was "active" with no real Qt5
+# stack — so check the firmware directory, not just the service.
+if command -v lsusb &>/dev/null; then
+    BT_LINE="$(lsusb 2>/dev/null | grep -iE 'bluetooth|BCM' | head -1)"
+    if [ -n "$BT_LINE" ]; then
+        if [ -d /usr/lib/firmware/brcm ] && [ -n "$(ls -A /usr/lib/firmware/brcm 2>/dev/null)" ]; then
+            ok "Broadcom Bluetooth chip detected, /usr/lib/firmware/brcm populated"
+        else
+            bad "Broadcom Bluetooth chip detected but /usr/lib/firmware/brcm is missing or empty — chip will load with no working firmware"
+        fi
+        # Best-effort precise check: the kernel logs the exact .hcd it
+        # wanted and whether the load succeeded. Only available when a
+        # real kernel log exists for this boot (not inside an
+        # arch-chroot at install time, where dmesg reflects the live
+        # session instead) — skip quietly rather than false-flag.
+        if command -v dmesg &>/dev/null && dmesg 2>/dev/null | grep -qi "brcm/.*\.hcd"; then
+            if dmesg 2>/dev/null | grep -qi "Direct firmware load for brcm/.*\.hcd failed"; then
+                bad "kernel log: Bluetooth firmware load failed (missing .hcd file for this exact chip)"
+            else
+                ok "kernel log: Bluetooth firmware loaded successfully"
+            fi
+        fi
     fi
 fi
 
