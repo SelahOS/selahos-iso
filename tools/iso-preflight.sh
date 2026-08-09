@@ -182,6 +182,22 @@ else
     ok "CS8409 driver (snd_hda_macbookpro) dkms-built successfully for at least one kernel"
 fi
 
+# 11. selah-postflight-check: live-system hardware health tool ships,
+# its pacman dependencies (bluez/bluez-utils for Bluetooth, smartmontools
+# for disk health, iw for live WiFi power-save state) are pacstrapped by
+# the installer, and it has an app-menu launcher.
+[ -x "$SFS/usr/local/bin/selah-postflight-check" ] \
+    && ok "selah-postflight-check present + executable" \
+    || bad "selah-postflight-check missing or not executable"
+for pkg in bluez bluez-utils smartmontools iw; do
+    grep -qs "'$pkg'" "$SFS/usr/local/bin/selah-setup" \
+        && ok "installer pacstraps $pkg" \
+        || bad "installer never pacstraps $pkg — selah-postflight-check dependency missing on installs"
+done
+[ -f "$SFS/usr/share/applications/selah-postflight-check.desktop" ] \
+    && ok "selah-postflight-check has an app-menu launcher" \
+    || bad "selah-postflight-check has no .desktop launcher"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "PRE-FLIGHT PASSED — safe to flash"

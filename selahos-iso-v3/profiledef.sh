@@ -65,6 +65,7 @@ file_permissions=(
   ["/usr/local/bin/selah-clamshell"]="0:0:755"
   ["/usr/local/bin/selahos-device-editors"]="0:0:755"
   ["/usr/local/bin/selah-preflight-check"]="0:0:755"
+  ["/usr/local/bin/selah-postflight-check"]="0:0:755"
   ["/usr/local/lib/selahos/device-bridge/selahos-device-editors"]="0:0:755"
   ["/usr/local/lib/selahos/device-bridge/lib/auto-init.sh"]="0:0:755"
   ["/usr/local/lib/selahos/device-bridge/lib/udev-init.sh"]="0:0:755"

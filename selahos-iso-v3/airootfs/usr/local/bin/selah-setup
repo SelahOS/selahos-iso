@@ -1101,6 +1101,15 @@ class InstallThread(QThread):
             # installed system previously had neither, and those checks
             # would have silently no-op'd post-install instead of running.
             'pciutils', 'usbutils',
+            # CLAUDE-CODE-COMPLETE-MASTER-PLAN Phase 2.6: shipped on the
+            # live ISO (packages.x86_64) but never pacstrapped here — same
+            # "live-only" gap class as pciutils/usbutils above. Without
+            # bluez/bluez-utils the Bluetooth daemon itself is absent on
+            # installed systems (not just diagnostics); smartmontools and
+            # iw are postflight-check dependencies (disk health, WiFi
+            # driver/powersave state) that would silently no-op without
+            # this.
+            'bluez', 'bluez-utils', 'smartmontools', 'iw',
         ]
         if is_apple:
             # SelahSeedCore can recommend linux-lts for older Mac GPUs (hardware-db.json

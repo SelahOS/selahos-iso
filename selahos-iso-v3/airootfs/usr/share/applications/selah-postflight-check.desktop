@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Health Check
+GenericName=Hardware Diagnostics
+Comment=Diagnose WiFi, sleep, DKMS, audio, disk and Bluetooth issues on this system
+Exec=konsole -e sudo /usr/local/bin/selah-postflight-check
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Settings;
+Keywords=SelahOS;health;diagnose;wifi;sleep;dkms;audio;disk;smart;bluetooth;postflight;
+StartupNotify=true

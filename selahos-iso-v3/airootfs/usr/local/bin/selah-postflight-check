@@ -1,0 +1,281 @@
+#!/bin/bash
+# selah-postflight-check.sh — v2
+# SelahOS Postflight — Live System Health Check & Repair
+#
+# Usage:
+#   sudo bash selah-postflight-check.sh          # diagnose only (safe, read-only)
+#   sudo bash selah-postflight-check.sh --fix    # diagnose AND repair known issues
+#
+# Exit codes: 0 = all pass, 1 = warnings, 2 = failures
+
+FIX_MODE=0
+[[ "$1" == "--fix" ]] && FIX_MODE=1
+
+PASS=0; WARN=0; FAIL=0; FIXED=0
+pass() { echo "  [PASS] $1"; PASS=$((PASS+1)); }
+warn() { echo "  [WARN] $1"; WARN=$((WARN+1)); }
+fail() { echo "  [FAIL] $1"; FAIL=$((FAIL+1)); }
+fixed(){ echo "  [FIXED] $1"; FIXED=$((FIXED+1)); }
+info() { echo "  [INFO] $1"; }
+
+echo "================================================================"
+echo " SelahOS Postflight v2 — Live System Health Check"
+echo " $(date)"
+[[ $FIX_MODE -eq 1 ]] && echo " MODE: DIAGNOSE + REPAIR" || echo " MODE: diagnose only (use --fix to repair)"
+echo "================================================================"
+
+# ================================================================
+echo ""
+echo "-- 1. WiFi: WPA3/SAE compatibility (Broadcom) --"
+# ================================================================
+# Known issue: brcmfmac on older Broadcom chips (BCM4350 etc.) cannot
+# reliably complete WPA3/SAE handshake. Symptom: endless
+# associate -> "association took too long" -> ssid-not-found loop.
+
+BRCM_CHIP=$(lspci 2>/dev/null | grep -i "network controller" | grep -i broadcom)
+if [ -n "$BRCM_CHIP" ]; then
+    info "Broadcom WiFi detected: $(echo "$BRCM_CHIP" | sed 's/.*: //')"
+
+    SAE_CONNS=$(nmcli -t -f NAME connection show 2>/dev/null | while read -r c; do
+        [ -z "$c" ] && continue
+        KM=$(nmcli connection show "$c" 2>/dev/null | grep "wireless-security.key-mgmt:" | awk '{print $2}')
+        [ "$KM" == "sae" ] && echo "$c"
+    done)
+
+    if [ -n "$SAE_CONNS" ]; then
+        fail "WiFi profile(s) set to WPA3/SAE on a Broadcom chip known to fail with it:"
+        echo "$SAE_CONNS" | sed 's/^/         /'
+        echo "         Symptom: connects, times out, retries forever ('ssid-not-found')"
+        if [ $FIX_MODE -eq 1 ]; then
+            echo "$SAE_CONNS" | while read -r c; do
+                if nmcli connection modify "$c" wifi-sec.key-mgmt wpa-psk 2>/dev/null; then
+                    fixed "Set '$c' to WPA2 (wpa-psk)"
+                else
+                    fail "Could not modify '$c'"
+                fi
+            done
+            info "Reconnect with: nmcli connection up \"<name>\""
+        else
+            info "Fix: sudo nmcli connection modify \"<name>\" wifi-sec.key-mgmt wpa-psk"
+        fi
+    else
+        pass "No WPA3/SAE profiles on Broadcom hardware"
+    fi
+
+    # WiFi power save
+    if [ ! -f /etc/NetworkManager/conf.d/wifi-powersave.conf ]; then
+        warn "WiFi power saving not explicitly disabled (can cause intermittent drops)"
+        if [ $FIX_MODE -eq 1 ]; then
+            mkdir -p /etc/NetworkManager/conf.d
+            printf '[connection]\nwifi.powersave = 2\n' > /etc/NetworkManager/conf.d/wifi-powersave.conf
+            fixed "Disabled WiFi power saving (restart NetworkManager to apply)"
+        fi
+    else
+        pass "WiFi power saving configuration present"
+    fi
+
+    # The config file above only takes effect on the next NM-managed
+    # association; check the driver's actual live state so a config
+    # written but not yet applied (no restart since) still shows up.
+    if command -v iw &>/dev/null; then
+        WIFI_IF=$(iw dev 2>/dev/null | awk '$1=="Interface"{print $2; exit}')
+        if [ -n "$WIFI_IF" ]; then
+            PS=$(iw dev "$WIFI_IF" get power_save 2>/dev/null | awk '{print $NF}')
+            if [ "$PS" = "off" ]; then
+                pass "Live WiFi power save is off on $WIFI_IF"
+            elif [ "$PS" = "on" ]; then
+                warn "Live WiFi power save is ON on $WIFI_IF (config may not be applied yet)"
+                if [ $FIX_MODE -eq 1 ]; then
+                    iw dev "$WIFI_IF" set power_save off 2>/dev/null \
+                        && fixed "Set power_save off on $WIFI_IF" \
+                        || fail "Could not set power_save on $WIFI_IF"
+                else
+                    info "Fix: sudo iw dev $WIFI_IF set power_save off (or restart NetworkManager)"
+                fi
+            else
+                info "Could not read live power_save state for $WIFI_IF"
+            fi
+        else
+            info "No active WiFi interface to check live power_save state"
+        fi
+    else
+        warn "iw not installed — cannot verify live WiFi power-save state (fix: pacman -S iw)"
+    fi
+else
+    info "No Broadcom WiFi detected — WPA3 check not applicable"
+fi
+
+# ================================================================
+echo ""
+echo "-- 2. Sleep / suspend --"
+# ================================================================
+MASKED=""
+for t in sleep.target suspend.target hibernate.target suspend-then-hibernate.target; do
+    if systemctl is-enabled "$t" 2>&1 | grep -q masked; then
+        MASKED="$MASKED $t"
+    fi
+done
+
+if [ -n "$MASKED" ]; then
+    fail "Sleep targets are MASKED — machine cannot suspend (drains battery, overheats in bag):$MASKED"
+    if [ $FIX_MODE -eq 1 ]; then
+        systemctl unmask $MASKED >/dev/null 2>&1 && fixed "Unmasked:$MASKED"
+    else
+        info "Fix: sudo systemctl unmask$MASKED"
+    fi
+else
+    pass "Sleep targets not masked"
+fi
+
+if [ -f /sys/power/mem_sleep ]; then
+    if grep -q "\[deep\]" /sys/power/mem_sleep; then
+        pass "Deep sleep selected ($(cat /sys/power/mem_sleep))"
+    else
+        warn "Deep sleep NOT selected: $(cat /sys/power/mem_sleep) — add mem_sleep_default=deep to GRUB cmdline"
+    fi
+fi
+
+for pkg in tlp thermald; do
+    if pacman -Q "$pkg" &>/dev/null; then
+        systemctl is-active --quiet "$pkg" && pass "$pkg active" || warn "$pkg installed but not active"
+    else
+        warn "$pkg not installed"
+    fi
+done
+
+# ================================================================
+echo ""
+echo "-- 3. DKMS module health --"
+# ================================================================
+if ! command -v dkms &>/dev/null; then
+    fail "DKMS is NOT INSTALLED — out-of-tree drivers (WiFi, audio, FaceTime cam) cannot build or survive kernel updates"
+    if [ $FIX_MODE -eq 1 ]; then
+        if pacman -S --noconfirm --needed dkms linux-zen-headers &>/dev/null; then
+            fixed "Installed dkms + kernel headers (reboot recommended)"
+        else
+            fail "DKMS install failed — check network connection"
+        fi
+    else
+        info "Fix: sudo pacman -S dkms linux-zen-headers"
+    fi
+else
+    pass "DKMS installed"
+    KVER=$(uname -r)
+    for pkg in broadcom-wl-dkms snd-hda-macbookpro-dkms-git facetimehd-dkms; do
+        if pacman -Q "$pkg" &>/dev/null; then
+            MODNAME=$(echo "$pkg" | sed 's/-dkms.*//; s/snd-hda-macbookpro/snd-hda-macbookpro/')
+            if dkms status 2>/dev/null | grep -q "$KVER"; then
+                pass "$pkg present, DKMS has builds for $KVER"
+            else
+                fail "$pkg installed but NOT built for running kernel $KVER"
+                if [ $FIX_MODE -eq 1 ]; then
+                    dkms autoinstall -k "$KVER" &>/dev/null && fixed "Rebuilt DKMS modules for $KVER" || fail "DKMS rebuild failed (kernel headers missing?)"
+                fi
+            fi
+        else
+            warn "$pkg NOT installed"
+            [[ $FIX_MODE -eq 1 ]] && { pacman -S --noconfirm --needed "$pkg" &>/dev/null && fixed "Installed $pkg" || warn "Could not install $pkg (may need AUR)"; }
+        fi
+    done
+fi
+
+# ================================================================
+echo ""
+echo "-- 4. Audio (CS8409 / Apple codecs) --"
+# ================================================================
+if command -v aplay &>/dev/null; then
+    CARDS=$(aplay -l 2>/dev/null | grep "^card")
+    if [ -z "$CARDS" ]; then
+        fail "No audio playback devices detected"
+        if pacman -Q snd-hda-macbookpro-dkms-git &>/dev/null; then
+            info "snd-hda-macbookpro is installed — likely a DKMS build issue (see section 3)"
+        else
+            fail "snd-hda-macbookpro-dkms-git NOT installed — required for Apple CS8409 audio"
+            [[ $FIX_MODE -eq 1 ]] && info "Install via AUR; not available in standard repos"
+        fi
+    else
+        pass "Audio devices detected:"
+        echo "$CARDS" | sed 's/^/         /'
+    fi
+    lsmod | grep -q snd_hda_macbookpro && pass "snd_hda_macbookpro module loaded" || warn "snd_hda_macbookpro module not loaded"
+else
+    warn "alsa-utils not installed — cannot verify audio (fix: pacman -S alsa-utils)"
+fi
+
+# ================================================================
+echo ""
+echo "-- 5. Disk health (SMART) --"
+# ================================================================
+if ! command -v smartctl &>/dev/null; then
+    warn "smartmontools not installed — cannot check disk health"
+    if [ $FIX_MODE -eq 1 ]; then
+        pacman -S --noconfirm --needed smartmontools &>/dev/null \
+            && fixed "Installed smartmontools" \
+            || fail "Could not install smartmontools"
+    else
+        info "Fix: sudo pacman -S smartmontools"
+    fi
+else
+    DISKS=$(lsblk -dno NAME,TYPE 2>/dev/null | awk '$2=="disk"{print $1}')
+    if [ -z "$DISKS" ]; then
+        info "No block devices found to check"
+    fi
+    for d in $DISKS; do
+        DEV="/dev/$d"
+        SMART_OUT=$(smartctl -H "$DEV" 2>/dev/null)
+        if [ -z "$SMART_OUT" ]; then
+            info "$DEV: SMART not accessible (USB bridge or virtual disk?)"
+        elif echo "$SMART_OUT" | grep -Eqi "overall-health.*passed|health status: ok"; then
+            pass "$DEV: SMART health OK"
+        elif echo "$SMART_OUT" | grep -Eqi "overall-health|health status"; then
+            fail "$DEV: SMART reports a problem — back up data"
+            echo "$SMART_OUT" | grep -Ei "overall-health|health status" | sed 's/^/         /'
+        else
+            info "$DEV: SMART status line not found (unsupported device?)"
+        fi
+    done
+fi
+
+# ================================================================
+echo ""
+echo "-- 6. Orphaned kernel modules --"
+# ================================================================
+ORPHANS=""
+for d in /usr/lib/modules/*/; do
+    [ -d "$d" ] || continue
+    pacman -Qo "$d" &>/dev/null || ORPHANS="$ORPHANS $(basename "$d")"
+done
+if [ -n "$ORPHANS" ]; then
+    fail "Orphaned kernel module directories (no owning package) — booting these loses WiFi/audio/Bluetooth:$ORPHANS"
+    if [ $FIX_MODE -eq 1 ]; then
+        for o in $ORPHANS; do rm -rf "/usr/lib/modules/$o"; done
+        grub-mkconfig -o /boot/grub/grub.cfg &>/dev/null
+        fixed "Removed orphaned kernels and regenerated GRUB"
+    else
+        info "Fix: sudo rm -rf /usr/lib/modules/<orphan> && sudo grub-mkconfig -o /boot/grub/grub.cfg"
+    fi
+else
+    pass "No orphaned kernel directories"
+fi
+
+# ================================================================
+echo ""
+echo "-- 7. Bluetooth --"
+# ================================================================
+if bluetoothctl show 2>/dev/null | grep -q Controller; then
+    pass "Bluetooth controller present"
+    if dmesg 2>/dev/null | grep -qi "Patch file not found"; then
+        warn "Bluetooth firmware patch missing (known BCM4350C0 limitation — no known-good file yet)"
+    fi
+else
+    warn "No Bluetooth controller visible"
+fi
+
+# ================================================================
+echo ""
+echo "================================================================"
+echo " SUMMARY: $PASS passed, $WARN warnings, $FAIL failures, $FIXED fixed"
+echo "================================================================"
+[[ $FIX_MODE -eq 1 && $FIXED -gt 0 ]] && echo " Reboot recommended to apply all repairs."
+[[ $FIX_MODE -eq 0 && $FAIL -gt 0 ]] && echo " Re-run with --fix to repair automatically."
+[ $FAIL -gt 0 ] && exit 2 || { [ $WARN -gt 0 ] && exit 1 || exit 0; }

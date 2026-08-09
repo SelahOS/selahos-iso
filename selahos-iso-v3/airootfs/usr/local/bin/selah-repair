@@ -232,6 +232,9 @@ if [ "${#missing_pkgs[@]}" -gt 0 ] && [ "$CHECK" = 0 ]; then
 fi
 
 echo
+echo "For hardware-level issues (WiFi, sleep/suspend, DKMS, audio, disk,"
+echo "Bluetooth) not covered above, run: sudo selah-postflight-check"
+echo
 echo "──────────────────────────────────────────────"
 echo "Result: $OK ok, $FIXED fixed, $MISSING still missing"
 if [ "$MISSING" -gt 0 ] && [ -z "$DONOR" ]; then
