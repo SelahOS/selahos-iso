@@ -182,6 +182,19 @@ else
     ok "CS8409 driver (snd_hda_macbookpro) dkms-built successfully for at least one kernel"
 fi
 
+# 10. bake-fixes handoff Task 6: Discover has no app backend without
+# flatpak installed AND a Flathub remote configured on the INSTALLED
+# system (live-ISO packages.x86_64 having flatpak isn't enough).
+grep -qs "'flatpak'" "$SFS/usr/local/bin/selah-setup" \
+    && ok "installer pacstraps flatpak" \
+    || bad "installer never pacstraps flatpak — Discover has no app backend on installs"
+grep -qs "flatpak.*remote-add" "$SFS/usr/local/bin/selah-setup" \
+    && ok "installer adds the flathub remote" \
+    || bad "installer never adds a flathub remote — Discover shows the 'not configured' prompt Task 6 reported"
+grep -qs "flathub" "$SFS/usr/local/bin/selah-repair" \
+    && ok "selah-repair can add flathub remote (already-flashed systems)" \
+    || bad "selah-repair has no flathub remote fallback"
+
 # 11. selah-postflight-check: live-system hardware health tool ships,
 # its pacman dependencies (bluez/bluez-utils for Bluetooth, smartmontools
 # for disk health, iw for live WiFi power-save state) are pacstrapped by

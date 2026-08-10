@@ -1166,7 +1166,21 @@ class InstallThread(QThread):
             # it, NVIDIA machines have no X11/XWayland driver at all until
             # a user manually installs one post-boot.
             'xf86-video-nouveau',
+            # bake-fixes handoff Task 6: Discover has no app backend without
+            # this — flatpak package alone isn't enough, Discover also needs
+            # a configured remote (see flatpak remote-add below).
+            'flatpak',
         ])
+        # bake-fixes handoff Task 6: Flathub must be a default remote, not a
+        # manual step — add it now while we're online for pacstrap anyway.
+        # --if-not-exists makes this safe to re-run (e.g. via selah-repair).
+        r = chroot(['flatpak', 'remote-add', '--if-not-exists', 'flathub',
+                     'https://dl.flathub.org/repo/flathub.flatpakrepo'])
+        if r.returncode != 0:
+            log.write("WARNING: flatpak remote-add flathub failed (no network at "
+                       "install time?) -- Discover will have no app backend until "
+                       "a user runs it manually or selah-repair re-adds it.\n")
+            log.flush()
 
         # Step 5: Audio
         self._step(5)

@@ -213,7 +213,7 @@ done
 
 echo
 echo "[8/8] Packages"
-PKGS=(fastfetch kvantum kvantum-qt5 python-pyqt6 python-mido python-rtmidi)
+PKGS=(fastfetch kvantum kvantum-qt5 python-pyqt6 python-mido python-rtmidi flatpak)
 missing_pkgs=()
 for p in "${PKGS[@]}"; do
     pacman -Qq "$p" >/dev/null 2>&1 && say_ok "$p" || { say_miss "$p"; missing_pkgs+=("$p"); }
@@ -228,6 +228,25 @@ if [ "${#missing_pkgs[@]}" -gt 0 ] && [ "$CHECK" = 0 ]; then
         fi
     else
         echo "  no network — connect and re-run to install: ${missing_pkgs[*]}"
+    fi
+fi
+
+# bake-fixes handoff Task 6: Discover needs flatpak AND a configured
+# remote — a system that already has the package but was installed
+# before this fix (or hit the "no network at install time" case above)
+# still has no Flathub remote. --if-not-exists makes this idempotent.
+if command -v flatpak >/dev/null 2>&1; then
+    if flatpak remote-list 2>/dev/null | grep -q '^flathub'; then
+        say_ok "flathub remote"
+    elif [ "$CHECK" = 1 ]; then
+        say_miss "flathub remote not configured"
+    else
+        if flatpak remote-add --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo 2>/dev/null; then
+            say_fix "flathub remote added"
+        else
+            echo "  flatpak remote-add failed — check network"
+        fi
     fi
 fi
 

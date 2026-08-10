@@ -15,6 +15,14 @@
 # Detection & Safe First Boot) — SelahSeedCore itself is the intended
 # longer-term home for this logic, not a permanent fork of it.
 #
+# 2026-07-27 night: this version had drifted from the literal file
+# attached to the handoff (the rewrite above was more thorough in some
+# ways but silently dropped two of the original checks) — restored the
+# sddm-greeter ldd dependency check and kernel/initramfs/grub.cfg
+# sanity check verbatim in spirit, plus added the Task 6 Discover/
+# flatpak-remote check the handoff also required and which no version
+# of this script had covered yet.
+#
 # This is deliberately NOT the same tool as tools/iso-preflight.sh
 # (a build-host script that mounts a *built ISO's* squashfs before
 # it's ever flashed). This one runs in-place against a live root —
@@ -68,6 +76,22 @@ if [ "${#missing_qt5[@]}" -eq 0 ]; then
     ok "Qt5/QML stack present (SDDM greeter can render)"
 else
     bad "Qt5/QML stack incomplete — missing: ${missing_qt5[*]} (SDDM greets to a black screen)"
+fi
+
+# ── 2b. sddm-greeter dependency resolution ─────────────────────────────
+# Belt and suspenders vs. check 2 above: the package list can be
+# complete and ldd can still find an unresolved symbol/lib (e.g. after
+# a partial upgrade), which is exactly what turns into a black screen
+# even though every qt5-* package reports "installed".
+if [ -f /usr/bin/sddm-greeter ]; then
+    missing_libs=$(ldd /usr/bin/sddm-greeter 2>/dev/null | grep "not found")
+    if [ -z "$missing_libs" ]; then
+        ok "sddm-greeter: all dependencies resolved"
+    else
+        bad "sddm-greeter has missing dependencies: $(echo "$missing_libs" | tr '\n' ';')"
+    fi
+else
+    bad "/usr/bin/sddm-greeter does not exist at all — sddm package likely incomplete"
 fi
 
 # ── 3. SelahOS product repo + selahbridgepro/selah-apps ───────────────
@@ -251,6 +275,37 @@ fi
 if command -v systemctl &>/dev/null; then
     systemctl is-enabled NetworkManager &>/dev/null \
         && ok "NetworkManager enabled" || bad "NetworkManager not enabled"
+fi
+
+# ── 8. Kernel + initramfs + bootloader sanity ──────────────────────────
+# Only meaningful on an installed target (arch-chroot /mnt or a booted
+# installed system) — on the live ISO itself these paths don't apply the
+# same way, so skip quietly there rather than false-flag.
+if [ -d /boot ] && [ ! -d /run/archiso ]; then
+    if compgen -G "/boot/initramfs-linux*.img" >/dev/null; then
+        ok "initramfs image exists ($(ls /boot/initramfs-linux*.img | tr '\n' ' '))"
+    else
+        bad "no initramfs image found under /boot — check mkinitcpio output for errors"
+    fi
+    if [ -f /boot/grub/grub.cfg ]; then
+        ok "grub.cfg exists"
+    else
+        bad "grub.cfg NOT found — GRUB was never generated (run: grub-mkconfig -o /boot/grub/grub.cfg)"
+    fi
+fi
+
+# ── 9. Discover app backend (bake-fixes handoff Task 6) ────────────────
+# flatpak alone isn't enough — Discover also needs a configured remote,
+# which is the actual symptom Task 6 was filed against ("SelahOS is not
+# configured for installing apps through Discover").
+if pacman -Qq flatpak &>/dev/null; then
+    if command -v flatpak &>/dev/null && flatpak remote-list 2>/dev/null | grep -q '^flathub'; then
+        ok "flatpak installed + flathub remote configured"
+    else
+        bad "flatpak installed but flathub remote is not configured — Discover has no app backend"
+    fi
+else
+    bad "flatpak not installed — Discover has no app backend at all"
 fi
 
 echo
