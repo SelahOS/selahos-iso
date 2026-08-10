@@ -1,0 +1,165 @@
+# Maintainer: SelahOS Contributors <support@selahtechnologies.com>
+
+pkgname=selahos-device-scripting
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Macro automation and scripting system for SelahOS Device Bridge"
+arch=('any')
+url="https://github.com/SelahOS/selahos-iso"
+license=('GPL3')
+depends=('python' 'python-pydantic' 'python-fastapi')
+optdepends=(
+    'selahos-device-editors: Device editors'
+    'selahos-device-bridge-web: Web interface'
+    'python-uvicorn: API server'
+)
+makedepends=('git')
+source=("https://github.com/SelahOS/selahos-iso/releases/download/v${pkgver}/device-scripting-v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir"
+
+    # Install Python module
+    install -d "$pkgdir/usr/lib/python3.11/site-packages/selahos_scripting"
+
+    cp -r device-scripting-${pkgver}/usr/local/lib/python3/dist-packages/selahos/* \
+        "$pkgdir/usr/lib/python3.11/site-packages/selahos_scripting/"
+
+    # Create symlink for compatibility
+    install -d "$pkgdir/usr/local/lib/python3/dist-packages"
+    ln -s /usr/lib/python3.11/site-packages/selahos_scripting \
+        "$pkgdir/usr/local/lib/python3/dist-packages/selahos_scripting"
+
+    # Install CLI tool
+    install -Dm 755 /dev/stdin "$pkgdir/usr/local/bin/selahos-macro" << 'EOF'
+#!/bin/bash
+python -m selahos_scripting "$@"
+EOF
+
+    # Install documentation
+    install -Dm 644 /dev/stdin "$pkgdir/usr/share/doc/selahos-device-scripting/README" << 'EOF'
+# SelahOS Device Scripting
+
+Macro automation and device control scripting.
+
+## Installation
+
+This package provides the Python scripting module.
+
+## Usage
+
+### Python API
+
+```python
+from selahos_scripting import MacroBuilder, MacroLibrary
+
+# Create a macro
+macro = (MacroBuilder("My Macro", "A simple sequence")
+    .note_on("mpk_mini_iv", 60, 100)
+    .delay(250)
+    .note_off("mpk_mini_iv", 60)
+    .build())
+
+# Save to library
+library = MacroLibrary()
+library.add_macro(macro)
+library.save_to_file("macros.json")
+```
+
+### Command Line
+
+```bash
+selahos-macro list
+selahos-macro play <macro-id>
+selahos-macro export <macro-id> > macro.json
+selahos-macro import < macro.json
+```
+
+### REST API
+
+The scripting system integrates with the Device Bridge web interface:
+
+- GET /api/macros - List macros
+- POST /api/macros - Create macro
+- POST /api/macros/{id}/execute - Execute macro
+- GET /api/macros/templates/ - List templates
+
+## Features
+
+✓ Fluent builder API for easy macro creation
+✓ 10 action types (NOTE, CC, SYSEX, DELAY, etc)
+✓ 5 pre-built standard templates
+✓ JSON import/export for macro sharing
+✓ Async execution for non-blocking playback
+✓ Error tracking and reporting
+✓ Tag-based organization
+✓ MIDI library management
+✓ REST API integration
+
+## Examples
+
+See /usr/share/doc/selahos-device-scripting/examples/
+
+## Support
+
+https://github.com/SelahOS/selahos-iso/issues
+EOF
+
+    # Install examples
+    install -d "$pkgdir/usr/share/doc/selahos-device-scripting/examples"
+
+    cat > "$pkgdir/usr/share/doc/selahos-device-scripting/examples/simple.py" << 'EOF'
+#!/usr/bin/env python3
+"""Simple macro example"""
+
+from selahos_scripting import MacroBuilder
+
+# Create macro
+macro = (MacroBuilder("Simple Sequence", "A basic test")
+    .note_on("mpk_mini_iv", 60, 100)  # C4
+    .delay_seconds(0.25)
+    .note_off("mpk_mini_iv", 60)
+    .delay_seconds(0.25)
+    .note_on("mpk_mini_iv", 62, 100)  # D4
+    .delay_seconds(0.25)
+    .note_off("mpk_mini_iv", 62)
+    .add_tag("learning")
+    .build())
+
+print(f"Macro: {macro.name}")
+print(f"Duration: {macro.get_duration_ms()}ms")
+print(f"Steps: {len(macro.steps)}")
+EOF
+
+    chmod 755 "$pkgdir/usr/share/doc/selahos-device-scripting/examples/simple.py"
+}
+
+post_install() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║  SelahOS Device Scripting - Installation Complete           ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "Python module installed:"
+    echo "  import selahos_scripting"
+    echo ""
+    echo "Command line tool:"
+    echo "  selahos-macro list"
+    echo "  selahos-macro play <id>"
+    echo ""
+    echo "Documentation:"
+    echo "  /usr/share/doc/selahos-device-scripting/"
+    echo ""
+    echo "Examples:"
+    echo "  /usr/share/doc/selahos-device-scripting/examples/"
+    echo ""
+}
+
+post_upgrade() {
+    echo "SelahOS Device Scripting updated to $pkgver"
+}
+
+post_remove() {
+    echo "SelahOS Device Scripting removed."
+}

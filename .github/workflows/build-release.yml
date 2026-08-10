@@ -1,0 +1,109 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Build device editors archive
+        run: |
+          cd tools
+          tar -czf device-editors-${{ steps.version.outputs.VERSION }}.tar.gz device-editors/
+          ls -lh device-editors-*.tar.gz
+
+      - name: Build frontend
+        run: |
+          cd tools/device-editors-web/frontend
+          npm install
+          npm run build
+          cd ../../..
+          tar -czf device-editors-web-${{ steps.version.outputs.VERSION }}.tar.gz tools/device-editors-web/frontend/dist/
+          ls -lh device-editors-web-*.tar.gz
+
+      - name: Build scripting package
+        run: |
+          cd tools
+          tar -czf device-scripting-${{ steps.version.outputs.VERSION }}.tar.gz device-editors-web/scripting/
+          ls -lh device-scripting-*.tar.gz
+
+      - name: Create checksums
+        run: |
+          cd tools
+          sha256sum device-editors-*.tar.gz > CHECKSUMS
+          sha256sum device-editors-web-*.tar.gz >> CHECKSUMS
+          sha256sum device-scripting-*.tar.gz >> CHECKSUMS
+          cat CHECKSUMS
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          release_name: Release ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+
+      - name: Upload device editors
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tools/device-editors-${{ steps.version.outputs.VERSION }}.tar.gz
+          asset_name: device-editors-${{ steps.version.outputs.VERSION }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload frontend
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tools/device-editors-web-${{ steps.version.outputs.VERSION }}.tar.gz
+          asset_name: device-editors-web-${{ steps.version.outputs.VERSION }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload scripting
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tools/device-scripting-${{ steps.version.outputs.VERSION }}.tar.gz
+          asset_name: device-scripting-${{ steps.version.outputs.VERSION }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload checksums
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tools/CHECKSUMS
+          asset_name: CHECKSUMS
+          asset_content_type: text/plain
