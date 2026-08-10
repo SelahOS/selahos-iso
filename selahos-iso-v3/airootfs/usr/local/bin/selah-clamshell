@@ -20,6 +20,8 @@ set -u
 INTERNAL_OUTPUT="eDP-1"
 LID_STATE_FILE="$(command ls /proc/acpi/button/lid/*/state 2>/dev/null | head -1)"
 
+log() { logger -t selah-clamshell "$*"; }
+
 lid_state() {
     [[ -n "$LID_STATE_FILE" && -r "$LID_STATE_FILE" ]] || { echo unknown; return; }
     awk '{print $NF}' "$LID_STATE_FILE"
@@ -59,12 +61,15 @@ run_as_user_kscreen() {
         kscreen-doctor "$@"
 }
 
-sess="$(find_session_user)" || exit 0
-[[ -n "$sess" ]] || exit 0
+sess="$(find_session_user)" || { log "no active graphical session found, exiting"; exit 0; }
+[[ -n "$sess" ]] || { log "no active graphical session found, exiting"; exit 0; }
 uid="${sess%%:*}"
 user="${sess#*:}"
 
 state="$(lid_state)"
+ac="no"
+on_ac_power && ac="yes"
+log "triggered: lid=${state} on_ac=${ac} session=${user}(${uid})"
 
 case "$state" in
     closed)
@@ -82,22 +87,36 @@ for o in d.get('outputs', []):
 " 2>/dev/null)"
             if [[ -n "$external" ]]; then
                 # AC power + external display present: hand off to it.
-                run_as_user_kscreen "$uid" "$user" \
+                log "AC + external display '${external}' detected: disabling ${INTERNAL_OUTPUT}, making ${external} primary"
+                if run_as_user_kscreen "$uid" "$user" \
                     output."${INTERNAL_OUTPUT}".disable \
                     output."${external}".enable \
-                    output."${external}".primary
+                    output."${external}".primary; then
+                    log "clamshell handoff to ${external} succeeded"
+                else
+                    log "clamshell handoff to ${external} FAILED (kscreen-doctor exit $?)"
+                fi
             else
                 # AC power, lid closed, nothing to hand off to. logind was
                 # told to ignore this (HandleLidSwitchExternalPower=ignore),
                 # so if we don't suspend here, nobody will.
+                log "AC power, lid closed, no external display found: suspending"
                 systemctl suspend
             fi
+        else
+            log "on battery: deferring to logind HandleLidSwitch=suspend, no-op here"
         fi
-        # On battery, logind's HandleLidSwitch=suspend already handles this
-        # independently — nothing for this script to do.
         ;;
     open)
         # Restore normal behavior regardless of how we got here.
-        run_as_user_kscreen "$uid" "$user" output."${INTERNAL_OUTPUT}".enable
+        log "lid opened: re-enabling ${INTERNAL_OUTPUT}"
+        if run_as_user_kscreen "$uid" "$user" output."${INTERNAL_OUTPUT}".enable; then
+            log "re-enable of ${INTERNAL_OUTPUT} succeeded"
+        else
+            log "re-enable of ${INTERNAL_OUTPUT} FAILED (kscreen-doctor exit $?)"
+        fi
+        ;;
+    *)
+        log "unrecognized lid state '${state}', doing nothing"
         ;;
 esac
