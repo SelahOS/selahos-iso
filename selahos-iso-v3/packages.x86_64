@@ -136,6 +136,13 @@ xf86-video-nouveau
 nvidia-utils
 
 # === Wine + SelahBridge ===
+# 2026-08-16: lib32-giflib, lib32-openal, lib32-v4l-utils removed from this
+# block (was standard Arch Wiki 32-bit Wine deps list) — confirmed via a
+# live mirror db pull that Arch has genuinely dropped all three from
+# multilib, breaking every build since. The 64-bit giflib/openal/v4l-utils
+# above are unaffected; only 32-bit Wine apps needing GIF/OpenAL/V4L lose
+# that specific codec path. Pro-audio still runs via PipeWire/ALSA/JACK,
+# not OpenAL, so this shouldn't affect the DAW-critical path.
 wine-staging
 winetricks
 wine-mono
@@ -149,7 +156,6 @@ lib32-pipewire-jack
 lib32-vulkan-intel
 lib32-vulkan-icd-loader
 giflib
-lib32-giflib
 libpng
 lib32-libpng
 libldap
@@ -157,11 +163,8 @@ lib32-libldap
 gnutls
 lib32-gnutls
 mpg123
-lib32-mpg123
 openal
-lib32-openal
 v4l-utils
-lib32-v4l-utils
 libpulse
 lib32-libpulse
 alsa-lib
@@ -175,7 +178,6 @@ lib32-ncurses
 opencl-icd-loader
 lib32-opencl-icd-loader
 libxslt
-lib32-libxslt
 libva
 lib32-libva
 gtk3
