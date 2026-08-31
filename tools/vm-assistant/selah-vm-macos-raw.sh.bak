@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# ROLLBACK FALLBACK ONLY (kept, not deleted, as of the 08-28/08-29 libvirt
+# migration — see selah-vm-macos.sh, now libvirt-backed, and
+# macos-libvirt-domain.xml.template). If you ever need to fall back to this
+# raw-QEMU version: the disk files (mac_hdd_ng.img, OVMF_VARS-1920x1080.fd,
+# etc.) may currently be owned by libvirt-qemu if the libvirt domain is
+# RUNNING — dynamic_ownership reverts them to their original (dbnoble) owner
+# automatically once the domain is cleanly stopped (`virsh destroy`/
+# `virsh shutdown` + confirm `virsh domstate` shows "shut off"), confirmed
+# empirically on this host. If ownership is somehow NOT dbnoble:dbnoble after
+# that, fix with: sudo chown dbnoble:dbnoble <file>. Do not run this script
+# and the libvirt domain against the same disk files at the same time.
+#
+# Fetches a macOS recovery image via OSX-KVM's own fetch-macOS-v2.py (which
+# already encodes the correct board-id per version, and verifies the download
+# against Apple's own chunklist hashes internally — no separate checksum step
+# needed here) and boots it headless under QEMU with VNC, using OSX-KVM's
+# bundled OpenCore-for-QEMU image.
+#
+# Scope: gets to a verified-booted macOS Recovery main menu unattended. The
+# Disk Utility erase + "Install macOS" click-through is handled separately by
+# macos-install-automate.py (experimental QMP-driven automation, with a
+# manual-takeover fallback via the same VNC session — see that script).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION="${1:-}"
+VERSIONS_CONF="$SCRIPT_DIR/macos-versions.conf"
+OSX_KVM_DIR="${OSX_KVM_DIR:-$HOME/vm-build/OSX-KVM}"
+# 4096 (not the previous 8192 default) matches what's actually proven to work
+# on this host for a test/dev guest — this machine only has 7.6GB total RAM,
+# of which the always-on Claude sandbox VM permanently holds 4GB. Apple's 8GB
+# figure is the "recommended for daily use" number, not the install-time
+# minimum.
+MEMORY_MB="${MEMORY_MB:-4096}"
+DISK_GB="${DISK_GB:-128}"
+VNC_DISPLAY="${VNC_DISPLAY:-:2}"   # :2 -> port 5902, avoids clashing with other VMs
+VNC_PORT=$((5900 + ${VNC_DISPLAY#:}))
+
+if [ -z "$VERSION" ]; then
+  echo "Usage: $0 <version>" >&2
+  echo "Available versions:" >&2
+  grep -v '^#' "$VERSIONS_CONF" | cut -d: -f1 | sed 's/^/  - /' >&2
+  exit 1
+fi
+
+line=$(grep -v '^#' "$VERSIONS_CONF" | grep "^$VERSION:" || true)
+if [ -z "$line" ]; then
+  echo "ERROR: unknown version '$VERSION'. Available:" >&2
+  grep -v '^#' "$VERSIONS_CONF" | cut -d: -f1 | sed 's/^/  - /' >&2
+  exit 1
+fi
+FETCH_SHORTNAME=$(echo "$line" | cut -d: -f2)
+CPU_MODEL=$(echo "$line" | cut -d: -f3)
+
+# Per macos-versions.conf: Skylake-Client is used for Sonoma/Sequoia/Tahoe,
+# which is also exactly the set that requires AVX2 on the host.
+REQUIRED_CPU_FLAG=""
+case "$CPU_MODEL" in
+  Skylake-Client*) REQUIRED_CPU_FLAG="avx2" ;;
+esac
+
+if [ ! -d "$OSX_KVM_DIR" ]; then
+  echo "ERROR: OSX-KVM not found at $OSX_KVM_DIR. Clone it first:" >&2
+  echo "  git clone https://github.com/kholia/OSX-KVM.git $OSX_KVM_DIR" >&2
+  exit 1
+fi
+
+bash "$SCRIPT_DIR/capability-check.sh" "$MEMORY_MB" "$REQUIRED_CPU_FLAG"
+
+if ! command -v dmg2img >/dev/null 2>&1; then
+  echo "ERROR: dmg2img not found (AUR-only package). Install with: yay -S dmg2img" >&2
+  exit 1
+fi
+
+WORK_DIR="$HOME/vm-build/macos-$VERSION"
+mkdir -p "$WORK_DIR" "$WORK_DIR/screenshots"
+cd "$WORK_DIR"
+
+if [ ! -f BaseSystem.img ]; then
+  if [ ! -f BaseSystem.dmg ]; then
+    echo "Fetching macOS $VERSION recovery image (shortname: $FETCH_SHORTNAME)..."
+    # fetch-macOS-v2.py's progress bar calls os.get_terminal_size(), which
+    # throws ENOTTY ("Inappropriate ioctl for device") once the download
+    # finishes and it moves on to chunklist verification, if stdout isn't a
+    # real terminal (e.g. redirected to a log file under nohup/background).
+    # The download itself is unaffected — only the verification step's
+    # progress rendering crashes — but that aborts before confirming
+    # integrity, so wrap in `script` to allocate a pty and dodge it.
+    if script -qec "python3 '$OSX_KVM_DIR/fetch-macOS-v2.py' -s '$FETCH_SHORTNAME' --action download -o '$WORK_DIR'" /dev/null; then
+      echo "Fetch OK: BaseSystem.dmg (verified against Apple's chunklist hashes by fetch-macOS-v2.py itself)."
+    else
+      echo "ERROR: fetch-macOS-v2.py failed — see output above. Not proceeding to conversion with a missing/partial file." >&2
+      exit 1
+    fi
+  fi
+  echo "Converting BaseSystem.dmg -> BaseSystem.img..."
+  if dmg2img -i BaseSystem.dmg BaseSystem.img; then
+    echo "Convert OK: BaseSystem.img"
+  else
+    echo "ERROR: dmg2img failed. Removing partial BaseSystem.img so the next run retries cleanly." >&2
+    rm -f BaseSystem.img
+    exit 1
+  fi
+fi
+
+if [ ! -f mac_hdd_ng.img ]; then
+  echo "Creating target disk image (${DISK_GB}G)..."
+  qemu-img create -f qcow2 mac_hdd_ng.img "${DISK_GB}G"
+fi
+
+if [ ! -f OpenCore.qcow2 ]; then
+  cp "$OSX_KVM_DIR/OpenCore/OpenCore.qcow2" .
+fi
+for f in OVMF_CODE_4M.fd OVMF_VARS-1920x1080.fd; do
+  [ -f "$f" ] || cp "$OSX_KVM_DIR/$f" .
+done
+
+# NIC: vmxnet3, not e1000-82545em. Confirmed live on this host (Sequoia
+# recovery, 2026-08-28): e1000-82545em's PCI device attaches but no en0 ever
+# appears (`ifconfig -a` shows only lo0/gif0/stf0/XHC1 — no ethernet), and
+# `ioreg -l` shows no AppleIntel8254X match at all, only a generic unbound
+# IOUserEthernetResource. Modern macOS (Sonoma/Sequoia) has dropped kernel
+# support for that legacy Intel NIC emulation. vmxnet3 (VMware's
+# paravirtualized NIC, natively supported by macOS via AppleVmxnet3Ethernet)
+# gets a real en0 and working internet, which the Installer requires even
+# just to start ("An Internet connection is required to install macOS").
+MY_OPTIONS="+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check"
+LOG_FILE="$WORK_DIR/qemu.log"
+QMP_SOCK="$WORK_DIR/qmp.sock"
+rm -f "$QMP_SOCK"
+
+echo "Launching macOS $VERSION recovery under QEMU (VNC display $VNC_DISPLAY -> port $VNC_PORT)..."
+nohup qemu-system-x86_64 \
+  -enable-kvm -m "$MEMORY_MB" -cpu "$CPU_MODEL",kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,"$MY_OPTIONS" \
+  -machine q35 \
+  -device qemu-xhci,id=xhci \
+  -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \
+  -smp 4,cores=2,sockets=1 \
+  -device isa-applesmc,osk="ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc" \
+  -drive if=pflash,format=raw,readonly=on,file="$WORK_DIR/OVMF_CODE_4M.fd" \
+  -drive if=pflash,format=raw,file="$WORK_DIR/OVMF_VARS-1920x1080.fd" \
+  -smbios type=2 \
+  -device ich9-ahci,id=sata \
+  -drive id=OpenCoreBoot,if=none,snapshot=on,format=qcow2,file="$WORK_DIR/OpenCore.qcow2" \
+  -device ide-hd,bus=sata.2,drive=OpenCoreBoot \
+  -device ide-hd,bus=sata.3,drive=InstallMedia \
+  -drive id=InstallMedia,if=none,file="$WORK_DIR/BaseSystem.img",format=raw \
+  -drive id=MacHDD,if=none,file="$WORK_DIR/mac_hdd_ng.img",format=qcow2 \
+  -device ide-hd,bus=sata.4,drive=MacHDD \
+  -netdev user,id=net0,hostfwd=tcp::2222-:22 -device vmxnet3,netdev=net0,id=net0,mac=52:54:00:c9:18:27 \
+  -device vmware-svga \
+  -display none \
+  -vnc "0.0.0.0${VNC_DISPLAY}" \
+  -qmp "unix:${QMP_SOCK},server,nowait" \
+  > "$LOG_FILE" 2>&1 &
+
+QEMU_PID="$!"
+echo "$QEMU_PID" > "$WORK_DIR/qemu.pid"
+echo "Started (PID $QEMU_PID). Log: $LOG_FILE"
+
+# Boot-verification gate: don't just assume the process is fine. Poll PID
+# liveness and VNC-port reachability instead of a blind sleep, and fail loudly
+# (with the tail of qemu.log) if QEMU died on startup — same discipline used
+# for the Windows virtio-blk boot check earlier in this project.
+echo "Verifying boot (PID alive + VNC port $VNC_PORT reachable)..."
+BOOT_OK=0
+for _ in $(seq 1 30); do
+  if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+    echo "ERROR: QEMU process died during startup. Last 30 lines of $LOG_FILE:" >&2
+    tail -30 "$LOG_FILE" >&2
+    exit 1
+  fi
+  if timeout 2 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$VNC_PORT" 2>/dev/null; then
+    BOOT_OK=1
+    break
+  fi
+  sleep 2
+done
+
+if [ "$BOOT_OK" -ne 1 ]; then
+  echo "ERROR: VNC port $VNC_PORT never became reachable within 60s (process is alive, but something's wrong). Check $LOG_FILE." >&2
+  exit 1
+fi
+
+echo "Boot verification OK: QEMU is alive and VNC is reachable."
+echo "Connect with: vncviewer localhost:$VNC_PORT"
+echo "QMP socket (for macos-install-automate.py): $QMP_SOCK"
+echo ""
+echo "Next: run macos-install-automate.py against this WORK_DIR to drive the"
+echo "Disk Utility erase + Installer click-through (experimental, see its"
+echo "own --calibrate mode first — it needs real screen coordinates from a"
+echo "live screenshot before it will attempt anything destructive)."

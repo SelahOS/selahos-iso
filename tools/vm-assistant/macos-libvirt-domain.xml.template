@@ -1,0 +1,140 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  SelahOS macOS libvirt domain template.
+
+  Based on OSX-KVM's own reference (~/vm-build/OSX-KVM/macOS-libvirt-Catalina.xml)
+  but corrected to match this project's proven-working raw-QEMU config exactly
+  (see selah-vm-macos-raw.sh.bak / RESUME-LOG-2026-08-28.md):
+    - machine type is q35, not the reference's pc-q35-4.2.
+    - SATA unit numbers are 2/3/4 (OpenCoreBoot/InstallMedia/MacHDD), not the
+      reference's 0/1/2, to match the topology already baked into this
+      version's OVMF_VARS NVRAM (BootOrder device paths are topology-sensitive).
+    - NIC model is vmxnet3 (required for a working en0 on modern macOS;
+      e1000-82545em has no kernel support on Sonoma/Sequoia/Tahoe), attached to
+      libvirt's default NAT network rather than raw QEMU's -netdev
+      user,hostfwd=tcp::2222-:22 (nothing depends on port 2222 today; SSH
+      access becomes `virsh domifaddr` for a real guest IP instead).
+    - Deliberately has NO <cpu> element. CPU is fully specified via the
+      qemu:commandline -cpu string below. Do not add a native <cpu> element —
+      that would put two -cpu flags on the real QEMU command line.
+    - qemu:commandline also carries a second, independent -qmp socket so the
+      existing macos-qmp-helper.py / macos-install-automate.py automation
+      tooling keeps working completely unchanged against the same path.
+    - The USB (qemu-xhci) controller and the NIC are pinned to explicit flat
+      PCI addresses directly on bus 0x00 (slot 0x02 / 0x03), NOT left for
+      libvirt to auto-place behind its default chain of pcie-root-port hotplug
+      bridges. Found the hard way 08-29: with auto-placement, QEMU reported
+      every input event as delivered successfully (both via VNC and via a
+      direct QMP input-send-event/sendkey, ruling out a VNC-client bug) but
+      the guest never reacted — mouse and keyboard were both completely dead.
+      macOS/OpenCore Hackintosh setups are known to be sensitive to PCI
+      topology for driver-matching (OSX-KVM's own reference XML has an
+      explicit comment about this for NIC placement specifically); pinning a
+      flat topology matching the proven raw-QEMU config's simplicity fixed it.
+      If you ever add more PCI devices to this template, keep them on explicit
+      flat addresses rather than letting libvirt auto-generate bridges.
+
+  Placeholders substituted by selah-vm-macos.sh before `virsh define`:
+    __VM_NAME__      e.g. selah-macos-sonoma
+    __MEMORY_KIB__   memory in KiB (MEMORY_MB * 1024)
+    __WORK_DIR__     e.g. /home/dbnoble/vm-build/macos-sonoma
+    __CPU_MODEL__    e.g. Skylake-Client,-hle,-rtm (from macos-versions.conf)
+    __MY_OPTIONS__   e.g. +ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt,check
+-->
+<domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+  <name>__VM_NAME__</name>
+  <memory unit='KiB'>__MEMORY_KIB__</memory>
+  <currentMemory unit='KiB'>__MEMORY_KIB__</currentMemory>
+  <vcpu placement='static'>4</vcpu>
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <loader readonly='yes' type='pflash'>__WORK_DIR__/OVMF_CODE_4M.fd</loader>
+    <nvram>__WORK_DIR__/OVMF_VARS-1920x1080.fd</nvram>
+  </os>
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='__WORK_DIR__/OpenCore.qcow2'/>
+      <target dev='sdc' bus='sata'/>
+      <transient/>
+      <address type='drive' controller='0' bus='0' target='0' unit='2'/>
+    </disk>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source file='__WORK_DIR__/BaseSystem.img'/>
+      <target dev='sdd' bus='sata'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='3'/>
+    </disk>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='__WORK_DIR__/mac_hdd_ng.img'/>
+      <target dev='sde' bus='sata'/>
+      <address type='drive' controller='0' bus='0' target='0' unit='4'/>
+    </disk>
+    <controller type='sata' index='0'/>
+    <controller type='pci' index='0' model='pcie-root'/>
+    <controller type='usb' index='0' model='qemu-xhci'>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
+    </controller>
+    <interface type='network'>
+      <source network='default'/>
+      <model type='vmxnet3'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+    </interface>
+    <serial type='pty'>
+      <target type='isa-serial' port='0'>
+        <model name='isa-serial'/>
+      </target>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+    <input type='tablet' bus='usb'/>
+    <input type='keyboard' bus='usb'/>
+    <!-- Switched VNC->SPICE (08-29), matching OSX-KVM's own reference config
+         (macOS-libvirt-Catalina.xml uses spice, not vnc). SPICE was built for
+         interactive remote-desktop use (dirty-region tracking, adaptive
+         compression) rather than VNC's dumb raw-framebuffer approach — the
+         actual "snappiness" lever available here, since real GPU/Metal
+         acceleration isn't achievable for a macOS guest on this single-GPU
+         laptop (would need VFIO passthrough of a dedicated card). Client:
+         `remote-viewer spice://127.0.0.1:<port>` (virt-viewer package),
+         not gvncviewer — this is no longer a VNC server at all. -->
+    <graphics type='spice' autoport='yes'>
+      <listen type='address'/>
+      <image compression='auto_glz'/>
+    </graphics>
+    <video>
+      <!-- vram: 128MB, sized for the 1920x1080 target at full color depth
+           with headroom — not the 16MB default (forced a 1280x800 ceiling,
+           see git history) and deliberately not 1-2GB either: vmvga has zero
+           acceleration to spend extra budget on regardless of size, so past
+           "enough for the target resolution" a bigger number buys nothing. -->
+      <model type='vmvga' vram='131072' heads='1' primary='yes'/>
+    </video>
+    <memballoon model='none'/>
+  </devices>
+  <qemu:commandline>
+    <qemu:arg value='-device'/>
+    <qemu:arg value='isa-applesmc,osk=ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc'/>
+    <qemu:arg value='-smbios'/>
+    <qemu:arg value='type=2'/>
+    <qemu:arg value='-cpu'/>
+    <qemu:arg value='__CPU_MODEL__,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,__MY_OPTIONS__'/>
+    <qemu:arg value='-qmp'/>
+    <qemu:arg value='unix:__WORK_DIR__/qmp.sock,server,nowait'/>
+  </qemu:commandline>
+</domain>
