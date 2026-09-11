@@ -1,0 +1,20 @@
+// SelahOS live ISO — passwordless polkit for the live session.
+//
+// customize_airootfs.sh runs `passwd -d liveuser` (and `passwd -d root`),
+// so neither account has a password PAM can authenticate. The NOPASSWD
+// sudoers rule for liveuser covers plain `sudo`, but polkit/pkexec-gated
+// GUI apps (KDE Partition Manager's org.kde.kpmcore.externalcommand
+// action, and anything else that elevates via pkexec rather than sudo)
+// still prompt for a password that can never be supplied, so every
+// privileged action in those apps fails or hangs. This mirrors what other
+// Arch-based live ISOs do for their live session: grant local, active
+// wheel-group sessions unconditional authorization.
+//
+// This file lives only in the live ISO's airootfs — selah-setup's
+// installer does not copy /etc/polkit-1 to the installed target, so
+// installed systems keep normal password-gated polkit auth.
+polkit.addRule(function(action, subject) {
+    if (subject.isInGroup("wheel") && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});
