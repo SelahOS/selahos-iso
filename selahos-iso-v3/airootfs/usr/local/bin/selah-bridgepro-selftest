@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# selah-bridgepro-selftest — verify SelahBridgePro can actually install and
+# run a Windows app with working audio, not just that the wrapper scripts
+# exist on disk.
+#
+# Added 2026-08-17 after finding SelahBridgePro's wrapper installs cleanly
+# even when its Wine runtime never made it onto the disk at all (the
+# wine-staging pacstrap step failed on every mirror, no retry, and the
+# installer still printed "Installation finished. No error reported.").
+# This exists to catch exactly that class of failure automatically, "out
+# of the box," instead of a user discovering it the first time they try
+# to actually run a DAW.
+#
+# Uses a throwaway Wine prefix and a small self-contained test app (see
+# ~/SelahOS-Dev/tools/selahbridge-selftest-src/) rather than a third-party
+# download, deliberately -- adding another network dependency to test a
+# bug caused by a network dependency would be self-defeating.
+#
+# Usage: selah-bridgepro-selftest
+# Exit codes: 0 = clean, 1 = warnings only, 2 = at least one FAIL
+set -uo pipefail
+
+ok()   { printf '  OK   %s\n' "$1"; }
+bad()  { printf '  FAIL %s\n' "$1"; FAIL=1; }
+warn() { printf '  WARN %s\n' "$1"; WARN=1; }
+
+FAIL=0
+WARN=0
+TESTEXE="/usr/share/selahbridgepro/selftest/selahbridge-selftest.exe"
+
+echo "SelahBridgePro self-test — install + run a minimal Windows audio app"
+echo
+
+if ! command -v wine &>/dev/null; then
+    bad "wine is not installed at all — SelahBridgePro has nothing to run on (check: pacman -Q wine-staging)"
+    echo
+    echo "SELFTEST FAILED"
+    exit 2
+fi
+ok "wine present: $(wine --version 2>/dev/null)"
+
+if [ -x /usr/local/bin/selahbridgepro ]; then
+    ok "selahbridgepro wrapper present"
+else
+    warn "selahbridgepro wrapper not found at /usr/local/bin/selahbridgepro"
+fi
+
+if [ ! -f "$TESTEXE" ]; then
+    bad "bundled self-test installer missing: $TESTEXE"
+    echo
+    echo "SELFTEST FAILED"
+    exit 2
+fi
+
+# Must NOT live directly under /tmp: Wine refuses to create a prefix
+# there ("'/tmp' is not owned by you, refusing to create a configuration
+# directory") since /tmp itself isn't user-owned, even though the mktemp
+# subdirectory inside it would be. Confirmed by hand while writing this
+# script -- would have made every real run of this check fail with a
+# misleading "installer could NOT write to Program Files" instead of the
+# actual cause.
+STAGEDIR="${XDG_CACHE_HOME:-$HOME/.cache}"
+mkdir -p "$STAGEDIR"
+TESTPREFIX="$(mktemp -d "$STAGEDIR/selahbridge-selftest-XXXXXX")"
+cleanup() { rm -rf "$TESTPREFIX"; }
+trap cleanup EXIT
+
+export WINEPREFIX="$TESTPREFIX"
+export WINEDEBUG=-all
+
+if ! wineboot --init &>/dev/null; then
+    bad "wineboot --init failed in a fresh prefix — Wine itself is broken, not just missing"
+    echo
+    echo "SELFTEST FAILED"
+    exit 2
+fi
+ok "fresh Wine prefix initializes"
+
+if ! timeout 60 wine "$TESTEXE" /S &>/dev/null; then
+    bad "self-test installer did not run to completion under Wine (timed out or crashed)"
+fi
+
+RESULT="$WINEPREFIX/drive_c/Program Files/SelahBridgeProSelfTest/selftest-result.txt"
+if [ ! -f "$RESULT" ]; then
+    bad "self-test installer ran but produced no result log — likely crashed before writing it"
+    echo
+    echo "SELFTEST FAILED"
+    exit 2
+fi
+
+# The result file is written by a Windows CRT fopen() in text mode, which
+# translates \n to \r\n even under Wine -- read -r keeps the \r, and a
+# bare `[ "$val" = "OK" ]` then silently fails for every line (found by
+# actually running this against real Wine, not by inspection: `cat` never
+# shows the trailing \r, but bash's string comparison very much sees it,
+# and every single check reported FAIL/WARN regardless of the real value).
+while IFS='=' read -r key val; do
+    val="${val%$'\r'}"
+    case "$key" in
+        INSTALL_COPY)
+            [ "$val" = "OK" ] && ok "installer could write to Program Files" \
+                || bad "installer could NOT write to Program Files" ;;
+        REGISTRY_WRITE)
+            [ "$val" = "OK" ] && ok "installer wrote an uninstall registry key" \
+                || warn "registry uninstall key write failed" ;;
+        AUDIO_WAVEOUT)
+            [ "$val" = "OK" ] && ok "waveOutOpen succeeded — Windows audio API is reachable" \
+                || bad "waveOutOpen FAILED — a real DAW/audio app would fail to open output here too" ;;
+        AUDIO_PLAYSOUND)
+            [ "$val" = "OK" ] && ok "PlaySound succeeded" \
+                || warn "PlaySound failed (no system sound scheme under Wine — expected, not fatal)" ;;
+    esac
+done < "$RESULT"
+
+echo
+if [ "$FAIL" -eq 1 ]; then
+    echo "SELFTEST FAILED — SelahBridgePro is not ready to run real Windows audio apps"
+    exit 2
+elif [ "$WARN" -eq 1 ]; then
+    echo "SELFTEST PASSED WITH WARNINGS"
+    exit 1
+else
+    echo "SELFTEST PASSED — SelahBridgePro can install and run a Windows app with working audio"
+    exit 0
+fi
