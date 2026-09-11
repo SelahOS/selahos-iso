@@ -1,0 +1,12 @@
+[Unit]
+Description=SelahSeedCore — reapply hardware profile for this machine
+Before=NetworkManager.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/selah-seedcore-reapply
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,22 @@ import subprocess
 import time
 import json
 import socket
+
+# Single source of truth for install-time package lists, shared with
+# tools/build-offline-repo.sh so the bundled offline repo and what this
+# installer actually requests can never drift apart again (the exact
+# "two lists that are supposed to match but don't" bug class that caused
+# missing pciutils/usbutils/bluez/theme packages on installed systems
+# before, and part of what let an unbundled jack2 conflict slip through
+# depending on live mirror state).
+PKGLIST_DIR = '/usr/local/share/selahos-install-packages'
+
+
+def load_pkglist(name):
+    path = os.path.join(PKGLIST_DIR, f'{name}.txt')
+    with open(path) as f:
+        return [line.split('#', 1)[0].strip() for line in f
+                if line.split('#', 1)[0].strip()]
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QStackedWidget,
@@ -127,6 +143,8 @@ def get_tier(tier_name):
     """Return tier dict by name."""
     return MAC_PROFILES.get('tiers', {}).get(tier_name, {})
 
+MIN_INSTALL_GB = 20
+
 INSTALL_STEPS = [
     (5,  'Partitioning drive'),
     (10, 'Formatting filesystems'),
@@ -194,7 +212,7 @@ def get_disks():
         try:
             num = float(re.sub(r'[^0-9.]', '', size))
             unit = re.sub(r'[0-9.]', '', size)
-            if unit in ('G', 'GB') and num < 20:
+            if unit in ('G', 'GB') and num < MIN_INSTALL_GB:
                 is_small = True
             if unit in ('M', 'MB'):
                 is_small = True
@@ -206,6 +224,38 @@ def get_disks():
             'type': disk_type, 'is_live': is_live, 'is_small': is_small,
         })
     return disks
+
+
+def get_free_space_gb(disk):
+    """Largest contiguous unpartitioned region on disk, in GiB (for Dual Boot mode)."""
+    try:
+        r = run(['parted', '-s', disk, 'unit', 'B', 'print', 'free'])
+        best = 0
+        for line in r.stdout.splitlines():
+            if 'Free Space' not in line:
+                continue
+            # free-space rows have no partition number: "<start>B <end>B <size>B Free Space"
+            parts = line.split()
+            size = parts[-3] if len(parts) >= 3 else ''
+            if size.endswith('B') and size[:-1].isdigit():
+                best = max(best, int(size[:-1]))
+        return best / (1024 ** 3)
+    except Exception:
+        return 0
+
+
+def _existing_partnums(disk):
+    """Partition numbers already on disk, so Dual Boot mode can append after them."""
+    base = disk.rsplit('/', 1)[-1]
+    nums = []
+    try:
+        for name in run(['lsblk', '-rno', 'NAME', disk]).stdout.split():
+            m = re.match(re.escape(base) + r'p?(\d+)$', name)
+            if m:
+                nums.append(int(m.group(1)))
+    except Exception:
+        pass
+    return sorted(nums)
 
 
 def get_timezones():
@@ -324,7 +374,7 @@ class WelcomeScreen(QWidget):
 
         layout.addSpacing(8)
 
-        name = QLabel('SelahOS™ v1.0-beta')
+        name = QLabel('SelahOS™ v2.0.1-beta')
         name.setFont(QFont('Inter', 28, QFont.Weight.Light))
         name.setStyleSheet(f"color: {C['white']}; background: transparent; letter-spacing: 2px;")
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -411,20 +461,33 @@ class DriveScreen(QWidget):
         layout.addWidget(gold_label('Partition Mode', 15, QFont.Weight.Medium))
 
         self.mode_group = QButtonGroup(self)
+        # 2026-09-05: 'dual' and 'manual' were UI-only stubs — selected mode
+        # was captured into install_config but never read by the actual
+        # partitioning step (_step(0) always ran `sgdisk --zap-all`
+        # unconditionally). That means picking "Dual Boot" silently wiped
+        # the entire disk instead of preserving the existing OS it promised
+        # to keep — the opposite of what the label said, on the single most
+        # destructive step in the installer.
+        # 2026-09-06: 'dual' now has real behavior — _install() only
+        # creates new partitions in existing free space and never zaps the
+        # disk (see _step(0)). 'manual' is still a stub; do not re-enable
+        # it without implementing real custom-layout logic.
         modes = [
-            ('clean',  'Clean Install (recommended)', 'Erase entire disk and install SelahOS'),
-            ('dual',   'Dual Boot', 'Install alongside existing OS'),
-            ('manual', 'Manual Partitioning', 'Advanced: create your own layout'),
+            ('clean',  'Clean Install (recommended)', 'Erase entire disk and install SelahOS', True),
+            ('dual',   'Dual Boot', f'Install into free space only, min {MIN_INSTALL_GB} GB (e.g. alongside Ventoy)', True),
+            ('manual', 'Manual Partitioning (coming soon)', 'Advanced: create your own layout', False),
         ]
         self.mode_btns = {}
-        for key, label, desc in modes:
+        for key, label, desc, enabled in modes:
             row = QWidget()
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
             rb = QRadioButton(label)
             rb.setFont(QFont('Inter', 14, QFont.Weight.Medium))
+            rb.setEnabled(enabled)
             if key == 'clean':
                 rb.setChecked(True)
+            rb.toggled.connect(self._on_select)
             self.mode_group.addButton(rb)
             self.mode_btns[key] = rb
             d = muted_label(desc, 12)
@@ -436,15 +499,16 @@ class DriveScreen(QWidget):
 
         layout.addStretch()
 
-        warn_frame = glass_frame()
-        warn_frame.setStyleSheet(
+        self.warn_frame = glass_frame()
+        self.warn_frame.setStyleSheet(
             f"QFrame {{ background: rgba(224,122,95,0.12); border: 1px solid rgba(224,122,95,0.3); "
             f"border-radius: 12px; }}"
         )
-        wl = QVBoxLayout(warn_frame)
+        wl = QVBoxLayout(self.warn_frame)
         wl.setContentsMargins(16, 12, 16, 12)
-        wl.addWidget(QLabel('⚠  This will permanently erase all data on the selected drive.'))
-        layout.addWidget(warn_frame)
+        self.warn_label = QLabel('⚠  This will permanently erase all data on the selected drive.')
+        wl.addWidget(self.warn_label)
+        layout.addWidget(self.warn_frame)
 
         layout.addSpacing(16)
 
@@ -471,7 +535,7 @@ class DriveScreen(QWidget):
         for d in self.disks:
             icon = '💿' if not d['is_live'] else '🔌'
             warn = '  ⚠ Live USB — cannot install here' if d['is_live'] else ''
-            small_warn = '  ⚠ Drive too small (<20 GB)' if d['is_small'] else ''
+            small_warn = f'  ⚠ Drive too small (<{MIN_INSTALL_GB} GB)' if d['is_small'] else ''
             text = f"{icon}  {d['name']}  —  {d['size']}  {d['type']}"
             if d['model']:
                 text += f"\n    {d['model']}{warn}{small_warn}"
@@ -484,18 +548,39 @@ class DriveScreen(QWidget):
         if self.disk_list.count():
             self.disk_list.setCurrentRow(0)
 
-    def _on_select(self):
+    def _selected_disk(self):
         items = self.disk_list.selectedItems()
-        if items:
-            idx = self.disk_list.row(items[0])
-            if idx < len(self.disks):
-                d = self.disks[idx]
-                if d['is_live']:
-                    self.disk_warn.setText('Cannot install to the live USB drive.')
-                elif d['is_small']:
-                    self.disk_warn.setText('Drive is too small. Minimum 20 GB required.')
-                else:
-                    self.disk_warn.setText('')
+        if not items:
+            return None
+        idx = self.disk_list.row(items[0])
+        if idx >= len(self.disks):
+            return None
+        return self.disks[idx]
+
+    def _dual_free_gb(self, d):
+        return get_free_space_gb(d['name'])
+
+    def _on_select(self):
+        if self._get_mode() == 'dual':
+            self.warn_label.setText(
+                f'⚠  Dual Boot only uses existing free space — other partitions on the '
+                f'drive are left untouched. Requires at least {MIN_INSTALL_GB} GB free.'
+            )
+        else:
+            self.warn_label.setText('⚠  This will permanently erase all data on the selected drive.')
+
+        d = self._selected_disk()
+        if d:
+            if d['is_live']:
+                self.disk_warn.setText('Cannot install to the live USB drive.')
+            elif d['is_small']:
+                self.disk_warn.setText(f'Drive is too small. Minimum {MIN_INSTALL_GB} GB required.')
+            elif self._get_mode() == 'dual' and self._dual_free_gb(d) < MIN_INSTALL_GB:
+                self.disk_warn.setText(
+                    f'Not enough free space for Dual Boot (need {MIN_INSTALL_GB} GB free).'
+                )
+            else:
+                self.disk_warn.setText('')
 
     def _get_mode(self):
         for key, btn in self.mode_btns.items():
@@ -504,21 +589,23 @@ class DriveScreen(QWidget):
         return 'clean'
 
     def _proceed(self):
-        items = self.disk_list.selectedItems()
-        if not items:
+        d = self._selected_disk()
+        if not d:
             self.disk_warn.setText('Please select a drive.')
             return
-        idx = self.disk_list.row(items[0])
-        if idx >= len(self.disks):
-            return
-        d = self.disks[idx]
         if d['is_live']:
             self.disk_warn.setText('Cannot install to the live USB drive.')
             return
         if d['is_small']:
-            self.disk_warn.setText('Drive is too small. Minimum 20 GB required.')
+            self.disk_warn.setText(f'Drive is too small. Minimum {MIN_INSTALL_GB} GB required.')
             return
-        self.proceed.emit({'disk': d['name'], 'mode': self._get_mode()})
+        mode = self._get_mode()
+        if mode == 'dual' and self._dual_free_gb(d) < MIN_INSTALL_GB:
+            self.disk_warn.setText(
+                f'Not enough free space for Dual Boot (need {MIN_INSTALL_GB} GB free).'
+            )
+            return
+        self.proceed.emit({'disk': d['name'], 'mode': mode})
 
 
 # ── Screen 3: User Setup ──────────────────────────────────────
@@ -888,8 +975,8 @@ class HardwareScreen(QWidget):
 class InstallScreen(QWidget):
     # bake-fixes handoff Task 3: carries the post-install preflight result
     # (exit code -1/0/1/2, output text) up to DoneScreen alongside the
-    # existing install success/error pair.
-    done = pyqtSignal(bool, str, int, str)
+    # existing install success/error pair. 5th field: bootloader_ok.
+    done = pyqtSignal(bool, str, int, str, bool)
 
     def __init__(self):
         super().__init__()
@@ -992,11 +1079,14 @@ class InstallScreen(QWidget):
 class InstallThread(QThread):
     step_update  = pyqtSignal(int, str)
     pct_update   = pyqtSignal(int)
-    done_signal  = pyqtSignal(bool, str, int, str)
+    # 5th field: bootloader_ok -- whether grub-install was verified to have
+    # actually written EFI boot files (see the Bootloader step below).
+    done_signal  = pyqtSignal(bool, str, int, str, bool)
 
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.bootloader_ok = True
 
     def _step(self, idx):
         pct, label = INSTALL_STEPS[idx]
@@ -1004,15 +1094,35 @@ class InstallThread(QThread):
         self.pct_update.emit(pct)
 
     def run(self):
+        # The live session's own logind.conf has IdleAction=suspend /
+        # IdleActionSec=20min. A pacstrap of ~250 packages can easily run
+        # past 20 minutes with nobody touching the keyboard/mouse, which
+        # would suspend the live session mid-install and freeze/corrupt
+        # in-flight downloads. Hold an idle/sleep inhibitor for the whole
+        # install, same technique used to protect the dev machine during
+        # VM smoke tests -- released automatically when this thread exits.
+        inhibit_proc = None
+        try:
+            inhibit_proc = subprocess.Popen([
+                'systemd-inhibit', '--what=idle:sleep', '--mode=block',
+                '--who=selah-setup', '--why=SelahOS installation in progress',
+                'sleep', '999999'
+            ])
+        except OSError:
+            pass
         try:
             self._install()
         except Exception as e:
             import traceback
-            self.done_signal.emit(False, traceback.format_exc(), -1, '')
+            self.done_signal.emit(False, traceback.format_exc(), -1, '', False)
+        finally:
+            if inhibit_proc is not None:
+                inhibit_proc.terminate()
 
     def _install(self):
         cfg      = self.config
         disk     = cfg['disk']
+        mode     = cfg.get('mode', 'clean')
         username = cfg['username']
         password = cfg['password']
         hostname = cfg['hostname']
@@ -1033,48 +1143,167 @@ class InstallThread(QThread):
         def chroot(cmd):
             return sh(['arch-chroot', '/mnt'] + (cmd if isinstance(cmd, list) else ['bash', '-c', cmd]))
 
-        # Check network
-        self.step_update.emit(0, 'Checking network connectivity...')
-        if subprocess.run(['ping', '-c1', '-W3', '1.1.1.1'], capture_output=True).returncode != 0:
-            self.done_signal.emit(False,
-                'No internet connection detected.\n\n'
-                'Connect to WiFi first:\n'
-                '  1. Open Konsole\n'
-                '  2. Run: nmtui\n'
-                '  3. Choose your WiFi network\n'
-                '  4. Then relaunch Selah Setup'
+        # sh()/chroot() above only ever log a nonzero exit as a WARNING and
+        # keep going -- that's fine for best-effort steps, but it let a
+        # failed grub-install fall all the way through to a "SelahOS is
+        # installed" success screen with no working bootloader. Use these
+        # for steps where a silent failure means an unbootable or
+        # unmountable system: partitioning, formatting, mounting, and the
+        # bootloader itself.
+        def sh_critical(cmd, **kw):
+            r = sh(cmd, **kw)
+            if r.returncode != 0:
+                # sh() redirects the command's real stdout/stderr straight
+                # into the log file, not into r.stdout/r.stderr, so it has
+                # to be read back here to put it in front of the user. This
+                # matters because /tmp/selah-setup.log lives in the live
+                # session's tmpfs -- if the machine gets powered off at the
+                # Installation Failed screen (as happens in practice), that
+                # file is gone and the real error is unrecoverable unless
+                # it's already on screen.
+                tail = ''
+                try:
+                    log.flush()
+                    with open('/tmp/selah-setup.log') as _lf:
+                        tail = ''.join(_lf.readlines()[-25:])
+                except OSError:
+                    pass
+                raise RuntimeError(
+                    f"Critical step failed (exit {r.returncode}): "
+                    f"{' '.join(cmd) if isinstance(cmd, list) else cmd}\n\n"
+                    f"Last log output:\n{tail}"
+                )
+            return r
+
+        def chroot_critical(cmd):
+            return sh_critical(['arch-chroot', '/mnt'] + (cmd if isinstance(cmd, list) else ['bash', '-c', cmd]))
+
+        # 2026-08-17 finding: every pacstrap call below went through plain
+        # sh(), which only logs a WARNING on a nonzero exit and keeps going.
+        # A transient mirror timeout (confirmed root cause for wine-staging/
+        # wine-gecko on 08-16/08-17) then silently drops an entire dependency
+        # group -- the install still ends on "Installation finished. No
+        # error reported." with no trace anywhere. Retry a few times first
+        # since these are typically transient network blips, then fail the
+        # install loudly (same contract as sh_critical) rather than
+        # continuing with a partial system.
+        def pacstrap(pkgs, retries=3, delay=5):
+            cmd = ['pacstrap', '-K', '/mnt'] + pkgs
+            for attempt in range(1, retries + 1):
+                r = sh(cmd)
+                if r.returncode == 0:
+                    return r
+                log.write(f"WARNING: pacstrap attempt {attempt}/{retries} "
+                           f"failed (exit {r.returncode}) for: {' '.join(pkgs)}\n")
+                log.flush()
+                if attempt < retries:
+                    lockfile = '/mnt/var/lib/pacman/db.lck'
+                    if os.path.exists(lockfile):
+                        try:
+                            os.remove(lockfile)
+                            log.write(f"Removed stale {lockfile} before retry\n")
+                        except OSError as e:
+                            log.write(f"WARNING: could not remove {lockfile}: {e}\n")
+                        log.flush()
+                    time.sleep(delay)
+            tail = ''
+            try:
+                log.flush()
+                with open('/tmp/selah-setup.log') as _lf:
+                    tail = ''.join(_lf.readlines()[-25:])
+            except OSError:
+                pass
+            raise RuntimeError(
+                f"pacstrap failed after {retries} attempts: {' '.join(pkgs)}\n\n"
+                f"Last log output:\n{tail}"
             )
-            return
+
+        # Check network — 2026-09-04: this used to hard-abort the entire
+        # install with no internet, but base/KDE/audio/wine are now all
+        # served from the offline repo bundled on the ISO itself (see
+        # [selahos-offline] in pacman.conf) — none of that actually needs
+        # the network anymore. Network is still useful for the Flathub
+        # remote below and anything genuinely not bundled (chaotic-aur
+        # extras), so keep checking and log/notify, but don't block.
+        self.step_update.emit(0, 'Checking network connectivity...')
+        has_network = subprocess.run(['ping', '-c1', '-W3', '1.1.1.1'], capture_output=True).returncode == 0
+        if not has_network:
+            log.write("WARNING: no internet connection detected. Continuing with the "
+                       "offline package repo bundled on this ISO — Flathub setup and "
+                       "anything not bundled locally will be skipped/may fail.\n")
+            log.flush()
 
         # Step 0: Partition
         self._step(0)
-        sh(['sgdisk', '--zap-all', disk])
-        sh(['sgdisk', '--new=1:0:+512M', '--typecode=1:ef00', '--change-name=1:EFI', disk])
-        sh(['sgdisk', '--new=2:0:0',    '--typecode=2:8300', '--change-name=2:ROOT', disk])
+        if mode == 'dual':
+            # Dual Boot: append new partitions after whatever is already
+            # on the disk (e.g. Ventoy) -- never zap, never touch existing
+            # partition numbers. sgdisk start/end of 0 targets the largest
+            # free-space block, which _proceed()/_on_select() already
+            # verified is >= MIN_INSTALL_GB before we got here.
+            existing = _existing_partnums(disk)
+            efi_num = (max(existing) + 1) if existing else 1
+            root_num = efi_num + 1
+        else:
+            sh_critical(['sgdisk', '--zap-all', disk])
+            efi_num, root_num = 1, 2
+        sh_critical(['sgdisk', f'--new={efi_num}:0:+512M',
+                     f'--typecode={efi_num}:ef00', f'--change-name={efi_num}:EFI', disk])
+        sh_critical(['sgdisk', f'--new={root_num}:0:0',
+                     f'--typecode={root_num}:8300', f'--change-name={root_num}:ROOT', disk])
         sh(['partprobe', disk])
-        time.sleep(2)
+        sh(['udevadm', 'settle', '--timeout=10'])
 
         # Determine partition paths
         if 'nvme' in disk:
-            efi, root = disk + 'p1', disk + 'p2'
+            efi, root = f'{disk}p{efi_num}', f'{disk}p{root_num}'
         else:
-            efi, root = disk + '1', disk + '2'
+            efi, root = f'{disk}{efi_num}', f'{disk}{root_num}'
+
+        # partprobe returning (and even udevadm settle) doesn't guarantee
+        # the /dev nodes exist yet on every bus -- a blind time.sleep(2)
+        # here covered this most of the time but not always, and mkfs
+        # failing because its target device doesn't exist yet looks
+        # identical to any other mkfs failure from the Installation Failed
+        # screen. Poll for the real thing instead of guessing a duration.
+        for _dev in (efi, root):
+            for _ in range(20):
+                if os.path.exists(_dev):
+                    break
+                time.sleep(0.5)
+            else:
+                log.write(f"WARNING: {_dev} did not appear within 10s of partitioning -- "
+                           f"the next step will likely fail because of this.\n")
+                log.flush()
 
         # Step 1: Format
         self._step(1)
-        sh(['mkfs.fat', '-F32', efi])
-        sh(['mkfs.ext4', '-F', root])
+        sh_critical(['mkfs.fat', '-F32', efi])
+        sh_critical(['mkfs.ext4', '-F', root])
 
         # Step 2: Mount
         self._step(2)
-        sh(['mount', root, '/mnt'])
+        sh_critical(['mount', root, '/mnt'])
         sh(['mkdir', '-p', '/mnt/boot/efi'])
-        sh(['mount', efi, '/mnt/boot/efi'])
+        sh_critical(['mount', efi, '/mnt/boot/efi'])
 
         # Step 3: Base system
         self._step(3)
         sh(['pacman-key', '--init'])
         sh(['pacman-key', '--populate', 'archlinux'])
+        # 2026-09-04: bundling the offline repo's package FILES isn't enough
+        # on its own — pacman also needs an explicit sync (-Sy) before it
+        # recognizes a repo's database at all ("database file for
+        # 'selahos-offline' does not exist" otherwise), confirmed live
+        # during a real ISO build. This -Sy works fully offline: the
+        # [selahos-offline] repo's Server is a local file:// path, so
+        # syncing it is a local disk read, not a network fetch. Plain -Sy
+        # (not scoped to one repo) is used deliberately — if core/extra/
+        # chaotic-aur are unreachable, pacman warns per-repo and continues
+        # (same graceful-degradation pattern already documented above for
+        # the disabled remote [selahos] repo), it doesn't hard-fail the
+        # whole sync just because some OTHER repo needs network.
+        sh(['pacman', '-Sy'])
         # Ensure mirrorlist has servers
         import os as _os
         mirrorlist = '/etc/pacman.d/mirrorlist'
@@ -1084,93 +1313,20 @@ class InstallThread(QThread):
             with open(mirrorlist, 'w') as f:
                 f.write('Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n')
                 f.write('Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch\n')
-        base_pkgs = [
-            'base', 'base-devel', 'linux-zen', 'linux-zen-headers', 'linux-firmware',
-            'networkmanager', 'sudo', 'grub', 'efibootmgr', 'os-prober',
-            'intel-ucode', 'amd-ucode',
-            'nano', 'vim', 'git', 'wget', 'curl', 'python', 'python-pip',
-            # selah-wifi-driver modprobes wl on BCM4331/4360-class chips —
-            # the module must exist on the installed system, not just the
-            # live ISO (packages.x86_64 ships it there). Builds via dkms
-            # against the headers above during pacstrap.
-            'broadcom-wl-dkms',
-            # SELAH-50 addendum: selah-preflight-check's PCI/USB hardware
-            # scan (WiFi driver binding, Bluetooth chip, generic device
-            # enumeration) needs lspci/lsusb. Only pulled in as an indirect
-            # dependency on the live ISO — never pacstrapped here, so every
-            # installed system previously had neither, and those checks
-            # would have silently no-op'd post-install instead of running.
-            'pciutils', 'usbutils',
-            # CLAUDE-CODE-COMPLETE-MASTER-PLAN Phase 2.6: shipped on the
-            # live ISO (packages.x86_64) but never pacstrapped here — same
-            # "live-only" gap class as pciutils/usbutils above. Without
-            # bluez/bluez-utils the Bluetooth daemon itself is absent on
-            # installed systems (not just diagnostics); smartmontools and
-            # iw are postflight-check dependencies (disk health, WiFi
-            # driver/powersave state) that would silently no-op without
-            # this.
-            'bluez', 'bluez-utils', 'smartmontools', 'iw',
-        ]
+        # 2026-09-04: package lists moved to
+        # /usr/local/share/selahos-install-packages/*.txt — the single
+        # source of truth shared with tools/build-offline-repo.sh, so the
+        # bundled offline repo (see [selahos-offline] in pacman.conf) can
+        # never silently drift out of sync with what this installer
+        # actually requests, the way base/KDE package sets have before.
+        base_pkgs = load_pkglist('base')
         if is_apple:
-            # SelahSeedCore can recommend linux-lts for older Mac GPUs (hardware-db.json
-            # "kernel": "linux-lts" entries, e.g. Broadwell/iMac16,2) -- it must actually be
-            # installed or the later grub-set-default call has no entry to point at and
-            # silently falls back to linux-zen, which doesn't have the same track record
-            # on that hardware.
-            base_pkgs += ['linux-lts', 'linux-lts-headers']
-            # SELAH-49 audit: _apply_seedcore below has ALWAYS unconditionally
-            # `systemctl enable`'d thermald/irqbalance/acpid on installed
-            # systems, but none of the three were ever pacstrapped here —
-            # only present on the live ISO (packages.x86_64). sh()/chroot()
-            # swallow nonzero exits into a log WARNING rather than failing
-            # the install, so this was a silent no-op on every Mac install
-            # until now. tlp and mbpfan are AUR-only (tlp-git/mbpfan-git,
-            # confirmed via this dev machine's /var/log/pacman.log — they
-            # were hand-built with makepkg and pacman -U'd locally, not
-            # pulled from a repo) and are NOT added here; wiring AUR
-            # packages into pacstrap needs its own design (local [selahos]
-            # repo hosting a build, or a makepkg step) — flagged as a
-            # follow-up, not fixed in this pass.
-            base_pkgs += ['acpid', 'thermald', 'irqbalance']
-        sh(['pacstrap', '-K', '/mnt'] + base_pkgs)
+            base_pkgs += load_pkglist('base-apple-extra')
+        pacstrap(base_pkgs)
 
         # Step 4: KDE Plasma
         self._step(4)
-        sh(['pacstrap', '-K', '/mnt',
-            'plasma-desktop', 'plasma-workspace', 'plasma-pa', 'plasma-nm',
-            'sddm', 'sddm-kcm', 'kwin', 'breeze', 'breeze-gtk',
-            'konsole', 'dolphin', 'kate', 'ark', 'gwenview', 'spectacle',
-            'kscreen', 'kinfocenter', 'firefox', 'xdg-user-dirs',
-            # Match the live ISO's KDE application set (packages.x86_64) —
-            # anything the live session ships must survive onto the
-            # installed system or users see apps "disappear" after install
-            'dolphin-plugins', 'ffmpegthumbs', 'filelight', 'kcalc',
-            'kcharselect', 'kcolorchooser', 'kdeconnect', 'kdialog',
-            'kfind', 'kwalletmanager', 'okular', 'partitionmanager',
-            'kdeplasma-addons', 'kde-cli-tools', 'kde-gtk-config',
-            'plasma-systemmonitor', 'plasma-firewall', 'plasma-disks',
-            'kdenlive',
-            # selah-reflection.desktop is copied to the installed system
-            # and launches xiphos
-            'xiphos',
-            # SelahOS theming: Kvantum engine (the Selah theme is a
-            # Kvantum theme) and fastfetch (skel .bashrc + profile.d
-            # snippet invoke it; config ships via _apply_theme)
-            'kvantum', 'kvantum-qt5', 'fastfetch',
-            # SELAH-36: the custom SDDM theme is Qt5 QML; Plasma 6 is Qt6 and
-            # pulls in none of these, so SDDM greets to a black screen without them
-            'qt5-base', 'qt5-declarative', 'qt5-quickcontrols',
-            'qt5-quickcontrols2', 'qt5-graphicaleffects', 'qt5-svg',
-            # bake-fixes handoff Task 4: safe nouveau default for non-Mac
-            # NVIDIA hardware. Harmless if no NVIDIA GPU is present; without
-            # it, NVIDIA machines have no X11/XWayland driver at all until
-            # a user manually installs one post-boot.
-            'xf86-video-nouveau',
-            # bake-fixes handoff Task 6: Discover has no app backend without
-            # this — flatpak package alone isn't enough, Discover also needs
-            # a configured remote (see flatpak remote-add below).
-            'flatpak',
-        ])
+        pacstrap(load_pkglist('kde'))
         # bake-fixes handoff Task 6: Flathub must be a default remote, not a
         # manual step — add it now while we're online for pacstrap anyway.
         # --if-not-exists makes this safe to re-run (e.g. via selah-repair).
@@ -1184,20 +1340,11 @@ class InstallThread(QThread):
 
         # Step 5: Audio
         self._step(5)
-        sh(['pacstrap', '-K', '/mnt',
-            'pipewire', 'pipewire-alsa', 'pipewire-audio', 'pipewire-jack',
-            'pipewire-pulse', 'wireplumber',
-            'alsa-utils', 'alsa-firmware', 'sof-firmware',
-        ])
+        pacstrap(load_pkglist('audio'))
 
         # Step 6: Wine/SelahBridge deps
         self._step(6)
-        sh(['pacstrap', '-K', '/mnt',
-            'wine-staging', 'winetricks', 'wine-mono', 'wine-gecko',
-            # python-mido/python-rtmidi: the device editors under
-            # /usr/local/lib/selahos/device-bridge import them at runtime
-            'python-pyqt6', 'python-mido', 'python-rtmidi',
-        ])
+        pacstrap(load_pkglist('wine'))
 
         # Step 7: fstab
         self._step(7)
@@ -1215,6 +1362,16 @@ class InstallThread(QThread):
         # applied to /etc/default/grub.
         if _os.path.exists('/etc/pacman.conf'):
             sh(['cp', '/etc/pacman.conf', '/mnt/etc/pacman.conf'])
+        # 2026-09-06: CONFIRMED real-hardware bug -- the copied pacman.conf's
+        # [chaotic-aur] section references /etc/pacman.d/chaotic-mirrorlist,
+        # a file that only exists on the live ISO's airootfs (it's not part
+        # of any package pacstrap installs, unlike the regular mirrorlist
+        # which comes from pacman-mirrorlist). Without this copy, EVERY
+        # pacman operation on the installed system fails outright with
+        # "config file /etc/pacman.d/chaotic-mirrorlist could not be read" --
+        # not just chaotic-aur installs, the whole pacman.conf fails to parse.
+        if _os.path.exists('/etc/pacman.d/chaotic-mirrorlist'):
+            sh(['cp', '/etc/pacman.d/chaotic-mirrorlist', '/mnt/etc/pacman.d/chaotic-mirrorlist'])
         chroot(['ln', '-sf', f'/usr/share/zoneinfo/{timezone}', '/etc/localtime'])
         chroot(['hwclock', '--systohc'])
         with open('/mnt/etc/locale.gen', 'a') as f:
@@ -1244,7 +1401,7 @@ class InstallThread(QThread):
 
         # Write SelahOS os-release
         with open('/mnt/etc/os-release', 'w') as f:
-            f.write('NAME="SelahOS"\nPRETTY_NAME="SelahOS v1.0-beta"\n'
+            f.write('NAME="SelahOS"\nPRETTY_NAME="SelahOS v2.0.1-beta"\n'
                     'ID=selahos\nID_LIKE=arch\nBUILD_ID=rolling\n'
                     'HOME_URL="https://selahos.io"\n'
                     'VENDOR_NAME="Selah Technologies LLC"\n')
@@ -1257,6 +1414,22 @@ class InstallThread(QThread):
 
         # Step 10: SelahBridgePro
         self._step(10)
+
+        # Core selah diagnostic/repair tools must reach the installed disk
+        # regardless of whether SelahBridgePro shipped on this build -- a
+        # user who hits a bootloader or driver problem post-install has no
+        # way to reach selah-doctor/selah-repair/selah-preflight-check
+        # without the USB otherwise. This used to only happen as a side
+        # effect of the SelahBridgePro copy below, gated on _sbp existing;
+        # split out so it always runs.
+        sh(['mkdir', '-p', '/mnt/usr/local/bin'])
+        for _tool in ('selah-preflight-check', 'selah-postflight-check',
+                      'selah-repair', 'selah-doctor'):
+            _src = f'/usr/local/bin/{_tool}'
+            if _os.path.exists(_src):
+                sh(['cp', _src, f'/mnt/usr/local/bin/{_tool}'])
+                sh(['chmod', '755', f'/mnt/usr/local/bin/{_tool}'])
+
         # Copy files from live ISO if present
         _sbp = '/usr/local/bin/selahbridgepro'
         if _os.path.exists(_sbp):
@@ -1285,8 +1458,37 @@ class InstallThread(QThread):
 
         # Step 11: Bootloader
         self._step(11)
+
+        # sh()/chroot() log a failed grub-install as a WARNING and keep
+        # going -- this was the actual bug: the installer reached "SelahOS
+        # is installed" with no EFI boot files ever written, and nothing
+        # noticed. Verify the real artifact (the EFI binaries), not just
+        # the command's exit code, and retry once before giving up.
+        def _bootloader_installed():
+            for f in ('/mnt/boot/efi/EFI/BOOT/BOOTX64.EFI',
+                      '/mnt/boot/efi/EFI/SelahOS/grubx64.efi'):
+                if _os.path.isfile(f) and _os.path.getsize(f) > 0:
+                    return True
+            return False
+
         chroot(['grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi',
                 '--bootloader-id=SelahOS', '--removable', '--recheck'])
+        if not _bootloader_installed():
+            log.write("WARNING: grub-install produced no EFI boot files on the first "
+                       "attempt -- reinstalling grub/efibootmgr and retrying once.\n")
+            log.flush()
+            chroot(['pacman', '-S', '--noconfirm', '--needed', 'grub', 'efibootmgr'])
+            chroot(['grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi',
+                    '--bootloader-id=SelahOS', '--removable', '--recheck'])
+
+        self.bootloader_ok = _bootloader_installed()
+        if not self.bootloader_ok:
+            log.write("FAIL: grub-install still produced no EFI boot files after a retry "
+                       "-- this system will not boot until repaired. /mnt is left mounted "
+                       "so the Done screen's Repair Now button (selah-doctor --fix) can "
+                       "act on it before reboot.\n")
+            log.flush()
+
         sh(['sed', '-i', 's/GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="SelahOS"/', '/mnt/etc/default/grub'])
         if not is_apple:
             # bake-fixes handoff Task 1: Apple installs get an explicit,
@@ -1339,20 +1541,51 @@ class InstallThread(QThread):
         log.flush()
         sh(['cp', '/tmp/selah-setup.log', '/mnt/var/log/selah-setup.log'])
         sh(['sync'])
-        sh(['umount', '-R', '/mnt'])
+
+        # Deliberately NOT unmounting /mnt here. If the bootloader wasn't
+        # verified, or preflight found a hard failure, the Done screen
+        # offers a Repair Now action (selah-doctor --target /mnt --fix)
+        # that needs /mnt still mounted to do anything useful. /mnt gets
+        # unmounted right before reboot instead -- see DoneScreen._do_restart.
 
         # Step 14: Done
         self._step(14)
         self.pct_update.emit(100)
         time.sleep(0.5)
-        self.done_signal.emit(True, '', preflight_exit, preflight_output)
+        self.done_signal.emit(True, '', preflight_exit, preflight_output, self.bootloader_ok)
 
     def _apply_seedcore(self, chroot, sh):
         import shutil, os as _os, re as _re
         seed_files = [
             ('/etc/modprobe.d/selah-broadcom.conf', '/mnt/etc/modprobe.d/'),
+            # 2026-09-05: MacBook10,1 (BCM4350/brcmfmac) associated to an AP
+            # then dropped within seconds — missing Apple calibration
+            # firmware plus NetworkManager's default Wi-Fi power-saving is
+            # the standard explanation for this exact symptom on Broadcom
+            # Macs. Not yet confirmed on real hardware; see the two files'
+            # own header comments for the full incident.
+            ('/etc/NetworkManager/conf.d/wifi-powersave-off.conf',
+             '/mnt/etc/NetworkManager/conf.d/'),
+            ('/etc/modprobe.d/selah-brcmfmac-options.conf', '/mnt/etc/modprobe.d/'),
+            # 2026-09-06: CONFIRMED root cause of the "connects then drops"
+            # bug on real hardware — WPA3-SAE handshake failure on old
+            # Broadcom firmware, not power/roaming/calibration. See this
+            # file's own header comment for the full incident.
+            ('/etc/NetworkManager/conf.d/broadcom-wpa2-default.conf',
+             '/mnt/etc/NetworkManager/conf.d/'),
             ('/etc/modules-load.d/selah-wifi.conf', '/mnt/etc/modules-load.d/'),
             ('/etc/modules-load.d/selah-thunderbolt.conf', '/mnt/etc/modules-load.d/'),
+            # 2026-09-07: a to-go/portable install (Dual Boot mode) can be
+            # built on one machine and booted on another -- everything
+            # below this point in _apply_seedcore was resolved against
+            # whichever machine ran the installer, which is wrong for that
+            # case. selah-seedcore-reapply re-resolves it at every boot
+            # against the CURRENT machine and no-ops once it matches, so
+            # it's shipped unconditionally rather than gated on anything
+            # detected here.
+            ('/etc/systemd/system/selah-seedcore-reapply.service',
+             '/mnt/etc/systemd/system/'),
+            ('/usr/local/bin/selah-seedcore-reapply', '/mnt/usr/local/bin/'),
             ('/etc/mbpfan.conf', '/mnt/etc/'),
             ('/etc/tlp.conf', '/mnt/etc/'),
             ('/etc/systemd/system/selah-wifi-wake.service',
@@ -1367,6 +1600,17 @@ class InstallThread(QThread):
             ('/etc/systemd/logind.conf', '/mnt/etc/systemd/'),
             ('/usr/local/bin/selah-clamshell', '/mnt/usr/local/bin/'),
             ('/etc/acpi/events/selah-lid', '/mnt/etc/acpi/events/'),
+            # Resume hooks: only ever shipped on the live ISO before this
+            # (same "fix never reached installed systems" bug class as
+            # SELAH-40/43/44/49) — harmless no-ops on hardware they don't
+            # apply to (selah-wifi-resume self-checks for the BCM4350 PCI
+            # ID; display/bluetooth hooks are inert without those devices).
+            ('/usr/lib/systemd/system-sleep/bluetooth-resume',
+             '/mnt/usr/lib/systemd/system-sleep/'),
+            ('/usr/lib/systemd/system-sleep/selah-display-resume',
+             '/mnt/usr/lib/systemd/system-sleep/'),
+            ('/usr/lib/systemd/system-sleep/selah-wifi-resume',
+             '/mnt/usr/lib/systemd/system-sleep/'),
         ]
         for src, dst in seed_files:
             if _os.path.exists(src):
@@ -1380,7 +1624,7 @@ class InstallThread(QThread):
         # selah-wifi-wake (PCIe remove/rescan + brcmfmac reload) is a
         # BCM4350-only workaround — on wl-driven chips like the
         # MacBookPro9,2's BCM4331 it leaves the card driverless.
-        services = ['selah-wifi-driver', 'thermald', 'irqbalance', 'acpid']
+        services = ['selah-wifi-driver', 'thermald', 'irqbalance', 'acpid', 'selah-seedcore-reapply']
         if profile.get('wifi') == 'BCM4350':
             services.append('selah-wifi-wake')
         if battery:
@@ -1498,13 +1742,31 @@ class InstallThread(QThread):
 
 
 # ── Screen 6: Complete ────────────────────────────────────────
+class RepairThread(QThread):
+    """Runs selah-doctor --fix against the still-mounted install target."""
+    done_signal = pyqtSignal(int, str)
+
+    def run(self):
+        r = subprocess.run(
+            ['/usr/local/bin/selah-doctor', '--target', '/mnt', '--fix'],
+            capture_output=True, text=True)
+        self.done_signal.emit(r.returncode, (r.stdout or '') + (r.stderr or ''))
+
+
 class DoneScreen(QWidget):
-    def __init__(self, success, message='', preflight_exit=-1, preflight_output=''):
+    def __init__(self, success, message='', preflight_exit=-1, preflight_output='', bootloader_ok=True):
         super().__init__()
         self.success = success
         self.message = message
         self.preflight_exit = preflight_exit
         self.preflight_output = preflight_output
+        self.bootloader_ok = bootloader_ok
+        self._repair_thread = None
+        self.out_box = None
+        self.repair_btn = None
+        self.repair_status = None
+        self.restart_btn = None
+        self._ack_box = None
         self._build()
 
     def _build(self):
@@ -1534,13 +1796,16 @@ class DoneScreen(QWidget):
             inst2.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(inst2)
 
-            # bake-fixes handoff Task 3: surface the post-install preflight
-            # result. A FAIL blocks the restart button until explicitly
-            # acknowledged; a WARN is shown but doesn't block (matches the
-            # script's own exit-code contract: 2 = fail, 1 = warn, 0 = clean).
+            # bake-fixes handoff Task 3, extended: surface the post-install
+            # preflight result AND whether grub-install actually produced
+            # EFI boot files (a failed grub-install used to be logged as a
+            # WARNING and never surfaced at all). Either condition blocks
+            # the restart button until the user repairs it or explicitly
+            # acknowledges; a WARN-only preflight is shown but doesn't block.
+            needs_repair = (not self.bootloader_ok) or self.preflight_exit == 2
             ack_box = None
-            if self.preflight_exit in (1, 2):
-                is_fail = self.preflight_exit == 2
+            if needs_repair or self.preflight_exit == 1:
+                is_fail = needs_repair
                 color = C['red'] if is_fail else C['gold']
                 summary_title = QLabel(
                     'Pre-flight check found issues' if is_fail
@@ -1550,31 +1815,47 @@ class DoneScreen(QWidget):
                 summary_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 layout.addWidget(summary_title)
 
-                out = QPlainTextEdit(self.preflight_output.strip() or '(no output)')
-                out.setReadOnly(True)
-                out.setFixedHeight(140)
-                out.setFont(QFont('JetBrains Mono', 10))
-                out.setStyleSheet(
+                out_text = self.preflight_output.strip() or '(no output)'
+                if not self.bootloader_ok:
+                    out_text = ('Bootloader was not verified as installed (no GRUB EFI '
+                                'boot files found) -- this system will not boot.\n\n') + out_text
+                self.out_box = QPlainTextEdit(out_text)
+                self.out_box.setReadOnly(True)
+                self.out_box.setFixedHeight(140)
+                self.out_box.setFont(QFont('JetBrains Mono', 10))
+                self.out_box.setStyleSheet(
                     f"background: {C['bg2']}; color: {C['text2']}; "
                     f"border: 1px solid {color}; border-radius: 8px; padding: 8px;")
-                layout.addWidget(out)
+                layout.addWidget(self.out_box)
 
                 if is_fail:
+                    self.repair_status = muted_label('', 12)
+                    self.repair_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    layout.addWidget(self.repair_status)
+
+                    self.repair_btn = QPushButton('Repair Now')
+                    self.repair_btn.setFixedSize(200, 44)
+                    self.repair_btn.setFont(QFont('Inter', 13, QFont.Weight.Bold))
+                    self.repair_btn.clicked.connect(self._run_repair)
+                    layout.addWidget(self.repair_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
                     ack_box = QCheckBox('I understand this system has unresolved issues, and want to restart anyway')
                     ack_box.setFont(QFont('Inter', 12))
                     ack_box.setStyleSheet(f"color: {C['text2']}; background: transparent;")
                     layout.addWidget(ack_box, alignment=Qt.AlignmentFlag.AlignCenter)
+                    self._ack_box = ack_box
 
             layout.addSpacing(32)
 
             btn = QPushButton('Restart Now')
             btn.setFixedSize(200, 56)
             btn.setFont(QFont('Inter', 16, QFont.Weight.Bold))
-            btn.clicked.connect(lambda: subprocess.run(['reboot']))
+            btn.clicked.connect(self._do_restart)
             if ack_box is not None:
                 btn.setEnabled(False)
                 ack_box.toggled.connect(btn.setEnabled)
             layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            self.restart_btn = btn
 
             layout.addStretch()
 
@@ -1598,15 +1879,57 @@ class DoneScreen(QWidget):
             title.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(title)
 
-            msg = QLabel(self.message[:500] or 'An error occurred. Check /tmp/selah-setup.log')
+            # Was a fixed-height QLabel truncated to 500 chars -- sh_critical()
+            # now appends a tail of the real command output (which is what
+            # actually explains a failure like "mkfs.ext4 failed") to this
+            # message, and /tmp/selah-setup.log itself only survives until
+            # the live session is powered off, so this needs to show the
+            # whole thing, scrollable, not clip it.
+            msg = QPlainTextEdit(self.message.strip() or 'An error occurred. Check /tmp/selah-setup.log')
+            msg.setReadOnly(True)
+            msg.setFixedHeight(260)
             msg.setFont(QFont('JetBrains Mono', 11))
-            msg.setStyleSheet(f"color: {C['red']}; background: {C['bg2']}; padding: 12px; border-radius: 8px;")
-            msg.setWordWrap(True)
+            msg.setStyleSheet(
+                f"background: {C['bg2']}; color: {C['red']}; "
+                f"border: 1px solid {C['red']}; border-radius: 8px; padding: 8px;")
             layout.addWidget(msg)
 
             note = muted_label('Log: /tmp/selah-setup.log', 12)
             note.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(note)
+
+    def _run_repair(self):
+        self.repair_btn.setEnabled(False)
+        self.repair_btn.setText('Repairing…')
+        self.repair_status.setText(
+            'Reinstalling the bootloader and re-checking the system — this can take a minute.')
+        self._repair_thread = RepairThread()
+        self._repair_thread.done_signal.connect(self._repair_done)
+        self._repair_thread.start()
+
+    def _repair_done(self, exit_code, output):
+        if self.out_box is not None:
+            self.out_box.setPlainText(output.strip() or '(no output)')
+        if exit_code == 0:
+            self.repair_status.setText('✓ Repair succeeded.')
+            self.repair_btn.setText('Repaired')
+            self.bootloader_ok = True
+            if self._ack_box is not None:
+                self._ack_box.hide()
+            if self.restart_btn is not None:
+                self.restart_btn.setEnabled(True)
+        else:
+            self.repair_status.setText(
+                'Repair did not fully succeed — see details above. You can try again.')
+            self.repair_btn.setEnabled(True)
+            self.repair_btn.setText('Repair Now')
+
+    def _do_restart(self):
+        # /mnt was deliberately left mounted after install so Repair Now
+        # above could act on it; unmount here, right before reboot, whether
+        # or not a repair ever ran (harmless no-op if already unmounted).
+        subprocess.run(['bash', '-c', 'sync; umount -R /mnt 2>/dev/null; true'])
+        subprocess.run(['reboot'])
 
 
 # ── Main Window ───────────────────────────────────────────────
@@ -1725,8 +2048,8 @@ class SelahSetup(QMainWindow):
         self._goto(4)
         self.install.start(self.install_config)
 
-    def _install_done(self, success, msg, preflight_exit=-1, preflight_output=''):
-        done = DoneScreen(success, msg, preflight_exit, preflight_output)
+    def _install_done(self, success, msg, preflight_exit=-1, preflight_output='', bootloader_ok=True):
+        done = DoneScreen(success, msg, preflight_exit, preflight_output, bootloader_ok)
         self.stack.addWidget(done)
         self.stack.setCurrentWidget(done)
         self.step_label.setText('Complete' if success else 'Error')

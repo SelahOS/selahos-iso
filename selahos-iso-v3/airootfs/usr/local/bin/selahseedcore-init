@@ -24,3 +24,12 @@ if echo "$MANUFACTURER" | grep -qi "apple"; then
 else
     logger "SelahSeedCore: Non-Apple hardware, skipping"
 fi
+
+# selah-seedcore-reapply (runs at boot, before this script) drops this flag
+# when it changes GRUB_CMDLINE_LINUX_DEFAULT for a machine this install
+# hasn't booted on before -- kernel params only take effect after a reboot.
+if [ -f /run/selah-seedcore-reboot-needed ]; then
+    notify-send -u normal "SelahOS" \
+        "New hardware detected on this drive. Reboot once to finish optimizing SelahOS for this machine." \
+        2>/dev/null
+fi

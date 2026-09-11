@@ -1,0 +1,72 @@
+#!/bin/bash
+# selah-seedcore-reapply — re-apply the hardware-specific SelahSeedCore
+# profile (GRUB kernel params + BCM4350 wake service) for whichever
+# physical machine this system is currently booted on.
+#
+# Why this exists: selah-setup's installer used to bake this profile once,
+# at install time, based on whatever machine ran the installer. That's
+# fine for a normal fixed install, but breaks completely for a portable
+# "to-go" install built on one machine (e.g. a VM, for Dual Boot mode
+# testing) and then booted on another — the baked config matches the
+# WRONG machine. This runs at every boot, compares the live machine model
+# against the last one this profile was applied for, and only redoes the
+# work when they differ (first boot on a new machine, or a fixed install's
+# very first boot ever) — a no-op on every boot after that.
+#
+# GRUB_CMDLINE_LINUX_DEFAULT only takes effect on the NEXT boot, so a
+# mismatch here also drops a flag for selahseedcore-init (which runs in
+# the user's session) to surface a "reboot to finish" notice.
+
+set -u
+
+MARKER=/var/lib/selah-seedcore/applied-for-model
+REBOOT_FLAG=/run/selah-seedcore-reboot-needed
+DB=/usr/share/selahos/hardware-db.json
+
+mkdir -p "$(dirname "$MARKER")"
+
+current_model=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
+[ -n "$current_model" ] || exit 0
+
+last_model=$(cat "$MARKER" 2>/dev/null)
+[ "$current_model" = "$last_model" ] && exit 0
+
+logger "selah-seedcore-reapply: model changed ('$last_model' -> '$current_model'), reapplying profile"
+
+# GRUB kernel params: hardware-db.json is keyed by DMI product name, same
+# lookup selah-setup's _apply_seedcore does at install time. Uses python3
+# (a guaranteed base package) reading the lookup script from stdin rather
+# than `python3 -c "..."` -- passing $DB/$current_model as argv instead of
+# interpolating them into the script text avoids any quote-nesting hazard
+# when this file is edited/pasted by hand.
+if [ -f "$DB" ]; then
+    params=$(python3 - "$DB" "$current_model" 2>/dev/null << 'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        db = json.load(f)
+    entry = db.get(sys.argv[2])
+    if isinstance(entry, dict):
+        print(entry.get('params', ''))
+except Exception:
+    pass
+PYEOF
+)
+    if [ -n "$params" ]; then
+        sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"$params\"|" /etc/default/grub
+        grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | logger -t selah-seedcore-reapply
+        touch "$REBOOT_FLAG"
+    fi
+fi
+
+# BCM4350 wake workaround: safe only on that exact chip (see
+# selah-wifi-wake.service's own header) -- gate on a LIVE PCI ID check,
+# not a stale install-time flag.
+if grep -qs 0x43a3 /sys/bus/pci/devices/*/device 2>/dev/null; then
+    systemctl enable --now selah-wifi-wake.service 2>/dev/null
+else
+    systemctl disable selah-wifi-wake.service 2>/dev/null
+fi
+
+echo "$current_model" > "$MARKER"
+logger "selah-seedcore-reapply: profile applied for '$current_model'"
