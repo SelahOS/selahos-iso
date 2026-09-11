@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Doctor
+GenericName=Bootloader & Boot Health Check
+Comment=Verify and repair the SelahOS bootloader and boot health
+Exec=konsole -e sudo /usr/local/bin/selah-doctor --fix
+Icon=tools-wizard
+Terminal=false
+Categories=System;Settings;
+Keywords=SelahOS;bootloader;grub;repair;rescue;boot;
+StartupNotify=true

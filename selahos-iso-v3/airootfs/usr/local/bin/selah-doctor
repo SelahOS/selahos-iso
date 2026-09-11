@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# ============================================================
+# selah-doctor — SelahOS install-time & post-install doctor
+#
+# Single entry point that verifies the bootloader was actually
+# installed (not just that grub-mkconfig ran without error) and
+# repairs it if asked, then runs selah-preflight-check (and, for a
+# live/booted target, selah-postflight-check) against the target.
+#
+# Exists because selah-setup's own bootloader step (grub-install)
+# had no verification: a failed grub-install was logged as a
+# WARNING and the installer still reported success, so a user could
+# finish the installer, reboot, and land on a firmware "no bootable
+# device" screen with the OS otherwise fully installed. This is the
+# tool that catches and fixes that — both from inside the installer,
+# against the still-mounted target before reboot, and standalone
+# afterward (from a live USB, or on an already-installed system that
+# runs into this later, e.g. after an NVRAM reset).
+#
+# Usage:
+#   selah-doctor                       diagnose /, no changes
+#   selah-doctor --fix                 diagnose /, repair what's fixable
+#   selah-doctor --target /mnt --fix   same, against a mounted install target
+#
+# Exit codes: 0 = clean, 1 = warnings only, 2 = failures remain
+# ============================================================
+set -uo pipefail
+
+TARGET_ARG="/"
+FIX=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --target) TARGET_ARG="$2"; shift 2 ;;
+        --fix) FIX=1; shift ;;
+        -h|--help)
+            echo "Usage: selah-doctor [--target /mnt] [--fix]"
+            exit 0
+            ;;
+        *) echo "selah-doctor: unknown argument: $1" >&2; exit 64 ;;
+    esac
+done
+
+# T is the target root with no trailing slash; "" means "/" itself,
+# which lets "$T/boot/..." resolve correctly in both cases without
+# double slashes.
+T="${TARGET_ARG%/}"
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "selah-doctor must run as root: sudo selah-doctor" >&2
+    exit 1
+fi
+
+FAIL=0; WARN=0
+say_ok()   { echo "  OK      $1"; }
+say_fix()  { echo "  FIXED   $1"; }
+say_bad()  { echo "  FAIL    $1"; FAIL=1; }
+say_warn() { echo "  WARN    $1"; WARN=1; }
+
+run_in_target() {
+    if [ -z "$T" ]; then
+        "$@"
+    else
+        arch-chroot "$T" "$@"
+    fi
+}
+
+echo "SelahOS Doctor — target: ${TARGET_ARG}  ($( [ "$FIX" = 1 ] && echo 'diagnose + repair' || echo 'diagnose only'))"
+echo
+
+# ── 1. Bootloader ────────────────────────────────────────────────
+# selah-setup mounts the ESP at /boot/efi; the older, no-longer-used
+# selahos-installer mounted it directly at /boot. Detect which one
+# this system actually used instead of assuming — mountpoint sees
+# the real mount table whether or not we're inside a chroot.
+echo "-- Bootloader --"
+efi_dir="/boot"
+mountpoint -q "$T/boot/efi" 2>/dev/null && efi_dir="/boot/efi"
+
+bootloader_present() {
+    [ -s "$T$efi_dir/EFI/BOOT/BOOTX64.EFI" ] || [ -s "$T$efi_dir/EFI/SelahOS/grubx64.efi" ]
+}
+
+if bootloader_present; then
+    say_ok "GRUB EFI files present under $efi_dir"
+else
+    say_bad "no GRUB EFI files under $efi_dir — this system will not boot"
+    if [ "$FIX" = 1 ]; then
+        echo "  attempting repair..."
+        run_in_target pacman -S --noconfirm --needed grub efibootmgr
+        run_in_target grub-install --target=x86_64-efi --efi-directory="$efi_dir" \
+            --bootloader-id=SelahOS --removable --recheck
+        run_in_target grub-mkconfig -o /boot/grub/grub.cfg
+        run_in_target mkinitcpio -P
+        if bootloader_present; then
+            say_fix "GRUB reinstalled — EFI files now present under $efi_dir"
+            FAIL=0
+        else
+            say_bad "GRUB reinstall attempted but EFI files are still missing — see grub-install output above"
+        fi
+    else
+        echo "  fix: sudo selah-doctor --target ${TARGET_ARG} --fix"
+    fi
+fi
+
+if [ -f "$T/boot/grub/grub.cfg" ]; then
+    say_ok "grub.cfg exists"
+else
+    say_bad "grub.cfg missing"
+fi
+
+# ── 2. Preflight (works against any target: live, chroot, or /mnt) ─
+echo
+echo "-- Preflight --"
+if [ -x "$T/usr/local/bin/selah-preflight-check" ]; then
+    run_in_target /usr/local/bin/selah-preflight-check
+    pf_exit=$?
+    [ "$pf_exit" -eq 2 ] && FAIL=1
+    [ "$pf_exit" -eq 1 ] && WARN=1
+else
+    say_warn "selah-preflight-check not present on target — skipped"
+fi
+
+# ── 3. Postflight — only meaningful against a live/booted system;
+# it checks live kernel/driver state (dmesg, iw, dkms status) that a
+# not-yet-booted chroot target doesn't have.
+if [ -z "$T" ]; then
+    echo
+    echo "-- Postflight --"
+    if command -v selah-postflight-check >/dev/null 2>&1; then
+        if [ "$FIX" = 1 ]; then
+            selah-postflight-check --fix
+        else
+            selah-postflight-check
+        fi
+        po_exit=$?
+        [ "$po_exit" -eq 2 ] && FAIL=1
+        [ "$po_exit" -eq 1 ] && WARN=1
+    fi
+fi
+
+echo
+if [ "$FAIL" -eq 1 ]; then
+    echo "SelahOS Doctor: FAILURES REMAIN"
+    exit 2
+elif [ "$WARN" -eq 1 ]; then
+    echo "SelahOS Doctor: warnings only"
+    exit 1
+else
+    echo "SelahOS Doctor: clean"
+    exit 0
+fi
