@@ -1,0 +1,67 @@
+# Base system package set for selah-setup (installer). Single source of
+# truth, shared with tools/build-offline-repo.sh — do not also hardcode
+# this list anywhere else, or the offline repo and the installer's actual
+# requests will drift apart again (the exact bug class this file exists
+# to prevent).
+base
+base-devel
+linux-zen
+linux-zen-headers
+linux-firmware
+networkmanager
+sudo
+grub
+efibootmgr
+os-prober
+intel-ucode
+amd-ucode
+openssh
+nano
+vim
+git
+wget
+curl
+python
+python-pip
+
+# selah-wifi-driver modprobes wl on BCM4331/4360-class chips — the module
+# must exist on the installed system, not just the live ISO (packages.x86_64
+# ships it there). Builds via dkms against the headers above during pacstrap.
+broadcom-wl-dkms
+
+# SELAH-50 addendum: selah-preflight-check's PCI/USB hardware scan (WiFi
+# driver binding, Bluetooth chip, generic device enumeration) needs
+# lspci/lsusb. Only pulled in as an indirect dependency on the live ISO —
+# never pacstrapped here before, so every installed system previously had
+# neither, and those checks would have silently no-op'd post-install.
+pciutils
+usbutils
+
+# CLAUDE-CODE-COMPLETE-MASTER-PLAN Phase 2.6: shipped on the live ISO
+# (packages.x86_64) but never pacstrapped here before — same "live-only"
+# gap class as pciutils/usbutils above. Without bluez/bluez-utils the
+# Bluetooth daemon itself is absent on installed systems (not just
+# diagnostics); smartmontools and iw are postflight-check dependencies
+# (disk health, WiFi driver/powersave state) that would silently no-op
+# without this.
+bluez
+bluez-utils
+smartmontools
+iw
+
+# 2026-09-04: proven working on the live ISO (see local-repo/ and its use
+# in customize_airootfs.sh) but never reached installed systems before —
+# same "live-only gap" pattern as the items above. Fixes real audio on
+# Cirrus CS8409 codec Macs (e.g. MacBookPro14,1-class hardware) out of
+# the box instead of leaving it silent post-install.
+snd-hda-macbookpro-dkms-git
+
+# 2026-09-06: CONFIRMED on a real MacBook10,1 (2017 12" MacBook) — the
+# stock kernel's cs420x driver picks a blank pin fixup for this Cirrus
+# CS4208 codec's SSID (106b:6600, not in the upstream table), leaving the
+# internal speaker unwired (autoconfig reports speaker_outs=0). Sibling
+# fix to snd-hda-macbookpro-dkms-git above, same packaging pattern (see
+# packaging/snd-hda-macbook12-dkms-git/), for the 12" MacBook's different
+# codec. Verified via direct ALSA playback on hw:0,0 post-install (clean
+# open at the codec's native 44100Hz, correct period timing, no errors).
+snd-hda-macbook12-dkms-git

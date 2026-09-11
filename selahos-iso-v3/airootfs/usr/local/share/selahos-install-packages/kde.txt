@@ -1,0 +1,75 @@
+# KDE Plasma desktop package set for selah-setup (installer). See base.txt
+# for the shared source-of-truth note.
+plasma-desktop
+plasma-workspace
+plasma-pa
+plasma-nm
+sddm
+sddm-kcm
+kwin
+breeze
+breeze-gtk
+konsole
+dolphin
+kate
+ark
+gwenview
+spectacle
+kscreen
+kinfocenter
+firefox
+xdg-user-dirs
+
+# Match the live ISO's KDE application set (packages.x86_64) — anything
+# the live session ships must survive onto the installed system or users
+# see apps "disappear" after install.
+dolphin-plugins
+ffmpegthumbs
+filelight
+kcalc
+kcharselect
+kcolorchooser
+kdeconnect
+kdialog
+kfind
+kwalletmanager
+okular
+partitionmanager
+kdeplasma-addons
+kde-cli-tools
+kde-gtk-config
+plasma-systemmonitor
+plasma-firewall
+plasma-disks
+kdenlive
+
+# selah-reflection.desktop is copied to the installed system and launches
+# xiphos
+xiphos
+
+# SelahOS theming: Kvantum engine (the Selah theme is a Kvantum theme) and
+# fastfetch (skel .bashrc + profile.d snippet invoke it; config ships via
+# _apply_theme)
+kvantum
+kvantum-qt5
+fastfetch
+
+# SELAH-36: the custom SDDM theme is Qt5 QML; Plasma 6 is Qt6 and pulls in
+# none of these, so SDDM greets to a black screen without them
+qt5-base
+qt5-declarative
+qt5-quickcontrols
+qt5-quickcontrols2
+qt5-graphicaleffects
+qt5-svg
+
+# bake-fixes handoff Task 4: safe nouveau default for non-Mac NVIDIA
+# hardware. Harmless if no NVIDIA GPU is present; without it, NVIDIA
+# machines have no X11/XWayland driver at all until a user manually
+# installs one post-boot.
+xf86-video-nouveau
+
+# bake-fixes handoff Task 6: Discover has no app backend without this —
+# flatpak package alone isn't enough, Discover also needs a configured
+# remote (see flatpak remote-add in selah-setup).
+flatpak

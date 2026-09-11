@@ -1,0 +1,25 @@
+# Additional base-system packages for Apple hardware only (is_apple branch
+# in selah-setup). See base.txt for the shared source-of-truth note.
+
+# SelahSeedCore can recommend linux-lts for older Mac GPUs (hardware-db.json
+# "kernel": "linux-lts" entries, e.g. Broadwell/iMac16,2) -- it must actually
+# be installed or the later grub-set-default call has no entry to point at
+# and silently falls back to linux-zen, which doesn't have the same track
+# record on that hardware.
+linux-lts
+linux-lts-headers
+
+# SELAH-49 audit: _apply_seedcore has ALWAYS unconditionally `systemctl
+# enable`'d thermald/irqbalance/acpid on installed systems, but none of the
+# three were ever pacstrapped here before — only present on the live ISO
+# (packages.x86_64). sh()/chroot() swallow nonzero exits into a log WARNING
+# rather than failing the install, so this was a silent no-op on every Mac
+# install until fixed. tlp and mbpfan are AUR-only (tlp-git/mbpfan-git,
+# confirmed via this dev machine's /var/log/pacman.log — hand-built with
+# makepkg and pacman -U'd locally, not pulled from a repo) and are NOT
+# included here; wiring AUR packages into the offline repo needs its own
+# design (see the offline-repo plan's "explicitly deferred" section) —
+# flagged as a follow-up, not fixed in this pass.
+acpid
+thermald
+irqbalance

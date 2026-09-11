@@ -1,0 +1,21 @@
+# Audio package set for selah-setup (installer). See base.txt for the
+# shared source-of-truth note.
+#
+# 2026-09-04: pipewire-jack and jack2 both provide the same `jack` virtual
+# package and explicitly conflict — a real install crash when both ended
+# up in the same non-interactive pacstrap transaction (jack2 pulled in via
+# live-mirror-state-dependent resolution, not requested here directly).
+# Fix is structural, not just "don't list jack2 here" (it never was
+# listed): jack2 is excluded from the bundled offline repo entirely
+# (tools/build-offline-repo.sh) and blocked via `IgnorePkg = jack2` in
+# pacman.conf, so this conflict is now impossible regardless of resolution
+# path, not just avoided by omission.
+pipewire
+pipewire-alsa
+pipewire-audio
+pipewire-jack
+pipewire-pulse
+wireplumber
+alsa-utils
+alsa-firmware
+sof-firmware

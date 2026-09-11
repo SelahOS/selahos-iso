@@ -1,0 +1,18 @@
+# Wine/SelahBridge package set for selah-setup (installer). See base.txt
+# for the shared source-of-truth note.
+#
+# Deliberately smaller than the live ISO's own Wine section
+# (packages.x86_64) — dxvk-async-git, wineasio, and the lib32-* audio/
+# graphics stack are live-ISO-only today, not installed onto the target.
+# Flagged as a known, deferred gap (see the offline-repo plan's
+# "explicitly deferred" section) — not a crash/failure, just reduced
+# DAW-via-Wine capability post-install, out of scope for this pass.
+wine-staging
+winetricks
+wine-mono
+wine-gecko
+# python-mido/python-rtmidi: the device editors under
+# /usr/local/lib/selahos/device-bridge import them at runtime
+python-pyqt6
+python-mido
+python-rtmidi
