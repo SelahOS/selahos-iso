@@ -1,0 +1,26 @@
+#!/bin/bash
+# SelahSeedCore — Wi-Fi Resume Hook
+#
+# The BCM4350 PCIe Wi-Fi's brcmfmac msgbuf ring does not survive suspend;
+# every firmware command times out (-5/EIO) after resume until the PCI
+# device is removed and re-enumerated. selah-wifi-wake.service already
+# does this remove+rescan+reload, but it's WantedBy=multi-user.target,
+# so it only ever runs once at cold boot — never on the actual resume
+# that needs it. This hook is the real fix; that boot-time unit is left
+# as-is for first-boot enumeration.
+case "$1/$2" in
+    post/*)
+        for dev in /sys/bus/pci/devices/*; do
+            [ "$(cat "$dev/vendor" 2>/dev/null)" = "0x14e4" ] || continue
+            [ "$(cat "$dev/device" 2>/dev/null)" = "0x43a3" ] || continue
+            rmmod brcmfmac 2>/dev/null
+            sleep 2
+            echo 1 > "$dev/remove" 2>/dev/null
+            sleep 3
+            echo 1 > /sys/bus/pci/rescan
+            sleep 3
+            modprobe brcmfmac 2>/dev/null
+            break
+        done
+        ;;
+esac
