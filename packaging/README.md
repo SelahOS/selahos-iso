@@ -60,11 +60,27 @@ sudo pacman -S --overwrite '/usr/local/*,/etc/selahbridgepro/*,/etc/selah-mpc/*,
 
 (`selah-update` should wrap this for the migration release.)
 
+## Publishing (step 2 of the OTA roadmap)
+
+```
+bash ~/SelahOS-Dev/packaging/publish.sh
+```
+
+Uploads the packages built above to `web-core:/var/www/selahos-repo`,
+then signs them there — the GPG private key was generated directly on
+web-core and never touches this repo or the dev machine (see the
+2026-06-17 SelahBridgePro secret-leak incident this is deliberately
+avoiding a repeat of). `[selahos]` in the ISO's `pacman.conf` stays
+commented out until this has been verified reachable end-to-end; see
+that file's comment for current status.
+
 ## Roadmap to OTA (see project notes)
 
 1. ✅ PKGBUILDs + local repo (this directory)
-2. Stand up `repo.selahos.io` on web-core, sign packages
-   (`repo-add --sign`), add `[selahos]` to the ISO's pacman.conf
+2. 🔄 Stand up `repo.selahos.io` on web-core, sign packages
+   (`repo-add --sign`), add `[selahos]` to the ISO's pacman.conf —
+   tooling in place (`publish.sh`, `tools/repo-server/`), server/DNS
+   rollout in progress
 3. Pin Arch packages per release via Arch Linux Archive snapshots
    (`archive.archlinux.org/repos/YYYY/MM/DD/`) + channel promotion
    in `selah-update` (beta → stable)
