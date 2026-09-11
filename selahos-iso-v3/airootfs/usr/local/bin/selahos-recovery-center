@@ -361,7 +361,7 @@ class FreshInstallPage(QWidget):
 
         layout.addStretch()
 
-        note = QLabel("SelahOS v1.0-beta · selahos.io · beta@selahos.io")
+        note = QLabel("SelahOS v2.0.1-beta · selahos.io · beta@selahos.io")
         note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         note.setStyleSheet(f"color: {COLORS['border']}; font-size: 12px;")
         layout.addWidget(note)
@@ -432,7 +432,7 @@ class SelahRecoveryCenter(QMainWindow):
 
         sidebar_layout.addStretch()
 
-        ver = QLabel("v1.0-beta")
+        ver = QLabel("v2.0.1-beta")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet(f"color: {COLORS['border']}; font-size: 11px; padding: 12px;")
         sidebar_layout.addWidget(ver)

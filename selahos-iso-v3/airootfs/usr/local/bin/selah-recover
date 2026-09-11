@@ -191,7 +191,7 @@ case "$ERROR_TYPE" in
             # SelahOS branding
             cat > /mnt/etc/os-release << 'OSREL'
 NAME="SelahOS"
-PRETTY_NAME="SelahOS v1.0-beta"
+PRETTY_NAME="SelahOS v2.0.1-beta"
 ID=selahos
 ID_LIKE=arch
 BUILD_ID=rolling

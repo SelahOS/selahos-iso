@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
-# SelahOS v1.0-beta archiso profile
+# SelahOS v2.0.1-beta archiso profile
 # Copyright (C) 2026 Selah Technologies LLC
 
 iso_name="selahos"
 iso_label="SELAHOS_$(date +%Y%m)"
 iso_publisher="Selah Technologies LLC <https://selahos.io>"
-iso_application="SelahOS Beta — Live and Install Medium"
-iso_version="1.0.0-beta-$(date +%Y.%m.%d)"
+iso_application="SelahOS Beta 2.0.1 — Live and Install Medium"
+iso_version="2.0.1-beta-$(date +%Y.%m.%d)"
 install_dir="arch"
 buildmodes=('iso')
 bootmodes=(
@@ -49,6 +49,8 @@ file_permissions=(
   ["/usr/local/bin/selah-audio-fix"]="0:0:755"
   ["/usr/local/bin/selahauth"]="0:0:755"
   ["/usr/local/bin/selahbridge-detect"]="0:0:755"
+  ["/usr/local/bin/selah-bridgepro-selftest"]="0:0:755"
+  ["/usr/share/selahbridgepro/selftest/selahbridge-selftest.exe"]="0:0:755"
   ["/usr/local/bin/selahbridge-install"]="0:0:755"
   ["/usr/local/bin/selahbridge-sandbox"]="0:0:755"
   ["/usr/local/bin/selahbridge-winapp"]="0:0:755"
@@ -59,6 +61,7 @@ file_permissions=(
   ["/usr/local/bin/selah-mpk-mini-iv"]="0:0:755"
   ["/usr/local/bin/selahpro"]="0:0:755"
   ["/usr/local/bin/selahseedcore-init"]="0:0:755"
+  ["/usr/local/bin/selah-seedcore-reapply"]="0:0:755"
   ["/usr/local/bin/selahwine"]="0:0:755"
   ["/usr/local/bin/selah-wifi-driver"]="0:0:755"
   ["/usr/local/bin/selah-repair"]="0:0:755"
@@ -66,8 +69,12 @@ file_permissions=(
   ["/usr/local/bin/selahos-device-editors"]="0:0:755"
   ["/usr/local/bin/selah-preflight-check"]="0:0:755"
   ["/usr/local/bin/selah-postflight-check"]="0:0:755"
+  ["/usr/local/bin/selah-doctor"]="0:0:755"
   ["/usr/local/lib/selahos/device-bridge/selahos-device-editors"]="0:0:755"
   ["/usr/local/lib/selahos/device-bridge/lib/auto-init.sh"]="0:0:755"
   ["/usr/local/lib/selahos/device-bridge/lib/udev-init.sh"]="0:0:755"
+  ["/usr/lib/systemd/system-sleep/bluetooth-resume"]="0:0:755"
+  ["/usr/lib/systemd/system-sleep/selah-display-resume"]="0:0:755"
+  ["/usr/lib/systemd/system-sleep/selah-wifi-resume"]="0:0:755"
   ["/usr/share/selahos/hardware-db.json"]="0:0:644"
 )
