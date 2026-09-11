@@ -76,3 +76,6 @@ selahos-website/
 # Keep PKGBUILD/.install/final .pkg.tar.zst, drop the build scratch.
 packaging/*/pkg/
 packaging/*/src/
+# makepkg's VCS source cache for -git PKGBUILDs (source=('git+...')),
+# cloned directly under the package dir rather than into src/.
+packaging/snd-hda-macbook12-dkms-git/macbook12-audio-driver/

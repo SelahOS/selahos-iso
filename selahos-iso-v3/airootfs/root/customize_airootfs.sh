@@ -205,13 +205,22 @@ fi
 # ── Step 18: CS8409 audio driver (snd-hda-macbookpro-dkms-git) ─
 # Deliberately NOT in packages.x86_64 (see that file). Its dkms hook runs
 # install.cirrus.driver.sh, which downloads the matching upstream kernel
-# source over the network to patch against — pacstrap does not bind-mount
-# /etc/resolv.conf for its own alpm-hook execution, so this always failed
-# silently there (package "installed", module never actually built, for
-# every kernel, confirmed via dkms status on the dev machine going back to
-# whenever this package was first added). mkarchiso runs this script via
-# arch-chroot, which DOES bind-mount resolv.conf, so this gets a real DKMS
-# build. DO NOT move this back into packages.x86_64.
+# source over the network to patch against.
+#
+# CORRECTED 2026-08-16 (this comment previously claimed arch-chroot
+# bind-mounts /etc/resolv.conf — verified FALSE: `mkarchiso` itself has
+# zero references to resolv.conf, and airootfs ships no /etc/resolv.conf
+# at all, so DNS inside this chroot has never actually worked. That is
+# the real reason this dkms build has silently failed on every single ISO
+# build going back to whenever this package was added — make.log always
+# showed "Temporary failure in name resolution" from install.cirrus.driver.sh's
+# `wget https://cdn.kernel.org/...`, mistaken for an acceptable non-blocker
+# instead of a fixable build bug. arch-chroot only isolates the filesystem,
+# not networking — the chroot shares the host's live network stack, so any
+# real resolv.conf placed at /etc/resolv.conf here resolves fine. Written
+# immediately before this step and removed immediately after so nothing
+# build-machine-specific ships in the image (matches source: no
+# airootfs/etc/resolv.conf).
 #
 # Installed via `pacman -U` from a bundled local file, not `pacman -S` from
 # a repo: this package only ever existed in the build machine's local-repo
@@ -233,12 +242,36 @@ if [ -n "$PKG" ]; then
     # Disable it for just this one internal install, then restore it so
     # the shipped pacman.conf is unchanged.
     sed -i 's/^CheckSpace/#CheckSpace/' /etc/pacman.conf
+    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
     pacman -U --noconfirm --needed "$PKG" || \
         echo "WARNING: snd-hda-macbookpro-dkms-git install/dkms build failed — CS8409 audio (MacBook Pro 14,1) will not work on this ISO"
+    rm -f /etc/resolv.conf
     sed -i 's/^#CheckSpace/CheckSpace/' /etc/pacman.conf
     rm -f "$PKG"
 else
     echo "WARNING: snd-hda-macbookpro-dkms-git-*.pkg.tar.zst not found in /root — was it copied into airootfs/root/?"
+fi
+
+# ── Step 18b: CS4208 audio driver (snd-hda-macbook12-dkms-git) ─
+# 2026-09-06: sibling of Step 18 above, same mechanism, for the 12" MacBook
+# (MacBook10,1)'s Cirrus CS4208 codec — CONFIRMED root cause on real
+# hardware: the stock cs420x driver picks a blank pin fixup for this
+# codec's SSID (106b:6600, not in the upstream table), leaving the
+# internal speaker unwired. This exact package + dkms build was verified
+# live via SSH on the test machine (direct ALSA playback on hw:0,0
+# succeeded cleanly post-install) before being packaged here — see
+# packaging/snd-hda-macbook12-dkms-git/PKGBUILD.
+PKG="$(ls /root/snd-hda-macbook12-dkms-git-*.pkg.tar.zst 2>/dev/null | head -1)"
+if [ -n "$PKG" ]; then
+    sed -i 's/^CheckSpace/#CheckSpace/' /etc/pacman.conf
+    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+    pacman -U --noconfirm --needed "$PKG" || \
+        echo "WARNING: snd-hda-macbook12-dkms-git install/dkms build failed — CS4208 audio (MacBook 10,1 / 12-inch MacBook) will not work on this ISO"
+    rm -f /etc/resolv.conf
+    sed -i 's/^#CheckSpace/CheckSpace/' /etc/pacman.conf
+    rm -f "$PKG"
+else
+    echo "WARNING: snd-hda-macbook12-dkms-git-*.pkg.tar.zst not found in /root — was it copied into airootfs/root/?"
 fi
 
 # ── Step 19: Purge build-time junk ────────────────────────────

@@ -1,0 +1,67 @@
+# Maintainer: Selah Technologies LLC
+#
+# 2026-09-06: CONFIRMED on real hardware (MacBook10,1, the 2017 12" MacBook,
+# Cirrus CS4208 codec) -- the stock kernel's snd-hda-codec-cs420x driver
+# picks a *blank* pin fixup for this codec's subsystem ID (106b:6600, not in
+# the upstream fixup table), leaving the internal speaker completely
+# unwired (autoconfig reports speaker_outs=0) -- this is the real root
+# cause of "no audio out of the box" on this hardware, not a PipeWire/
+# ALSA config issue. This driver's cs4208_probe() unconditionally runs
+# model-specific setup_a1534()/play_a1534() pin/PCM setup for every CS4208
+# codec regardless of SSID match, which is exactly what this hardware
+# needs. Verified after install: direct ALSA playback on hw:0,0 succeeds
+# cleanly at the codec's native 44100Hz (the only rate it exposes --
+# expected for this DSP path, not a defect).
+#
+# Packaged the same way as the already-shipped snd-hda-macbookpro-dkms-git
+# (CS8409, MacBookPro14,1-class hardware) -- see that AUR package and
+# selahos-iso-v3/docs/hardware-lab/cs8409-audio-fix.md for the sibling fix
+# this mirrors. Built module name intentionally matches (and thus shadows,
+# via dkms's /usr/lib/modules/*/updates/dkms override path) the stock
+# snd-hda-codec-cs420x.ko -- this is the intended mechanism, not a
+# conflict, and only this one file is replaced.
+#
+# NOTE: like snd-hda-macbookpro-dkms-git, this package's dkms.conf
+# PRE_BUILD step downloads the matching upstream kernel source tarball at
+# DKMS build time (via install.cirrus.driver.sh) -- this requires internet
+# access the *first* time DKMS builds against a new kernel version, same
+# as the existing CS8409 package. Not yet reconciled with the offline-
+# install goal (selahos-install-packages/*.txt + build-offline-repo.sh) --
+# flagged as a follow-up affecting both audio DKMS packages equally, not
+# a regression introduced here.
+
+pkgname=snd-hda-macbook12-dkms-git
+pkgver=0.1
+pkgrel=1
+pkgdesc="Kernel driver for sound on the 12-inch MacBook (Cirrus CS4208 HDA codec)"
+arch=('any')
+url="https://github.com/juicecultus/macbook12-audio-driver"
+license=('GPL-2.0-only')
+install='snd-hda-macbook12.install'
+depends=(
+    'git'
+    'gcc'
+    'make'
+    'patch'
+    'wget'
+    'dkms'
+)
+makedepends=()
+source=('git+https://github.com/juicecultus/macbook12-audio-driver.git')
+sha256sums=('SKIP')
+
+package() {
+    for file in $(ls -p "${srcdir}"/macbook12-audio-driver | grep -v '/$'); do
+        install -D -m0644 -t \
+            "${pkgdir}"/usr/src/macbook12-audio-${pkgver} \
+            "${srcdir}"/macbook12-audio-driver/"$file"
+    done
+    for file in $(ls -p "${srcdir}"/macbook12-audio-driver/patch_cirrus | grep -v '/$'); do
+        install -D -m0644 -t \
+            "${pkgdir}"/usr/src/macbook12-audio-${pkgver}/patch_cirrus \
+            "${srcdir}"/macbook12-audio-driver/patch_cirrus/"$file"
+    done
+    install -D -m0755 -t \
+        "${pkgdir}"/usr/src/macbook12-audio-${pkgver} \
+        "${srcdir}/macbook12-audio-driver/install.cirrus.driver.sh"
+}
