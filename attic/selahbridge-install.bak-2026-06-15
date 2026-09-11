@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+# ═══════════════════════════════════════════════════════════════════════════════
+#  selahbridge-install — SelahBridgePro Runtime Installer
+#  Selah Technologies LLC — Copyright (C) 2026
+#
+#  Installs and configures the complete SelahBridgePro compatibility layer:
+#  Wine runtime, graphics acceleration, audio bridging, and MIDI support.
+#  Run once after a fresh SelahOS install, or to repair/upgrade the stack.
+#
+#  Usage: selahbridge-install [--repair] [--quiet]
+# ═══════════════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+# ── Terminal colors ───────────────────────────────────────────────────────────
+GOLD=$'\033[38;2;214;168;90m'
+PARCH=$'\033[38;2;237;228;212m'
+TEAL=$'\033[38;2;142;195;184m'
+MUTED=$'\033[38;2;154;141;123m'
+RED=$'\033[38;2;185;122;111m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+RESET=$'\033[0m'
+
+QUIET=0
+REPAIR=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --quiet) QUIET=1; shift ;;
+        --repair) REPAIR=1; shift ;;
+        *) shift ;;
+    esac
+done
+
+_banner() {
+    clear
+    printf '\n'
+    printf '%s%s' "$GOLD" "$BOLD"
+    printf '  ╔══════════════════════════════════════════════════════════════╗\n'
+    printf '  ║          SelahBridgePro™  —  Runtime Installer              ║\n'
+    printf '  ║          Selah Technologies LLC  ·  SelahOS  2026           ║\n'
+    printf '  ╚══════════════════════════════════════════════════════════════╝\n'
+    printf '%s\n\n' "$RESET"
+}
+
+_hdr()  { printf '\n%s%s  %s  %s\n' "$GOLD" "$BOLD" "$1" "$RESET"; }
+_ok()   { printf '  %s✓%s  %s%s%s\n' "$TEAL" "$RESET" "$PARCH" "$1" "$RESET"; }
+_info() { printf '  %s→%s  %s\n' "$MUTED" "$RESET" "$1"; }
+_warn() { printf '  %s⚠%s  %s%s%s\n' "$RED" "$RESET" "$PARCH" "$1" "$RESET"; }
+_die()  { printf '\n%s✗  %s%s\n\n' "$RED" "$1" "$RESET" >&2; exit 1; }
+_step() {
+    local n="$1" total="$2" label="$3"
+    printf '  %s[%d/%d]%s  %s\n' "$MUTED" "$n" "$total" "$RESET" "$label"
+}
+
+_run_quiet() {
+    # Run a command, showing only branded progress — suppress raw package manager output
+    local desc="$1"; shift
+    _info "$desc"
+    if [[ $QUIET -eq 1 ]]; then
+        "$@" &>/dev/null || true
+    else
+        "$@" 2>&1 | sed "s/^/         /" || true
+    fi
+}
+
+_run_silent() {
+    "$@" &>/dev/null 2>&1 || true
+}
+
+# ── Privilege check ───────────────────────────────────────────────────────────
+[[ $EUID -ne 0 ]] || _die "Do not run as root. The installer will request sudo when needed."
+command -v sudo &>/dev/null || _die "sudo is required. Install it first."
+
+# ── Get sudo credential — TTY or KDE GUI dialog ───────────────────────────────
+_SUDOPASS=""
+_get_sudo() {
+    if sudo -n true 2>/dev/null; then
+        return 0  # already cached
+    fi
+    if [[ -t 0 ]]; then
+        # Real terminal available — let sudo prompt normally
+        sudo -v || _die "Authentication failed."
+    elif command -v kdialog &>/dev/null; then
+        # No TTY (running from IDE/Claude) — use KDE GUI dialog
+        _SUDOPASS=$(kdialog \
+            --title "SelahBridgePro Setup" \
+            --password "Administrator password required to install SelahBridgePro:" \
+            2>/dev/null) || _die "Password dialog cancelled."
+        printf '%s\n' "$_SUDOPASS" | sudo -S -v 2>/dev/null \
+            || _die "Authentication failed — wrong password?"
+    else
+        _die "No terminal and no GUI dialog found. Run from Konsole or install kdialog."
+    fi
+}
+
+# Wrapper: run a command with sudo, reusing cached credential
+_sudo() {
+    if [[ -n "$_SUDOPASS" ]]; then
+        printf '%s\n' "$_SUDOPASS" | sudo -S "$@" 2>/dev/null
+    else
+        sudo "$@"
+    fi
+}
+
+_banner
+_get_sudo
+
+# Keep sudo ticket alive for the duration of the install
+( while true; do
+    if [[ -n "$_SUDOPASS" ]]; then
+        printf '%s\n' "$_SUDOPASS" | sudo -S -v 2>/dev/null
+    else
+        sudo -n true 2>/dev/null
+    fi
+    sleep 50
+  done ) &
+SUDO_KEEPALIVE_PID=$!
+trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null; exit' INT TERM EXIT
+
+TOTAL_STEPS=9
+STEP=0
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  Package Repository Setup"
+# ════════════════════════════════════════════════════════════════════════════════
+
+# Enable multilib (32-bit compatibility layer required for audio and graphics)
+PACMAN_CONF="/etc/pacman.conf"
+if grep -q "^#\[multilib\]" "$PACMAN_CONF" 2>/dev/null; then
+    _info "Enabling 32-bit package repository..."
+    sudo sed -i '/^#\[multilib\]/,/^#Include/{
+        s/^#\[multilib\]/[multilib]/
+        s/^#Include/Include/
+    }' "$PACMAN_CONF"
+    _ok "32-bit repository enabled"
+else
+    _ok "32-bit repository already enabled"
+fi
+
+_info "Synchronizing package database..."
+_run_silent sudo pacman -Sy
+_ok "Package database up to date"
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  Wine Compatibility Runtime"
+# ════════════════════════════════════════════════════════════════════════════════
+
+WINE_PKGS=(
+    wine-staging        # Wine with performance and compatibility patches
+    wine-mono           # .NET / C# runtime for Windows apps
+    wine-gecko          # Internet Explorer engine for Wine
+    winetricks          # Helper scripts for common Windows libraries
+)
+
+_info "Installing Wine runtime..."
+_run_silent sudo pacman -S --needed --noconfirm "${WINE_PKGS[@]}"
+_ok "Wine runtime installed"
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  Vulkan Graphics Driver"
+# ════════════════════════════════════════════════════════════════════════════════
+
+# Detect GPU vendor and install the matching Vulkan driver
+_info "Detecting GPU..."
+GPU_VENDOR=""
+if lspci 2>/dev/null | grep -qi "intel"; then
+    GPU_VENDOR="intel"
+fi
+if lspci 2>/dev/null | grep -qi "amd\|radeon\|advanced micro"; then
+    GPU_VENDOR="amd"
+fi
+if lspci 2>/dev/null | grep -qi "nvidia"; then
+    GPU_VENDOR="nvidia"
+fi
+
+case "$GPU_VENDOR" in
+    intel)
+        _info "Intel GPU detected — installing Intel Vulkan driver..."
+        _run_silent sudo pacman -S --needed --noconfirm \
+            vulkan-intel mesa lib32-mesa
+        _ok "Intel Vulkan driver installed"
+        ;;
+    amd)
+        _info "AMD GPU detected — installing AMD Vulkan driver..."
+        _run_silent sudo pacman -S --needed --noconfirm \
+            vulkan-radeon lib32-vulkan-radeon mesa lib32-mesa
+        _ok "AMD Vulkan driver installed"
+        ;;
+    nvidia)
+        _info "NVIDIA GPU detected — installing NVIDIA Vulkan driver..."
+        _run_silent sudo pacman -S --needed --noconfirm \
+            nvidia-utils lib32-nvidia-utils
+        _ok "NVIDIA Vulkan driver installed"
+        ;;
+    *)
+        _warn "Could not detect GPU vendor — skipping Vulkan driver"
+        _info "Install manually: vulkan-intel / vulkan-radeon / nvidia-utils"
+        ;;
+esac
+
+# Vulkan ICD loader (always needed)
+_run_silent sudo pacman -S --needed --noconfirm \
+    vulkan-icd-loader lib32-vulkan-icd-loader 2>/dev/null || true
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  Direct3D 9/10/11 Acceleration (DXVK)"
+# ════════════════════════════════════════════════════════════════════════════════
+# DXVK translates Windows Direct3D 9, 10, and 11 calls into Vulkan.
+# This is required for virtually all Windows graphics applications and DAWs.
+
+_info "Checking for DXVK..."
+DXVK_FOUND=0
+for dir in /usr/share/dxvk /usr/share/dxvk-mingw /usr/share/dxvk-async; do
+    if [[ -f "$dir/x64/d3d11.dll" ]]; then
+        DXVK_FOUND=1
+        break
+    fi
+done
+
+if [[ $DXVK_FOUND -eq 0 ]] || [[ $REPAIR -eq 1 ]]; then
+    _info "Installing Direct3D acceleration layer..."
+    if command -v yay &>/dev/null; then
+        _run_silent yay -S --needed --noconfirm dxvk-mingw
+        _ok "Direct3D 9/10/11 acceleration installed"
+    else
+        _warn "AUR helper (yay) not found — trying pacman fallback..."
+        # Try pacman in case distro has it packaged
+        _run_silent sudo pacman -S --needed --noconfirm dxvk lib32-dxvk 2>/dev/null || \
+            _warn "DXVK not available via pacman. Install yay and re-run this installer."
+    fi
+else
+    _ok "Direct3D 9/10/11 acceleration already present"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  Direct3D 12 Acceleration (VKD3D-Proton)"
+# ════════════════════════════════════════════════════════════════════════════════
+# VKD3D-Proton translates Direct3D 12 (including DirectML/AI features) into
+# Vulkan. This is Valve's production-grade D3D12 implementation — required for
+# modern DAWs, AI-enabled apps (like Spark Desktop), and DX12 instruments.
+
+_info "Checking for Direct3D 12 acceleration..."
+VKD3D_FOUND=0
+for dir in /usr/share/vkd3d-proton /usr/share/vkd3d-proton-mingw; do
+    if [[ -f "$dir/x64/d3d12.dll" ]]; then
+        VKD3D_FOUND=1
+        break
+    fi
+done
+
+# Also accept the -bin package path
+if find /usr/share -name "d3d12.dll" -path "*/vkd3d*" 2>/dev/null | grep -q .; then
+    VKD3D_FOUND=1
+fi
+
+if [[ $VKD3D_FOUND -eq 0 ]] || [[ $REPAIR -eq 1 ]]; then
+    _info "Installing Direct3D 12 acceleration layer..."
+    if command -v yay &>/dev/null; then
+        # vkd3d-proton-bin is a prebuilt binary — no compilation, fast install
+        _run_silent yay -S --needed --noconfirm vkd3d-proton-bin
+        _ok "Direct3D 12 acceleration installed"
+    else
+        _warn "AUR helper (yay) not found — install yay and re-run."
+        # Stock vkd3d as fallback (significantly less compatible)
+        _run_silent sudo pacman -S --needed --noconfirm vkd3d 2>/dev/null || true
+        _warn "Using stock vkd3d fallback — D3D12 compatibility is limited."
+    fi
+else
+    _ok "Direct3D 12 acceleration already present"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  Professional Audio Bridge (SelahASIO)"
+# ════════════════════════════════════════════════════════════════════════════════
+
+_info "Installing audio subsystem..."
+AUDIO_PKGS=(
+    pipewire
+    pipewire-pulse
+    pipewire-jack
+    wireplumber
+)
+_run_silent sudo pacman -S --needed --noconfirm "${AUDIO_PKGS[@]}"
+
+# lib32-pipewire-jack via multilib (now enabled)
+_run_silent sudo pacman -S --needed --noconfirm lib32-pipewire-jack 2>/dev/null || \
+    _warn "lib32-pipewire-jack not available — 32-bit audio apps may have issues"
+
+_ok "PipeWire audio system configured"
+
+# WineASIO bridge
+_info "Installing SelahASIO bridge..."
+if command -v yay &>/dev/null; then
+    _run_silent yay -S --needed --noconfirm wineasio
+    _ok "SelahASIO bridge installed"
+else
+    _warn "yay not found — WineASIO installation skipped"
+fi
+
+# Register WineASIO COM server in the default prefix
+if command -v selah-asio-config &>/dev/null; then
+    _run_silent selah-asio-config --install
+    _ok "SelahASIO registered"
+fi
+
+# Realtime audio scheduling privileges
+LIMITS="/etc/security/limits.conf"
+if [[ -f "$LIMITS" ]] && ! grep -q "@audio.*rtprio" "$LIMITS"; then
+    _info "Configuring realtime audio scheduling..."
+    printf '\n# SelahBridgePro — realtime audio\n@audio  -  rtprio   88\n@audio  -  memlock  unlimited\n' \
+        | sudo tee -a "$LIMITS" > /dev/null
+    _ok "Realtime audio limits configured"
+fi
+
+# Add user to audio group
+CURRENT_USER="${SUDO_USER:-$USER}"
+if ! groups "$CURRENT_USER" 2>/dev/null | grep -qw audio; then
+    _info "Granting audio group membership to $CURRENT_USER..."
+    sudo usermod -aG audio "$CURRENT_USER" 2>/dev/null || true
+    _info "Audio group: re-login required for this to take effect"
+fi
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  USB MIDI & Controller Support"
+# ════════════════════════════════════════════════════════════════════════════════
+
+MIDI_PKGS=(alsa-utils alsa-lib)
+_run_silent sudo pacman -S --needed --noconfirm "${MIDI_PKGS[@]}"
+_ok "ALSA MIDI subsystem present"
+
+if [[ -f /etc/udev/rules.d/99-selah-midi.rules ]]; then
+    _run_silent sudo udevadm control --reload-rules
+    _run_silent sudo udevadm trigger --subsystem-match=usb
+    _ok "USB MIDI device rules loaded"
+else
+    _warn "MIDI udev rules not found — USB devices may need manual configuration"
+fi
+
+# Enable kernel module for virtual MIDI ports (needed for Phase 2 SelahAudio)
+_run_silent sudo modprobe snd-virmidi midi_devs=4 2>/dev/null || true
+# Make it persist
+if [[ -d /etc/modules-load.d ]]; then
+    echo "snd-virmidi" | sudo tee /etc/modules-load.d/selah-virmidi.conf > /dev/null
+    # Set 4 virtual ports by default
+    echo "options snd-virmidi midi_devs=4" | sudo tee /etc/modprobe.d/selah-virmidi.conf > /dev/null
+fi
+_ok "Virtual MIDI ports enabled (4 ports)"
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  SelahBridgePro Core Files"
+# ════════════════════════════════════════════════════════════════════════════════
+
+SRC="/home/${CURRENT_USER}/SelahOS-Dev/selahos-iso-v3/airootfs"
+
+_install_file() {
+    local src="$1" dst="$2"
+    if [[ -f "$src" ]]; then
+        sudo cp "$src" "$dst"
+        sudo chmod +x "$dst" 2>/dev/null || true
+    fi
+}
+
+_info "Deploying SelahBridgePro runtime..."
+_install_file "$SRC/usr/local/bin/selahwine"           /usr/local/bin/selahwine
+_install_file "$SRC/usr/local/bin/selahpro"            /usr/local/bin/selahpro
+_install_file "$SRC/usr/local/bin/selahbridge-winapp"  /usr/local/bin/selahbridge-winapp
+_install_file "$SRC/usr/local/bin/selahbridgepro"      /usr/local/bin/selahbridgepro
+_ok "Core runtime deployed"
+
+_info "Deploying DAW and app profiles..."
+sudo mkdir -p /etc/selahbridgepro/profiles
+for profile in "$SRC/etc/selahbridgepro/profiles/"*.profile; do
+    [[ -f "$profile" ]] && sudo cp "$profile" /etc/selahbridgepro/profiles/
+done
+if [[ -f "$SRC/etc/selahbridgepro/selahbridgepro.conf" ]]; then
+    sudo cp "$SRC/etc/selahbridgepro/selahbridgepro.conf" /etc/selahbridgepro/
+fi
+_ok "Profiles deployed"
+
+# Create log directory
+sudo mkdir -p /var/log/selahbridgepro
+sudo chown "${CURRENT_USER}:${CURRENT_USER}" /var/log/selahbridgepro 2>/dev/null || \
+    sudo chmod 1777 /var/log/selahbridgepro
+
+# ════════════════════════════════════════════════════════════════════════════════
+_hdr "STEP $((++STEP))/$TOTAL_STEPS  —  Verification"
+# ════════════════════════════════════════════════════════════════════════════════
+
+PASS=0; FAIL=0
+_chk() {
+    local label="$1" result
+    result=$(eval "$2" 2>/dev/null && echo ok || echo fail)
+    if [[ "$result" == "ok" ]]; then
+        printf '  %s✓%s  %s%-32s%s\n' "$TEAL" "$RESET" "$PARCH" "$label" "$RESET"
+        ((PASS++))
+    else
+        printf '  %s✗%s  %s%-32s%s\n' "$RED" "$RESET" "$PARCH" "$label" "$RESET"
+        ((FAIL++))
+    fi
+}
+
+_chk "Wine runtime"          "command -v wine"
+_chk "Vulkan ICD"            "find /usr/share/vulkan/icd.d -name '*.json' | grep -q ."
+_chk "Direct3D 9/10/11"      "find /usr/share/dxvk* -name 'd3d11.dll' 2>/dev/null | grep -q ."
+_chk "Direct3D 12"           "find /usr/share -path '*/vkd3d*' -name 'd3d12.dll' 2>/dev/null | grep -q ."
+_chk "PipeWire audio"        "command -v pipewire"
+_chk "SelahASIO bridge"      "find /usr/lib* -name 'wineasio*' 2>/dev/null | grep -q ."
+_chk "ALSA MIDI"             "command -v aconnect"
+_chk "Virtual MIDI ports"    "lsmod | grep -q snd_virmidi"
+_chk "selahwine runtime"     "command -v selahwine"
+_chk "selahpro CLI"          "command -v selahpro"
+_chk "selahbridge-winapp"    "command -v selahbridge-winapp"
+
+printf '\n'
+TOTAL=$((PASS + FAIL))
+if [[ $FAIL -eq 0 ]]; then
+    printf '  %s%s✓  All %d components installed successfully.%s\n\n' \
+        "$TEAL" "$BOLD" "$TOTAL" "$RESET"
+else
+    printf '  %s%s⚠  %d/%d components installed  (%d need attention — see warnings above)%s\n\n' \
+        "$GOLD" "$BOLD" "$PASS" "$TOTAL" "$FAIL" "$RESET"
+fi
+
+printf '%s  SelahBridgePro is ready. Next steps:%s\n' "$PARCH" "$RESET"
+printf '%s  ·%s  selahpro diagnose            %srun a full system check%s\n' \
+    "$TEAL" "$RESET" "$MUTED" "$RESET"
+printf '%s  ·%s  selahpro install <daw>       %sscaffold a DAW Wine prefix%s\n' \
+    "$TEAL" "$RESET" "$MUTED" "$RESET"
+printf '%s  ·%s  selahbridge-winapp <path>    %slaunch any Windows .exe%s\n' \
+    "$TEAL" "$RESET" "$MUTED" "$RESET"
+printf '\n'
