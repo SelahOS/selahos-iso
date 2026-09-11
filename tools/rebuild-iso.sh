@@ -15,9 +15,12 @@ LOG=/home/dbnoble/selahos-build-log.txt
 echo "==> Removing stale work/output dirs"
 rm -rf "$WORK" "$OUT"
 
+echo "==> Building offline package repo (bundled on the ISO for network-free installs, log: $LOG)"
+bash /home/dbnoble/SelahOS-Dev/tools/build-offline-repo.sh 2>&1 | tee "$LOG"
+
 echo "==> Building ISO (log: $LOG)"
-mkarchiso -v -w "$WORK" -o "$OUT" "$PROFILE" 2>&1 | tee "$LOG"
+mkarchiso -v -w "$WORK" -o "$OUT" "$PROFILE" 2>&1 | tee -a "$LOG"
 
 echo
-echo "==> Build finished, running preflight gate"
-bash /home/dbnoble/SelahOS-Dev/tools/iso-preflight.sh
+echo "==> Build finished, running preflight gate (log: $LOG)"
+bash /home/dbnoble/SelahOS-Dev/tools/iso-preflight.sh 2>&1 | tee -a "$LOG"

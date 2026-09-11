@@ -107,7 +107,59 @@ fi
 
 # ================================================================
 echo ""
-echo "-- 2. Sleep / suspend --"
+echo "-- 2. Internet connectivity --"
+# ================================================================
+# NetworkManager's own connectivity checker forces a fresh probe rather
+# than trusting cached state, which is what actually matters for "does
+# the internet work right now" -- an interface can show "connected" while
+# genuinely unable to reach anything (captive portal, DNS down, etc.).
+if command -v nmcli &>/dev/null; then
+    CONN_STATE=$(nmcli networking connectivity check 2>/dev/null)
+    case "$CONN_STATE" in
+        full)
+            pass "NetworkManager reports full connectivity" ;;
+        portal)
+            fail "Behind a captive portal — internet not actually reachable yet" ;;
+        limited)
+            fail "Limited connectivity (local network reachable, internet is not)" ;;
+        none)
+            info "No connectivity at all — normal if no network is configured yet, otherwise check cabling/WiFi"
+            ;;
+        *)
+            warn "Could not determine connectivity state (nmcli returned: ${CONN_STATE:-<empty>})" ;;
+    esac
+else
+    warn "nmcli not available — cannot check connectivity state"
+fi
+
+# DNS resolution -- separate from raw reachability below, since a host
+# can be reachable by IP with DNS still broken (wrong/unreachable
+# resolver), which looks like "no internet" to every actual app.
+if command -v getent &>/dev/null; then
+    if getent hosts archlinux.org &>/dev/null; then
+        pass "DNS resolution works"
+    else
+        fail "DNS resolution failed for archlinux.org — check /etc/resolv.conf / NetworkManager DNS settings"
+    fi
+else
+    warn "getent not available — cannot check DNS resolution"
+fi
+
+# Actual reachability, not just link state. Short timeout so this never
+# hangs the whole postflight run on a genuinely offline machine.
+if command -v curl &>/dev/null; then
+    if curl -fsS --max-time 5 -o /dev/null https://archlinux.org 2>/dev/null; then
+        pass "Internet reachable (HTTPS to archlinux.org succeeded)"
+    else
+        fail "Could not reach the internet over HTTPS — pacman/AUR/repo.selahos.io will all fail"
+    fi
+else
+    warn "curl not available — cannot verify real internet reachability"
+fi
+
+# ================================================================
+echo ""
+echo "-- 3. Sleep / suspend --"
 # ================================================================
 MASKED=""
 for t in sleep.target suspend.target hibernate.target suspend-then-hibernate.target; do
@@ -128,10 +180,16 @@ else
 fi
 
 if [ -f /sys/power/mem_sleep ]; then
-    if grep -q "\[deep\]" /sys/power/mem_sleep; then
-        pass "Deep sleep selected ($(cat /sys/power/mem_sleep))"
+    # 2026-09-06: "deep" is NOT universally correct — confirmed on a real
+    # MacBook10,1 that deep (S3) suspend never resumes at all (hangs
+    # forever), while s2idle at least resumes the kernel/network layer.
+    # The right mode is per-hardware (see hardware-db.json's per-model
+    # mem_sleep_default), so this check only confirms a mode is
+    # explicitly selected — not which one.
+    if grep -qE "\[(deep|s2idle)\]" /sys/power/mem_sleep; then
+        pass "Sleep mode explicitly selected ($(cat /sys/power/mem_sleep))"
     else
-        warn "Deep sleep NOT selected: $(cat /sys/power/mem_sleep) — add mem_sleep_default=deep to GRUB cmdline"
+        warn "No sleep mode explicitly selected: $(cat /sys/power/mem_sleep) — check hardware-db.json's mem_sleep_default for this model"
     fi
 fi
 
@@ -145,7 +203,7 @@ done
 
 # ================================================================
 echo ""
-echo "-- 3. DKMS module health --"
+echo "-- 4. DKMS module health --"
 # ================================================================
 if ! command -v dkms &>/dev/null; then
     fail "DKMS is NOT INSTALLED — out-of-tree drivers (WiFi, audio, FaceTime cam) cannot build or survive kernel updates"
@@ -181,7 +239,7 @@ fi
 
 # ================================================================
 echo ""
-echo "-- 4. Audio (CS8409 / Apple codecs) --"
+echo "-- 5. Audio (CS8409 / Apple codecs) --"
 # ================================================================
 if command -v aplay &>/dev/null; then
     CARDS=$(aplay -l 2>/dev/null | grep "^card")
@@ -202,9 +260,54 @@ else
     warn "alsa-utils not installed — cannot verify audio (fix: pacman -S alsa-utils)"
 fi
 
+# General "does audio work at all" -- separate from the CS8409-specific
+# checks above, since a non-Apple-codec machine has no CS8409 section to
+# fail but can still have a dead PipeWire session. PipeWire/WirePlumber
+# run in the logged-in user's session, not root's, so this has to reach
+# into that session the same way selah-clamshell does (runuser with the
+# right XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS) rather than just
+# checking `systemctl` as root, which would only ever see the system bus.
+AUDIO_USER=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3=="seat0"{print $2; exit}')
+if [ -z "$AUDIO_USER" ]; then
+    AUDIO_USER=$(who 2>/dev/null | awk '{print $1; exit}')
+fi
+if [ -n "$AUDIO_USER" ]; then
+    AUDIO_UID=$(id -u "$AUDIO_USER" 2>/dev/null)
+    RUNDIR="/run/user/$AUDIO_UID"
+    if [ -n "$AUDIO_UID" ] && [ -d "$RUNDIR" ]; then
+        PW_STATE=$(runuser -u "$AUDIO_USER" -- env XDG_RUNTIME_DIR="$RUNDIR" \
+            systemctl --user is-active pipewire.service 2>/dev/null)
+        if [ "$PW_STATE" = "active" ]; then
+            pass "PipeWire is active in $AUDIO_USER's session"
+        else
+            fail "PipeWire is not active in $AUDIO_USER's session (state: ${PW_STATE:-unknown}) — no audio will play at all"
+            if [ $FIX_MODE -eq 1 ]; then
+                runuser -u "$AUDIO_USER" -- env XDG_RUNTIME_DIR="$RUNDIR" \
+                    systemctl --user restart pipewire.service pipewire-pulse.service wireplumber.service &>/dev/null \
+                    && fixed "Restarted PipeWire/WirePlumber for $AUDIO_USER" \
+                    || fail "Could not restart PipeWire for $AUDIO_USER"
+            else
+                info "Fix: systemctl --user restart pipewire.service pipewire-pulse.service wireplumber.service (as $AUDIO_USER)"
+            fi
+        fi
+
+        SINKS=$(runuser -u "$AUDIO_USER" -- env XDG_RUNTIME_DIR="$RUNDIR" \
+            pactl list sinks short 2>/dev/null)
+        if [ -n "$SINKS" ]; then
+            pass "At least one audio output sink is registered"
+        else
+            fail "No audio output sinks registered — nothing to play sound through, even if PipeWire is running"
+        fi
+    else
+        warn "Could not find a runtime dir for $AUDIO_USER (session not fully up?) — skipping PipeWire check"
+    fi
+else
+    info "No logged-in graphical user found — skipping PipeWire/session audio check (normal at a bare TTY)"
+fi
+
 # ================================================================
 echo ""
-echo "-- 5. Disk health (SMART) --"
+echo "-- 6. Disk health (SMART) --"
 # ================================================================
 if ! command -v smartctl &>/dev/null; then
     warn "smartmontools not installed — cannot check disk health"
@@ -238,7 +341,7 @@ fi
 
 # ================================================================
 echo ""
-echo "-- 6. Orphaned kernel modules --"
+echo "-- 7. Orphaned kernel modules --"
 # ================================================================
 ORPHANS=""
 for d in /usr/lib/modules/*/; do
@@ -260,7 +363,7 @@ fi
 
 # ================================================================
 echo ""
-echo "-- 7. Bluetooth --"
+echo "-- 8. Bluetooth --"
 # ================================================================
 if bluetoothctl show 2>/dev/null | grep -q Controller; then
     pass "Bluetooth controller present"
@@ -269,6 +372,32 @@ if bluetoothctl show 2>/dev/null | grep -q Controller; then
     fi
 else
     warn "No Bluetooth controller visible"
+fi
+
+# ================================================================
+echo ""
+echo "-- 9. SelahBridgePro self-test --"
+# ================================================================
+# Installs + runs a small self-contained Windows audio app through Wine
+# in a throwaway prefix. Added 2026-08-17 because selahbridgepro's
+# wrapper can be present and "working" while its actual Wine runtime
+# silently failed to install (a real pacstrap mirror failure that day
+# left wine-staging/wine-gecko/etc. completely absent, with the
+# installer still reporting success) -- checking for the wrapper script
+# alone would have missed that entirely.
+if [ -x /usr/local/bin/selah-bridgepro-selftest ]; then
+    SBP_OUT=$(/usr/local/bin/selah-bridgepro-selftest 2>&1)
+    SBP_RC=$?
+    echo "$SBP_OUT" | sed 's/^/         /'
+    if [ $SBP_RC -eq 0 ]; then
+        pass "SelahBridgePro self-test: can install and run a Windows app with working audio"
+    elif [ $SBP_RC -eq 1 ]; then
+        warn "SelahBridgePro self-test passed with warnings (see above)"
+    else
+        fail "SelahBridgePro self-test FAILED (see above) — Wine runtime is likely missing or broken"
+    fi
+else
+    info "selah-bridgepro-selftest not present on this system — skipping"
 fi
 
 # ================================================================
