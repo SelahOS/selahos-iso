@@ -1,5 +1,31 @@
-# CS4208 Audio Fix — CONFIRMED September 6 2026
-## NEVER REMOVE THIS
+# CS4208 Audio Fix — driver loads correctly, speaker STILL SILENT (corrected September 12 2026)
+
+## CORRECTION — read this before trusting anything below
+This doc originally claimed "CONFIRMED" based on the module loading and
+`speaker-test` opening cleanly. **That was not a real confirmation** — no
+human ever actually heard sound; the September 6 session was SSH-only.
+A live hardware test on 2026-09-12 (Beta 2.0.1 flashed to the real
+MacBook10,1 test unit) confirms: the module loads, the codec is
+correctly identified, the fixup-table bypass runs, PipeWire/ALSA are
+unmuted at full volume, and the pin default at Node 0x1d is a legitimate
+`Fixed Speaker at Int` — **and the speaker is still completely silent.**
+GPIO0 (the presumed amp-enable line) is high, exactly as this driver
+intends, matching a much deeper investigation from 2026-08-13 (a
+*different* upstream fork, `leifliddy/macbook12-audio-driver`) that hit
+the identical dead end. See `project_macbook_audio_driver.md` in
+Claude's memory for the full history across both forks.
+
+**Lesson for future hardware-fix docs in this directory:** "module loads
+without errors" and "speaker-test opens cleanly" are NOT evidence of a
+working fix for this class of bug — only a human ear counts. Don't mark
+anything CONFIRMED without that.
+
+**Current status:** open. Next step is hands-on GPIO experimentation on
+the real unit — see `tools/hardware-lab/gpio_poke.py` and this
+directory's `cs4208-gpio-investigation.md`. Genuinely possible this
+specific test unit has a physical fault rather than a software bug.
+
+## Original (September 6 2026) writeup below, kept for the parts that ARE still true
 
 ## Root cause
 Stock kernel `snd-hda-codec-cs420x` picks a **blank** pin fixup for this
