@@ -1,5 +1,13 @@
 #!/bin/bash
+# 2026-09-12: this hook runs synchronously as part of the systemd sleep
+# transaction -- systemd-sleep waits for every system-sleep/ script to
+# return before signaling resume-finished (PrepareForSleep(false)) to
+# the desktop, which is what the screen/compositor waits on. The old
+# unconditional `sleep 2` here directly caused a ~2s visible delay in
+# the screen coming back after every resume, confirmed via journalctl
+# timestamps on a MacBookPro9,2. Bluetooth doesn't need to be ready
+# before the screen is usable, so give it its 2s settle time in a
+# detached background job instead of blocking resume completion on it.
 if [ "$1" = "post" ]; then
-    sleep 2
-    systemctl restart bluetooth
+    setsid bash -c 'sleep 2; systemctl restart bluetooth' >/dev/null 2>&1 &
 fi
