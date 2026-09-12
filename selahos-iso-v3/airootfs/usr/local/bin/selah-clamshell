@@ -17,7 +17,6 @@
 
 set -u
 
-INTERNAL_OUTPUT="eDP-1"
 LID_STATE_FILE="$(command ls /proc/acpi/button/lid/*/state 2>/dev/null | head -1)"
 
 log() { logger -t selah-clamshell "$*"; }
@@ -61,10 +60,37 @@ run_as_user_kscreen() {
         kscreen-doctor "$@"
 }
 
+# 2026-09-12: the internal panel isn't always named eDP-1 -- that's the
+# modern (~2013+) naming, but older Macs with a pre-eDP LVDS panel (e.g.
+# MacBookPro9,2, 2012) show up as LVDS-1 instead. Hardcoding eDP-1 made
+# this script misidentify its OWN internal screen as "external" on every
+# lid event on that hardware (disabling a nonexistent eDP-1, redundantly
+# re-enabling the already-active LVDS-1 as if it were a handoff target),
+# adding real measurable delay to every lid open/close for no reason.
+# Detect the actual internal output name once per invocation instead.
+detect_internal_output() {
+    local uid="$1" user="$2"
+    local name
+    name="$(run_as_user_kscreen "$uid" "$user" -j 2>/dev/null | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for o in d.get('outputs', []):
+    n = o.get('name', '')
+    if n.startswith('eDP') or n.startswith('LVDS'):
+        print(n)
+        break
+" 2>/dev/null)"
+    echo "${name:-eDP-1}"
+}
+
 sess="$(find_session_user)" || { log "no active graphical session found, exiting"; exit 0; }
 [[ -n "$sess" ]] || { log "no active graphical session found, exiting"; exit 0; }
 uid="${sess%%:*}"
 user="${sess#*:}"
+INTERNAL_OUTPUT="$(detect_internal_output "$uid" "$user")"
 
 state="$(lid_state)"
 ac="no"
