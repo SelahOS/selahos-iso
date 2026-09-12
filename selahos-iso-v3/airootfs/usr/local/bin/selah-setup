@@ -1178,6 +1178,34 @@ class InstallThread(QThread):
         def chroot_critical(cmd):
             return sh_critical(['arch-chroot', '/mnt'] + (cmd if isinstance(cmd, list) else ['bash', '-c', cmd]))
 
+        # 2026-09-12 finding: pacstrap used the live ISO's own /etc/pacman.conf
+        # as-is, which includes [chaotic-aur] -- needed ONLY to build the live
+        # ISO itself (calamares/ckbcomp/dxvk-async-git/wineasio, all in
+        # packages.x86_64). Nothing pacstrap ever installs onto a target comes
+        # from chaotic-aur (wine.txt's own comment already notes dxvk/wineasio
+        # are deliberately excluded from install-time package lists). But
+        # `pacman -Sy` aborts on ANY configured repo's database failing to
+        # sync, even one nothing being installed needs -- so a real chaotic-aur
+        # mirror outage (503/404 from all three of its mirrors, observed
+        # 2026-09-12) took down the entire offline-capable installer for
+        # packages that were available the whole time from selahos-offline/
+        # core/extra. Strip it from a private copy of pacman.conf used only
+        # for pacstrap's target-root syncs; the live session's own
+        # /etc/pacman.conf is untouched.
+        _pacstrap_conf_cache = {}
+
+        def _pacstrap_pacman_conf():
+            if 'path' in _pacstrap_conf_cache:
+                return _pacstrap_conf_cache['path']
+            with open('/etc/pacman.conf') as f:
+                text = f.read()
+            text = re.sub(r'\[chaotic-aur\]\n.*?\n\n', '', text, flags=re.S)
+            dst = '/tmp/selah-pacstrap-pacman.conf'
+            with open(dst, 'w') as f:
+                f.write(text)
+            _pacstrap_conf_cache['path'] = dst
+            return dst
+
         # 2026-08-17 finding: every pacstrap call below went through plain
         # sh(), which only logs a WARNING on a nonzero exit and keeps going.
         # A transient mirror timeout (confirmed root cause for wine-staging/
@@ -1188,7 +1216,7 @@ class InstallThread(QThread):
         # install loudly (same contract as sh_critical) rather than
         # continuing with a partial system.
         def pacstrap(pkgs, retries=3, delay=5):
-            cmd = ['pacstrap', '-K', '/mnt'] + pkgs
+            cmd = ['pacstrap', '-C', _pacstrap_pacman_conf(), '-K', '/mnt'] + pkgs
             for attempt in range(1, retries + 1):
                 r = sh(cmd)
                 if r.returncode == 0:
