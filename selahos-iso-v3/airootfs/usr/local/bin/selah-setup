@@ -1261,6 +1261,22 @@ class InstallThread(QThread):
                        "anything not bundled locally will be skipped/may fail.\n")
             log.flush()
 
+        # 2026-09-12 finding: retrying the installer after any failure that
+        # got as far as partitioning/mounting/pacstrapping (real case hit:
+        # a chaotic-aur mirror outage) leaves stray state behind in the
+        # live session -- /mnt still mounted, and pacstrap's own gpg-agent
+        # (spawned with --homedir pointing inside /mnt for keyring
+        # verification) still running and holding it busy. A retry's
+        # sgdisk --zap-all/mkfs then fails with a confusing, unrelated-
+        # looking error ("mkfs.fat: /dev/sda1 contains a mounted
+        # filesystem") that has nothing to do with whatever caused the
+        # first attempt to fail. Clean up unconditionally before every
+        # install attempt -- a no-op on a genuinely fresh live session,
+        # essential on a retry. Best-effort (sh, not sh_critical): failure
+        # here just means there was nothing to clean up.
+        sh(['pkill', '-f', 'gpg-agent.*--homedir /mnt'])
+        sh(['umount', '-R', '/mnt'])
+
         # Step 0: Partition
         self._step(0)
         if mode == 'dual':
