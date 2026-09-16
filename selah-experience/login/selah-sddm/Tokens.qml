@@ -13,6 +13,9 @@ QtObject {
     readonly property color error: "#E07A5F"
     readonly property color success: "#81B29A"
     readonly property string fontFamily: "Noto Sans"
+    readonly property int bodyPx: 16
+    readonly property int captionPx: 13
+    readonly property int titlePx: 28
     readonly property int spaceXs: 4
     readonly property int spaceSm: 8
     readonly property int spaceMd: 12

@@ -77,30 +77,32 @@ fun refresh() {
     if (last_width != Window.GetWidth() || last_height != Window.GetHeight()) layout();
     if (mode != "normal" || settled) return;
     global.tick++;
-    if (tick % 2 != 0) return;
+    if (tick % visual_stride != 0) return;
     local.seconds = tick / 50;
-    local.reveal = clamp((seconds - 2.1) / 1.1);
+    local.reveal = clamp((seconds - reflect_end_s) / (create_end_s - reflect_end_s));
     logo.SetOpacity(reveal);
     title.SetOpacity(reveal);
     tagline.SetOpacity(reveal);
-    point.SetOpacity(clamp((seconds - 0.35) / 0.35) * (1 - reveal));
+    point.SetOpacity(clamp((seconds - pause_s) / pause_s) * (1 - reveal));
     for (i = 0; i < 3; i++) {
         local.start = 0.7 + i * 0.3;
         local.enter = clamp((seconds - start) / 0.5);
         rings[i].sprite.SetOpacity(0.45 * enter * (1 - reveal));
     }
-    if (tick >= 160) {
+    if (seconds >= create_end_s) {
         global.settled = 1;
         decoration(1);
     }
 }
 fun normal() {
+    if (mode == "normal") return;
     global.mode = "normal";
     prompt_sprite.SetOpacity(0);
     answer_sprite.SetOpacity(0);
     # Resume to a settled mark after any prompt: no repeated entrance animation.
     global.settled = 1;
     decoration(1);
+    if (message_text != "") text_at(message_sprite, message_text, Window.GetHeight() - 60);
 }
 fun password(prompt, bullets) {
     global.mode = "password";

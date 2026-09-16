@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
@@ -9,12 +10,15 @@ Pane {
     padding: 0
     property bool authenticating: false
     property string feedback: ""
+    // SDDM injects these context objects; guarded during greeter teardown.
+    // qmllint disable unqualified
     property var greeter: sddm
     property var sessions: sessionModel
     property var users: userModel
     property var keyboardState: keyboard
+    // qmllint enable unqualified
     font.family: tokens.fontFamily
-    font.pixelSize: 16
+    font.pixelSize: tokens.bodyPx
     palette.window: tokens.background
     palette.base: tokens.field
     palette.button: tokens.field
@@ -24,7 +28,26 @@ Pane {
     palette.highlight: tokens.gold
     palette.highlightedText: tokens.background
     palette.placeholderText: tokens.muted
-    Tokens { id: tokens }
+    Tokens {
+        id: tokens
+    }
+
+    component SelahComboBox: ComboBox {
+        id: combo
+        background: Rectangle {
+            color: tokens.field
+            radius: tokens.radiusField
+            border.width: combo.activeFocus ? 2 : 0
+            border.color: tokens.goldLight
+        }
+        indicator: Text {
+            x: combo.width - width - 16
+            anchors.verticalCenter: parent.verticalCenter
+            text: "⌄"
+            color: tokens.goldLight
+            font.pixelSize: 20
+        }
+    }
 
     background: Rectangle {
         color: tokens.background
@@ -37,7 +60,8 @@ Pane {
     }
 
     function signIn() {
-        if (authenticating) return;
+        if (authenticating || !greeter)
+            return;
         if (username.text.trim() === "") {
             feedback = qsTr("Enter your username.");
             username.forceActiveFocus();
@@ -56,161 +80,179 @@ Pane {
     ScrollView {
         id: scroll
         anchors.fill: parent
-        contentWidth: availableWidth
-        contentHeight: Math.max(availableHeight, form.implicitHeight + 64)
-        clip: true
+        Flickable {
+            id: viewport
+            contentWidth: width
+            contentHeight: Math.max(height, form.implicitHeight + 64)
+            clip: true
 
-        ColumnLayout {
-            id: form
-            width: Math.min(400, scroll.availableWidth - 48)
-            x: (scroll.availableWidth - width) / 2
-            y: Math.max(32, (scroll.availableHeight - implicitHeight) / 2)
-            spacing: tokens.spaceMd
-
-            Image {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: 88
-                Layout.preferredHeight: 88
-                source: "selah-mark.svg"
-                sourceSize: Qt.size(176, 176)
-                fillMode: Image.PreserveAspectFit
-                Accessible.ignored: true
-            }
-            Label {
-                Layout.alignment: Qt.AlignHCenter
-                text: qsTr("SelahOS")
-                font.pixelSize: 28
-            }
-            Label {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.bottomMargin: tokens.spaceLg
-                text: qsTr("Pause. Reflect. Create.")
-                color: tokens.goldLight
-            }
-            Label { text: qsTr("Username"); color: tokens.muted }
-            TextField {
-                id: username
-                objectName: "username"
-                Layout.fillWidth: true
-                implicitHeight: 44
-                text: root.users.lastUser
-                enabled: !root.authenticating
-                Accessible.name: qsTr("Username")
-                selectByMouse: true
-                onAccepted: password.forceActiveFocus()
-                background: Rectangle {
-                    color: tokens.field
-                    radius: tokens.radiusField
-                    border.width: username.activeFocus ? 2 : 0
-                    border.color: tokens.goldLight
-                }
-            }
-            Label { text: qsTr("Password"); color: tokens.muted }
-            TextField {
-                id: password
-                objectName: "password"
-                Layout.fillWidth: true
-                implicitHeight: 44
-                enabled: !root.authenticating
-                echoMode: TextInput.Password
-                inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
-                Accessible.name: qsTr("Password")
-                onAccepted: root.signIn()
-                background: Rectangle {
-                    color: tokens.field
-                    radius: tokens.radiusField
-                    border.width: password.activeFocus ? 2 : 0
-                    border.color: tokens.goldLight
-                }
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: root.keyboardState.capsLock
-                text: qsTr("Caps Lock is on")
-                color: tokens.goldLight
-                wrapMode: Text.WordWrap
-            }
-            Label {
-                Layout.fillWidth: true
-                objectName: "feedback"
-                visible: text !== ""
-                text: root.feedback
-                color: tokens.error
-                wrapMode: Text.WordWrap
-                Accessible.role: Accessible.AlertMessage
-                Accessible.name: text
-            }
-            Button {
-                id: login
-                objectName: "login"
-                Layout.fillWidth: true
-                implicitHeight: 46
-                text: root.authenticating ? qsTr("Signing in…") : qsTr("Sign in")
-                enabled: !root.authenticating && session.count > 0
-                onClicked: root.signIn()
-                contentItem: Text {
-                    text: login.text
-                    font: login.font
-                    color: tokens.background
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: login.down ? tokens.goldDark : tokens.goldLight
-                    radius: tokens.radiusButton
-                    opacity: login.enabled ? 1 : 0.6
-                    border.width: login.activeFocus ? 2 : 0
-                    border.color: tokens.text
-                }
-            }
-            Label {
-                text: qsTr("Desktop session")
-                color: tokens.muted
-                Layout.topMargin: tokens.spaceSm
-            }
-            ComboBox {
-                id: session
-                objectName: "session"
-                Layout.fillWidth: true
-                implicitHeight: 44
-                model: root.sessions
-                textRole: "name"
-                enabled: !root.authenticating
-                Accessible.name: qsTr("Desktop session")
-                Component.onCompleted: currentIndex =
-                    count > 0 ? Math.max(0, Math.min(root.sessions.lastIndex, count - 1)) : -1
-            }
-            Label { text: qsTr("Keyboard layout"); color: tokens.muted }
-            ComboBox {
-                id: keyboardLayout
-                objectName: "keyboardLayout"
-                Layout.fillWidth: true
-                implicitHeight: 44
-                model: root.keyboardState.layouts
-                textRole: "longName"
-                currentIndex: root.keyboardState.currentLayout
-                enabled: !root.authenticating
-                Accessible.name: qsTr("Keyboard layout")
-                onActivated: root.keyboardState.currentLayout = currentIndex
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
+            ColumnLayout {
+                id: form
+                width: Math.min(400, viewport.width - 48)
+                x: (viewport.width - width) / 2
+                y: Math.max(32, (viewport.height - implicitHeight) / 2)
                 spacing: tokens.spaceMd
-                Button {
-                    text: qsTr("Restart")
+
+                Image {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: 88
+                    Layout.preferredHeight: 88
+                    source: "selah-mark.svg"
+                    sourceSize: Qt.size(176, 176)
+                    fillMode: Image.PreserveAspectFit
+                    Accessible.ignored: true
+                }
+                Label {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: qsTr("SelahOS")
+                    font.pixelSize: tokens.titlePx
+                }
+                Label {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.bottomMargin: tokens.spaceLg
+                    text: qsTr("Pause. Reflect. Create.")
+                    color: tokens.goldLight
+                }
+                Label {
+                    text: qsTr("Username")
+                    color: tokens.muted
+                }
+                TextField {
+                    id: username
+                    objectName: "username"
+                    Layout.fillWidth: true
                     implicitHeight: 44
-                    enabled: root.greeter.canReboot && !root.authenticating
-                    onClicked: { powerDialog.action = "restart"; powerDialog.open(); }
+                    text: root.users ? root.users.lastUser : ""
+                    enabled: !root.authenticating
+                    Accessible.name: qsTr("Username")
+                    selectByMouse: true
+                    onAccepted: password.forceActiveFocus()
+                    background: Rectangle {
+                        color: tokens.field
+                        radius: tokens.radiusField
+                        border.width: username.activeFocus ? 2 : 0
+                        border.color: tokens.goldLight
+                    }
+                }
+                Label {
+                    text: qsTr("Password")
+                    color: tokens.muted
+                }
+                TextField {
+                    id: password
+                    objectName: "password"
+                    Layout.fillWidth: true
+                    implicitHeight: 44
+                    enabled: !root.authenticating
+                    echoMode: TextInput.Password
+                    inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                    Accessible.name: qsTr("Password")
+                    onAccepted: root.signIn()
+                    background: Rectangle {
+                        color: tokens.field
+                        radius: tokens.radiusField
+                        border.width: password.activeFocus ? 2 : 0
+                        border.color: tokens.goldLight
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    visible: root.keyboardState ? root.keyboardState.capsLock : false
+                    text: qsTr("Caps Lock is on")
+                    color: tokens.goldLight
+                    wrapMode: Text.WordWrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    objectName: "feedback"
+                    visible: text !== ""
+                    text: root.feedback
+                    color: tokens.error
+                    wrapMode: Text.WordWrap
+                    Accessible.role: Accessible.AlertMessage
+                    Accessible.name: text
                 }
                 Button {
-                    text: qsTr("Shut down")
+                    id: login
+                    objectName: "login"
+                    Layout.fillWidth: true
+                    implicitHeight: 46
+                    text: root.authenticating ? qsTr("Signing in…") : qsTr("Sign in")
+                    enabled: !root.authenticating && session.count > 0
+                    onClicked: root.signIn()
+                    contentItem: Text {
+                        text: login.text
+                        font: login.font
+                        color: tokens.background
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: login.down ? tokens.goldDark : tokens.goldLight
+                        radius: tokens.radiusButton
+                        opacity: login.enabled ? 1 : 0.6
+                        border.width: login.activeFocus ? 2 : 0
+                        border.color: tokens.text
+                    }
+                }
+                Label {
+                    text: qsTr("Desktop session")
+                    color: tokens.muted
+                    Layout.topMargin: tokens.spaceSm
+                }
+                SelahComboBox {
+                    id: session
+                    objectName: "session"
+                    Layout.fillWidth: true
                     implicitHeight: 44
-                    enabled: root.greeter.canPowerOff && !root.authenticating
-                    onClicked: { powerDialog.action = "shutdown"; powerDialog.open(); }
+                    model: root.sessions
+                    textRole: "name"
+                    enabled: !root.authenticating
+                    Accessible.name: qsTr("Desktop session")
+                    Component.onCompleted: currentIndex = count > 0 && root.sessions ? Math.max(0, Math.min(root.sessions.lastIndex, count - 1)) : -1
+                }
+                Label {
+                    text: qsTr("Keyboard layout")
+                    color: tokens.muted
+                }
+                SelahComboBox {
+                    id: keyboardLayout
+                    objectName: "keyboardLayout"
+                    Layout.fillWidth: true
+                    implicitHeight: 44
+                    model: root.keyboardState ? root.keyboardState.layouts : []
+                    textRole: "longName"
+                    currentIndex: root.keyboardState ? root.keyboardState.currentLayout : -1
+                    enabled: !root.authenticating
+                    Accessible.name: qsTr("Keyboard layout")
+                    onActivated: if (root.keyboardState)
+                        root.keyboardState.currentLayout = currentIndex
+                }
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: tokens.spaceMd
+                    Button {
+                        text: qsTr("Restart")
+                        implicitHeight: 44
+                        enabled: root.greeter && root.greeter.canReboot && !root.authenticating
+                        onClicked: {
+                            powerDialog.action = "restart";
+                            powerDialog.open();
+                        }
+                    }
+                    Button {
+                        text: qsTr("Shut down")
+                        implicitHeight: 44
+                        enabled: root.greeter && root.greeter.canPowerOff && !root.authenticating
+                        onClicked: {
+                            powerDialog.action = "shutdown";
+                            powerDialog.open();
+                        }
+                    }
                 }
             }
         }
-    }
+    } // Flickable / ScrollView
 
     Dialog {
         id: powerDialog
@@ -221,8 +263,10 @@ Pane {
         title: action === "restart" ? qsTr("Restart this computer?") : qsTr("Shut down this computer?")
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: {
-            if (action === "restart") root.greeter.reboot();
-            else root.greeter.powerOff();
+            if (action === "restart")
+                root.greeter.reboot();
+            else
+                root.greeter.powerOff();
         }
     }
     Connections {
@@ -239,7 +283,9 @@ Pane {
         }
     }
     Component.onCompleted: {
-        if (username.text === "") username.forceActiveFocus();
-        else password.forceActiveFocus();
+        if (username.text === "")
+            username.forceActiveFocus();
+        else
+            password.forceActiveFocus();
     }
 }

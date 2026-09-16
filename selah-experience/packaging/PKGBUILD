@@ -1,0 +1,27 @@
+# Local development package. Run makepkg from this directory in the source checkout.
+# No install script, pacman hook, /etc payload, service, or automatic activation.
+pkgname=selah-experience
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Opt-in SelahOS Experience foundation: Plymouth, SDDM, Plasma and scenes'
+arch=('any')
+url='https://github.com/SelahOS/selahos-iso'
+license=('custom')
+makedepends=('python')
+optdepends=('plymouth: boot splash (requires an already working Plymouth setup)'
+            'sddm>=0.21: Qt 6 login theme'
+            'qt6-declarative: Qt Quick login controls'
+            'qt6-svg: login logo rendering'
+            'plasma-workspace: Plasma 6 Look-and-Feel'
+            'noto-fonts: preferred typography')
+options=('!strip' '!debug')
+source=()
+sha256sums=()
+
+check() {
+    python "$startdir/../tools/check.py"
+}
+
+package() {
+    python "$startdir/../tools/stage.py" "$pkgdir"
+}

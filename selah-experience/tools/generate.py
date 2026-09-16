@@ -28,6 +28,8 @@ def generate(out):
     for key, value in tokens["colors"].items():
         qml += f'    readonly property color {key}: "{value}"\n'
     qml += f'    readonly property string fontFamily: "{tokens["typography"]["family"]}"\n'
+    for key in ("bodyPx", "captionPx", "titlePx"):
+        qml += f'    readonly property int {key}: {tokens["typography"][key]}\n'
     for key, value in tokens["spacing"].items():
         qml += f'    readonly property int space{key.capitalize()}: {value}\n'
     for key, value in tokens["radii"].items():
@@ -39,6 +41,9 @@ def generate(out):
     for prefix, key in [("bg", "background"), ("text", "text"), ("gold", "gold")]:
         for suffix, value in zip("rgb", rgb(tokens["colors"][key])):
             header += f"{prefix}_{suffix} = {value:.6f};\n"
+    for key, token in [("pause_s", "pauseMs"), ("reflect_end_s", "reflectEndMs"), ("create_end_s", "createEndMs")]:
+        header += f"{key} = {tokens['motion'][token] / 1000};\n"
+    header += f"visual_stride = {max(1, round(50 / tokens['motion']['maxVisualFps']))};\n"
     body = (ROOT / "boot/selah-plymouth/selah.script").read_text()
     for name, motion in [("selah-experience", 1), ("selah-experience-static", 0)]:
         write(f"boot/generated/{name}.script", header + f"motion_enabled = {motion};\n" + body)
