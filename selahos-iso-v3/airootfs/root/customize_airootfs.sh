@@ -102,17 +102,10 @@ EOF
 # ── Step 8: NTSYNC ────────────────────────────────────────────
 echo "ntsync" > /etc/modules-load.d/ntsync.conf
 
-# ── Step 9: Broadcom WiFi ─────────────────────────────────────
-echo "wl" > /etc/modules-load.d/broadcom-wl.conf
-cat > /etc/modprobe.d/broadcom-wl.conf << 'EOF'
-blacklist b43
-blacklist b43legacy
-blacklist ssb
-blacklist bcma
-blacklist brcm80211
-blacklist brcmfmac
-blacklist brcmsmac
-EOF
+# ── Step 9: Broadcom WiFi (generic ISO — configured by AppleseedCore Part 2) ──
+# Broadcom drivers disabled in base ISO to avoid conflicts
+# Part 2 installer will apply Apple-specific config if on Apple hardware
+# Generic systems can enable manually if needed
 
 # ── Step 10: WiFi powersave fix ───────────────────────────────
 mkdir -p /etc/NetworkManager/conf.d
@@ -196,14 +189,12 @@ if [ -f /etc/mkinitcpio.conf ]; then
     fi
 fi
 
-echo "customize_airootfs.sh complete — SelahOS v1.0-beta"
-
-# SelahSeedCore — only enable on Apple hardware
-if dmidecode -s system-manufacturer 2>/dev/null | grep -qi "apple"; then
-    systemctl enable bluetooth
-    echo "SelahSeedCore: Apple hardware detected — services enabled"
-else
-    echo "SelahSeedCore: Non-Apple hardware — skipping Mac-specific services"
-fi
-
-# SelahSeedCore runs via KDE autostart desktop entry only
+echo "customize_airootfs.sh complete — SelahOS v1.0-beta (Generic ISO)"
+echo ""
+echo "=========================================="
+echo "AppleseedCore Part 2 Installation"
+echo "=========================================="
+echo "After installation and first boot:"
+echo "  • On Apple hardware: Run 'AppleseedCore Configuration' to apply Mac-specific settings"
+echo "  • On other hardware: System is ready to use as-is"
+echo "=========================================="

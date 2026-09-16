@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AppleseedCore Configuration
+Comment=Apply Apple hardware-specific configurations
+Exec=pkexec /usr/local/bin/selahos-appleseedcore-installer
+Icon=preferences-system-bluetooth
+Categories=System;Settings;
+Terminal=true
+StartupNotify=false
