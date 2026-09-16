@@ -1,0 +1,162 @@
+# Generated palette. See design/tokens.json.
+bg_r = 0.050980;
+bg_g = 0.062745;
+bg_b = 0.125490;
+text_r = 1.000000;
+text_g = 1.000000;
+text_b = 1.000000;
+gold_r = 0.839216;
+gold_g = 0.658824;
+gold_b = 0.352941;
+motion_enabled = 0;
+# Selah Experience: generated settings precede this body at package generation.
+# Plymouth script callbacks never sleep or hold boot completion.
+Window.SetBackgroundTopColor(bg_r, bg_g, bg_b);
+Window.SetBackgroundBottomColor(bg_r, bg_g, bg_b);
+tick = 0;
+settled = !motion_enabled;
+mode = "normal";
+last_width = -1;
+last_height = -1;
+message_text = "";
+slow_message = 0;
+
+logo_image = Image("logo.png");
+logo = Sprite(logo_image);
+point_image = Image("point.png");
+point = Sprite(point_image);
+for (i = 0; i < 3; i++) {
+    rings[i].image = Image("ring-" + i + ".png");
+    rings[i].sprite = Sprite(rings[i].image);
+    rings[i].sprite.SetOpacity(0);
+}
+title_image = Image.Text("SelahOS", text_r, text_g, text_b);
+title = Sprite(title_image);
+tagline_image = Image.Text("Pause. Reflect. Create.", gold_r, gold_g, gold_b);
+tagline = Sprite(tagline_image);
+prompt_sprite = Sprite();
+answer_sprite = Sprite();
+message_sprite = Sprite();
+prompt_sprite.SetZ(100);
+answer_sprite.SetZ(100);
+message_sprite.SetZ(90);
+
+fun clamp(value) {
+    if (value < 0) return 0;
+    if (value > 1) return 1;
+    return value;
+}
+
+fun centered(sprite, image, y) {
+    sprite.SetPosition(Window.GetX() + (Window.GetWidth() - image.GetWidth()) / 2,
+                       Window.GetY() + y, 10);
+}
+
+fun layout() {
+    global.last_width = Window.GetWidth();
+    global.last_height = Window.GetHeight();
+    global.center_y = Math.Int(last_height * 0.38);
+    centered(logo, logo_image, center_y - logo_image.GetHeight() / 2);
+    centered(point, point_image, center_y - point_image.GetHeight() / 2);
+    for (i = 0; i < 3; i++)
+        centered(rings[i].sprite, rings[i].image, center_y - rings[i].image.GetHeight() / 2);
+    centered(title, title_image, center_y + 94);
+    centered(tagline, tagline_image, center_y + 124);
+}
+
+fun decoration(opacity) {
+    logo.SetOpacity(opacity);
+    title.SetOpacity(opacity);
+    tagline.SetOpacity(opacity);
+    point.SetOpacity(0);
+    for (i = 0; i < 3; i++) rings[i].sprite.SetOpacity(0);
+}
+
+fun text_at(sprite, text, y) {
+    local.image = Image.Text(text, text_r, text_g, text_b);
+    local.limit = Window.GetWidth() - 48;
+    if (limit < 1) limit = 1;
+    if (image.GetWidth() > limit)
+        image = image.Scale(limit, Math.Max(1, Math.Int(image.GetHeight() * limit / image.GetWidth())));
+    sprite.SetImage(image);
+    sprite.SetPosition(Window.GetX() + (Window.GetWidth() - image.GetWidth()) / 2,
+                       Window.GetY() + y, 100);
+    sprite.SetOpacity(1);
+}
+
+fun refresh() {
+    if (last_width != Window.GetWidth() || last_height != Window.GetHeight()) layout();
+    if (mode != "normal" || settled) return;
+    global.tick++;
+    if (tick % 2 != 0) return;
+    local.seconds = tick / 50;
+    local.reveal = clamp((seconds - 2.1) / 1.1);
+    logo.SetOpacity(reveal);
+    title.SetOpacity(reveal);
+    tagline.SetOpacity(reveal);
+    point.SetOpacity(clamp((seconds - 0.35) / 0.35) * (1 - reveal));
+    for (i = 0; i < 3; i++) {
+        local.start = 0.7 + i * 0.3;
+        local.enter = clamp((seconds - start) / 0.5);
+        rings[i].sprite.SetOpacity(0.45 * enter * (1 - reveal));
+    }
+    if (tick >= 160) {
+        global.settled = 1;
+        decoration(1);
+    }
+}
+fun normal() {
+    global.mode = "normal";
+    prompt_sprite.SetOpacity(0);
+    answer_sprite.SetOpacity(0);
+    # Resume to a settled mark after any prompt: no repeated entrance animation.
+    global.settled = 1;
+    decoration(1);
+}
+fun password(prompt, bullets) {
+    global.mode = "password";
+    decoration(0);
+    message_sprite.SetOpacity(0);
+    text_at(prompt_sprite, prompt, Window.GetHeight() * 0.4);
+    local.mask = "";
+    for (i = 0; i < bullets && i < 32; i++) mask += "*";
+    if (bullets > 32) mask += "+";
+    text_at(answer_sprite, mask, Window.GetHeight() * 0.4 + 40);
+}
+fun question(prompt, entry) {
+    global.mode = "question";
+    decoration(0);
+    message_sprite.SetOpacity(0);
+    text_at(prompt_sprite, prompt, Window.GetHeight() * 0.4);
+    text_at(answer_sprite, entry, Window.GetHeight() * 0.4 + 40);
+}
+fun message(text) {
+    global.message_text = text;
+    if (mode == "normal") text_at(message_sprite, text, Window.GetHeight() - 60);
+}
+fun hide_message(text) {
+    if (text == message_text) {
+        global.message_text = "";
+        message_sprite.SetOpacity(0);
+    }
+}
+fun progress(duration, fraction) {
+    if (duration > 12 && !slow_message && message_text == "" && mode == "normal") {
+        global.slow_message = 1;
+        message("Preparing your workspace...");
+    }
+}
+fun quit() {
+    global.settled = 1;
+    if (mode == "normal") decoration(1);
+}
+layout();
+decoration(!motion_enabled);
+Plymouth.SetRefreshFunction(refresh);
+Plymouth.SetDisplayNormalFunction(normal);
+Plymouth.SetDisplayPasswordFunction(password);
+Plymouth.SetDisplayQuestionFunction(question);
+Plymouth.SetDisplayMessageFunction(message);
+Plymouth.SetHideMessageFunction(hide_message);
+Plymouth.SetBootProgressFunction(progress);
+Plymouth.SetQuitFunction(quit);

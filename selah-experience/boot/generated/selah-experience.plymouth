@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Selah Experience
+Description=Pause. Reflect. Create.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/selah-experience/assets
+ScriptFile=/usr/share/plymouth/themes/selah-experience/selah-experience.script
