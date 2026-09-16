@@ -1,0 +1,11 @@
+[SddmGreeterTheme]
+Name=Selah Experience
+Description=Pause. Reflect. Create. — opt-in Qt 6 foundation
+Author=Selah Technologies LLC
+Type=sddm-theme
+Version=0.1.0
+MainScript=Main.qml
+ConfigFile=theme.conf
+Theme-Id=selah-experience
+Theme-API=2.0
+QtVersion=6

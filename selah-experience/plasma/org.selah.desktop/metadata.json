@@ -1,0 +1,15 @@
+{
+  "KPlugin": {
+    "Id": "org.selah.desktop",
+    "Name": "Selah Experience (foundation)",
+    "Description": "Opt-in Selah palette; retains Plasma functionality and current layout",
+    "Version": "0.1.0",
+    "Authors": [
+      {
+        "Name": "Selah Technologies LLC"
+      }
+    ],
+    "Website": "https://selahos.io"
+  },
+  "KPackageStructure": "Plasma/LookAndFeel"
+}

@@ -1,0 +1,4 @@
+# Deliberately scoped: only the color scheme is selected.
+# No layouts, shell scripts, lockscreen, splash, shortcuts or widget style overrides.
+[kdeglobals][General]
+ColorScheme=SelahExperience
