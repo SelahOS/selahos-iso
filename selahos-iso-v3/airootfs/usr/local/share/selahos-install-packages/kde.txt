@@ -73,3 +73,10 @@ xf86-video-nouveau
 # flatpak package alone isn't enough, Discover also needs a configured
 # remote (see flatpak remote-add in selah-setup).
 flatpak
+
+# 2026-09-19 (beta tester report): testers had to install a log viewer and
+# a GUI package manager by hand just to look at their own logs. Discover
+# handles the Flathub remote selah-setup configures; ksystemlog reads the
+# journal without a terminal.
+discover
+ksystemlog

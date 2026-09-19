@@ -1416,6 +1416,37 @@ class InstallThread(QThread):
         # not just chaotic-aur installs, the whole pacman.conf fails to parse.
         if _os.path.exists('/etc/pacman.d/chaotic-mirrorlist'):
             sh(['cp', '/etc/pacman.d/chaotic-mirrorlist', '/mnt/etc/pacman.d/chaotic-mirrorlist'])
+        # 2026-09-19 beta tester report ("pacman didn't work until I synced
+        # the mirrors by hand"): the pacman.conf copied above still carries
+        # two repos that cannot sync on an installed system --
+        #   [selahos-offline]  Server = file:///usr/local/share/selahos-offline-repo,
+        #                      a directory that exists only on the live ISO;
+        #   [chaotic-aur]      signed by a key that is in no package list
+        #                      and never imported into the target's keyring.
+        # `pacman -Sy`/`-Syu` abort on ANY repo whose database fails to sync
+        # (same mechanism as the 2026-09-12 chaotic-aur outage above), so
+        # first-boot updates were dead on arrival. Neither repo is needed
+        # after install: everything pacstrap installs is already on disk.
+        # The regular mirrorlist already carries working servers. The
+        # section headers are left as comments so the intent is visible.
+        _target_conf = '/mnt/etc/pacman.conf'
+        if _os.path.exists(_target_conf):
+            with open(_target_conf) as _f:
+                _lines = _f.read().split('\n')
+            _out, _skip = [], False
+            for _ln in _lines:
+                _hdr = _ln.strip()
+                if _hdr.startswith('[') and _hdr.endswith(']'):
+                    _skip = _hdr in ('[selahos-offline]', '[chaotic-aur]')
+                    if _skip:
+                        _out.append('# SelahOS: ' + _hdr + ' is live-ISO-only and is '
+                                    'disabled on installed systems (see selah-setup).')
+                        continue
+                if _skip and _hdr and not _hdr.startswith('#'):
+                    continue          # drop the section's own key = value lines
+                _out.append(_ln)
+            with open(_target_conf, 'w') as _f:
+                _f.write('\n'.join(_out))
         chroot(['ln', '-sf', f'/usr/share/zoneinfo/{timezone}', '/etc/localtime'])
         chroot(['hwclock', '--systohc'])
         with open('/mnt/etc/locale.gen', 'a') as f:
@@ -1455,6 +1486,18 @@ class InstallThread(QThread):
         recommended_kernel = None
         if is_apple:
             recommended_kernel = self._apply_seedcore(chroot, sh)
+        else:
+            # 2026-09-19 beta tester report (ASUS ExpertBook B1502CVA, Intel
+            # AX211): base.txt installs broadcom-wl-dkms on EVERY system, but
+            # the blacklist + selah-wifi-driver.service that keep it from
+            # auto-loading were only ever applied to Apple installs. The wl
+            # module's PCI table matches any device of class 0x0280, so on
+            # this Intel-Wi-Fi laptop udev loaded wl anyway: kernel tainted,
+            # "unpatched return thunk" warning from wl_module_init, and a
+            # driver that could contend for the card. Ship the same
+            # chip-based driver selection to every install; the script is a
+            # no-op when no Broadcom Wi-Fi device is present.
+            self._apply_wifi_driver_selection(chroot, sh)
 
         # Step 10: SelahBridgePro
         self._step(10)
@@ -1563,6 +1606,9 @@ class InstallThread(QThread):
         self._apply_theme(sh)
 
         # Step 13: Cleanup
+        # Keyboard layout + Wi-Fi profiles from the live session; must run
+        # before mkinitcpio so vconsole.conf lands in the initramfs.
+        self._carry_over_live_settings(chroot, sh, username, log)
         self._step(13)
         chroot(['mkinitcpio', '-P'])
 
@@ -1597,6 +1643,125 @@ class InstallThread(QThread):
         self.pct_update.emit(100)
         time.sleep(0.5)
         self.done_signal.emit(True, '', preflight_exit, preflight_output, self.bootloader_ok)
+
+    def _apply_wifi_driver_selection(self, chroot, sh):
+        """Ship the Broadcom driver blacklist + per-chip selector to any
+        install (Apple or not). See the call site in _install() for why."""
+        import os as _os
+        for src, dst in [
+            ('/etc/modprobe.d/selah-broadcom.conf', '/mnt/etc/modprobe.d/'),
+            ('/etc/modules-load.d/selah-wifi.conf', '/mnt/etc/modules-load.d/'),
+            ('/etc/systemd/system/selah-wifi-driver.service',
+             '/mnt/etc/systemd/system/'),
+            ('/usr/local/bin/selah-wifi-driver', '/mnt/usr/local/bin/'),
+        ]:
+            if _os.path.exists(src):
+                _os.makedirs(dst, exist_ok=True)
+                sh(['cp', src, dst])
+        chroot(['systemctl', 'enable', 'selah-wifi-driver'])
+
+    def _carry_over_live_settings(self, chroot, sh, username, log):
+        """Beta tester report 2026-09-19: after install the keyboard was back
+        on US and the Wi-Fi network had to be re-entered. Carry both over
+        from the live session. Best-effort -- a failure here must never
+        fail the install, so everything is wrapped and only logged."""
+        import os as _os, glob as _glob, configparser as _cp, shutil as _sh
+        try:
+            # --- Wi-Fi / network profiles -------------------------------
+            src = '/etc/NetworkManager/system-connections'
+            dst = '/mnt/etc/NetworkManager/system-connections'
+            profiles = _glob.glob(src + '/*.nmconnection')
+            if profiles:
+                _os.makedirs(dst, mode=0o700, exist_ok=True)
+                for p in profiles:
+                    _sh.copy2(p, dst)
+                    _os.chmod(_os.path.join(dst, _os.path.basename(p)), 0o600)
+                log.write(f"Carried over {len(profiles)} NetworkManager connection profile(s) "
+                          f"from the live session.\n")
+        except Exception as e:
+            log.write(f"WARNING: could not carry over network profiles: {e}\n")
+
+        try:
+            # --- keyboard layout ---------------------------------------
+            layout = variant = model = options = ''
+            # Plasma's keyboard settings live in the user's kxkbrc, not in
+            # localectl -- check every home on the live system first.
+            for rc in (_glob.glob('/home/*/.config/kxkbrc') +
+                       ['/root/.config/kxkbrc']):
+                if not _os.path.exists(rc):
+                    continue
+                cp = _cp.ConfigParser(interpolation=None, strict=False)
+                cp.read(rc)
+                if cp.has_section('Layout') and cp.get('Layout', 'LayoutList', fallback=''):
+                    layout = cp.get('Layout', 'LayoutList')
+                    variant = cp.get('Layout', 'VariantList', fallback='')
+                    options = cp.get('Layout', 'Options', fallback='')
+                    break
+            if not layout:
+                r = subprocess.run(['localectl', 'status'], capture_output=True, text=True)
+                vals = {}
+                for ln in (r.stdout or '').splitlines():
+                    if ':' in ln:
+                        k, v = ln.split(':', 1)
+                        vals[k.strip()] = v.strip()
+                layout = vals.get('X11 Layout', '')
+                variant = vals.get('X11 Variant', '')
+                model = vals.get('X11 Model', '')
+                options = vals.get('X11 Options', '')
+            layout = '' if layout in ('n/a', '(unset)') else layout
+            if layout and (layout.split(',')[0] != 'us' or variant.strip(',')):
+                layouts = layout.split(',')
+                variants = (variant or '').split(',')
+                variants += [''] * (len(layouts) - len(variants))
+                # X11 config: read by SDDM and by KDE as the system default
+                xdir = '/mnt/etc/X11/xorg.conf.d'
+                _os.makedirs(xdir, exist_ok=True)
+                with open(xdir + '/00-keyboard.conf', 'w') as f:
+                    f.write('Section "InputClass"\n'
+                            '        Identifier "system-keyboard"\n'
+                            '        MatchIsKeyboard "on"\n'
+                            f'        Option "XkbLayout" "{layout}"\n')
+                    if model:
+                        f.write(f'        Option "XkbModel" "{model}"\n')
+                    if any(variants):
+                        f.write(f'        Option "XkbVariant" "{",".join(variants)}"\n')
+                    if options:
+                        f.write(f'        Option "XkbOptions" "{options}"\n')
+                    f.write('EndSection\n')
+                # Console keymap: same X11 -> vconsole lookup localectl uses
+                vc = ''
+                try:
+                    with open('/usr/share/systemd/kbd-model-map') as f:
+                        rows = [l.split() for l in f if l.strip() and not l.startswith('#')]
+                    first_v = variants[0] or '-'
+                    for want_v in (first_v, '-'):
+                        for r_ in rows:
+                            if len(r_) >= 4 and r_[1] == layouts[0] and r_[3] == want_v:
+                                vc = r_[0]
+                                break
+                        if vc:
+                            break
+                except Exception:
+                    pass
+                if vc:
+                    with open('/mnt/etc/vconsole.conf', 'w') as f:
+                        f.write(f'KEYMAP={vc}\n')
+                # The user's own Plasma setting (skel default is US)
+                home = f'/mnt/home/{username}'
+                if _os.path.isdir(home):
+                    _os.makedirs(home + '/.config', exist_ok=True)
+                    with open(home + '/.config/kxkbrc', 'w') as f:
+                        f.write('[Layout]\nUse=true\n'
+                                f'LayoutList={",".join(layouts)}\n'
+                                f'VariantList={",".join(variants)}\n')
+                        if options:
+                            f.write(f'Options={options}\n')
+                    chroot(['chown', '-R', f'{username}:', f'/home/{username}/.config'])
+                log.write(f"Carried over keyboard layout '{layout}' "
+                          f"(variant '{','.join(variants)}', console keymap '{vc or 'default'}').\n")
+        except Exception as e:
+            log.write(f"WARNING: could not carry over keyboard layout: {e}\n")
+        log.flush()
 
     def _apply_seedcore(self, chroot, sh):
         import shutil, os as _os, re as _re

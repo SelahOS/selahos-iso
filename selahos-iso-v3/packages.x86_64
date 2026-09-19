@@ -421,3 +421,6 @@ bolt
 # runs via arch-chroot and so actually has working DNS. See that script.
 xiphos
 bibletime
+rtkit
+ksystemlog
+discover

@@ -65,3 +65,9 @@ snd-hda-macbookpro-dkms-git
 # codec. Verified via direct ALSA playback on hw:0,0 post-install (clean
 # open at the codec's native 44100Hz, correct period timing, no errors).
 snd-hda-macbook12-dkms-git
+
+# 2026-09-19 (beta tester report, ASUS ExpertBook B1502CVA): wireless-regdb
+# was in the live ISO's packages.x86_64 but never here, so every installed
+# system logged "failed to load regulatory.db" and ran on the restrictive
+# world regulatory domain — no 6 GHz / limited channels on Wi-Fi 6E cards.
+wireless-regdb
