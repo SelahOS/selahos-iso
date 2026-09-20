@@ -80,7 +80,62 @@ bootloader_present() {
     [ -s "$T$efi_dir/EFI/BOOT/BOOTX64.EFI" ] || [ -s "$T$efi_dir/EFI/SelahOS/grubx64.efi" ]
 }
 
-if bootloader_present; then
+# B-03 (2026-09-20): repair for the firmware mode THIS machine is booted in
+# (inside the installer that is the install's own mode; run from a live USB
+# it is the mode that USB booted, i.e. the mode the broken machine needs).
+# The EFI check above says nothing about a BIOS boot -- a BIOS-booted install
+# used to pass it with a disk that had no MBR boot code at all.
+if [ -d /sys/firmware/efi ]; then boot_mode=uefi; else boot_mode=bios; fi
+
+# Whole disk holding the target's root filesystem (what grub-install i386-pc
+# writes to).
+target_disk() {
+    local src pk
+    src=$(findmnt -n -o SOURCE --target "${T:-/}" 2>/dev/null | head -1)
+    [ -n "$src" ] || return 1
+    pk=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)
+    if [ -n "$pk" ]; then echo "/dev/$pk"; else echo "$src"; fi
+}
+# BIOS Boot Partition GUID (GPT type ef02)
+has_bios_grub_part() {
+    lsblk -no PARTTYPE "$1" 2>/dev/null | grep -qi '^21686148-6449-6e6f-744e-656564454649$'
+}
+bios_bootloader_present() {
+    [ -f "$T/boot/grub/i386-pc/core.img" ] || return 1
+    [ -n "$(head -c 440 "$1" 2>/dev/null | tr -d '\000')" ]
+}
+
+if [ "$boot_mode" = bios ]; then
+    DISK=$(target_disk)
+    if [ -z "$DISK" ]; then
+        say_bad "cannot work out which disk holds the target — BIOS boot code not checked"
+    elif bios_bootloader_present "$DISK"; then
+        say_ok "GRUB BIOS boot code present on $DISK"
+    else
+        say_bad "no GRUB BIOS boot code on $DISK — this system will not boot in BIOS/legacy mode"
+        if [ "$(blkid -p -o value -s PTTYPE "$DISK" 2>/dev/null)" = gpt ] && ! has_bios_grub_part "$DISK"; then
+            say_bad "$DISK is GPT but has no BIOS Boot Partition, so GRUB has nowhere to embed — cannot be repaired in place. Reinstall with this or a newer SelahOS installer, or boot the machine in UEFI mode."
+        elif [ "$FIX" = 1 ]; then
+            echo "  attempting repair..."
+            run_in_target pacman -S --noconfirm --needed grub
+            run_in_target grub-install --target=i386-pc --recheck "$DISK"
+            run_in_target grub-mkconfig -o /boot/grub/grub.cfg
+            run_in_target mkinitcpio -P
+            if bios_bootloader_present "$DISK"; then
+                say_fix "GRUB reinstalled — BIOS boot code now present on $DISK"
+                FAIL=0
+            else
+                say_bad "GRUB reinstall attempted but BIOS boot code is still missing — see grub-install output above"
+            fi
+        else
+            echo "  fix: sudo selah-doctor --target ${TARGET_ARG} --fix"
+        fi
+    fi
+    # The EFI fallback loader is a bonus on a BIOS install (disk also boots on UEFI).
+    if bootloader_present; then
+        echo "  info    EFI fallback loader also present under $efi_dir (disk also boots on UEFI)"
+    fi
+elif bootloader_present; then
     say_ok "GRUB EFI files present under $efi_dir"
 else
     say_bad "no GRUB EFI files under $efi_dir — this system will not boot"

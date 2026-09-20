@@ -1279,6 +1279,25 @@ class InstallThread(QThread):
 
         # Step 0: Partition
         self._step(0)
+
+        # B-03 (2026-09-20): this installer only ever produced a UEFI
+        # layout (ESP + root) and ran grub-install for x86_64-efi. Run from
+        # a BIOS-booted live session, that "succeeded" -- grub-install
+        # --removable happily writes \EFI\BOOT\BOOTX64.EFI to the ESP with
+        # no firmware present -- so the EFI-file check passed, the Done
+        # screen said Complete, and the disk had zero MBR boot code and hung
+        # at "Booting from Hard Disk..." (confirmed in QEMU/SeaBIOS on both
+        # the released ISO and the 09-20 rebuild). Follow the firmware mode
+        # the live session actually booted in:
+        #   uefi -> unchanged: ESP + root, grub x86_64-efi.
+        #   bios -> GPT with a 1 MiB BIOS Boot Partition (GRUB's embedding
+        #           area), the same ESP + root, grub i386-pc onto the disk,
+        #           and the EFI fallback loader too, so the same disk still
+        #           boots if it is later moved to a UEFI machine.
+        boot_mode = 'uefi' if os.path.isdir('/sys/firmware/efi') else 'bios'
+        log.write(f"Boot mode of this live session: {boot_mode}\n")
+        log.flush()
+        bios_num = None
         if mode == 'dual':
             # Dual Boot: append new partitions after whatever is already
             # on the disk (e.g. Ventoy) -- never zap, never touch existing
@@ -1286,11 +1305,28 @@ class InstallThread(QThread):
             # free-space block, which _proceed()/_on_select() already
             # verified is >= MIN_INSTALL_GB before we got here.
             existing = _existing_partnums(disk)
-            efi_num = (max(existing) + 1) if existing else 1
-            root_num = efi_num + 1
+            next_num = (max(existing) + 1) if existing else 1
+            if boot_mode == 'bios':
+                # A BIOS Boot Partition only exists on GPT. On an MBR disk
+                # sgdisk would have to convert the table in place, which is
+                # not something to do to a disk we were told to leave alone.
+                pttype = run(['blkid', '-p', '-o', 'value', '-s', 'PTTYPE', disk]).stdout.strip()
+                if pttype != 'gpt':
+                    raise RuntimeError(
+                        f"Dual Boot in BIOS mode needs a GPT disk, but {disk} uses "
+                        f"'{pttype or 'an unknown'}' partitioning. Nothing was changed. "
+                        f"Boot the installer in UEFI mode, or use Clean Install on this disk.")
+                bios_num, next_num = next_num, next_num + 1
+            efi_num, root_num = next_num, next_num + 1
         else:
             sh_critical(['sgdisk', '--zap-all', disk])
-            efi_num, root_num = 1, 2
+            if boot_mode == 'bios':
+                bios_num, efi_num, root_num = 1, 2, 3
+            else:
+                efi_num, root_num = 1, 2
+        if bios_num is not None:
+            sh_critical(['sgdisk', f'--new={bios_num}:0:+1M',
+                         f'--typecode={bios_num}:ef02', f'--change-name={bios_num}:BIOSBOOT', disk])
         sh_critical(['sgdisk', f'--new={efi_num}:0:+512M',
                      f'--typecode={efi_num}:ef00', f'--change-name={efi_num}:EFI', disk])
         sh_critical(['sgdisk', f'--new={root_num}:0:0',
@@ -1551,27 +1587,50 @@ class InstallThread(QThread):
         # is installed" with no EFI boot files ever written, and nothing
         # noticed. Verify the real artifact (the EFI binaries), not just
         # the command's exit code, and retry once before giving up.
-        def _bootloader_installed():
+        def _efi_bootloader_installed():
             for f in ('/mnt/boot/efi/EFI/BOOT/BOOTX64.EFI',
                       '/mnt/boot/efi/EFI/SelahOS/grubx64.efi'):
                 if _os.path.isfile(f) and _os.path.getsize(f) > 0:
                     return True
             return False
 
-        chroot(['grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi',
-                '--bootloader-id=SelahOS', '--removable', '--recheck'])
-        if not _bootloader_installed():
-            log.write("WARNING: grub-install produced no EFI boot files on the first "
-                       "attempt -- reinstalling grub/efibootmgr and retrying once.\n")
-            log.flush()
-            chroot(['pacman', '-S', '--noconfirm', '--needed', 'grub', 'efibootmgr'])
+        def _bios_bootloader_installed():
+            # What a BIOS boot actually needs: GRUB's boot.img in the disk's
+            # first 440 bytes, and core.img on disk. The EFI files above say
+            # nothing about this -- that gap is exactly B-03.
+            try:
+                with open(disk, 'rb') as f:
+                    mbr = f.read(440)
+            except OSError:
+                return False
+            return any(mbr) and _os.path.isfile('/mnt/boot/grub/i386-pc/core.img')
+
+        def _bootloader_installed():
+            # Verify the artifact for the firmware mode this machine boots in.
+            return (_bios_bootloader_installed() if boot_mode == 'bios'
+                    else _efi_bootloader_installed())
+
+        def _grub_install():
+            if boot_mode == 'bios':
+                chroot(['grub-install', '--target=i386-pc', '--recheck', disk])
+            # Always lay down the EFI fallback loader too. Required on UEFI;
+            # on a BIOS install it is best-effort and only there so the same
+            # disk still boots after a move to a UEFI machine.
             chroot(['grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi',
                     '--bootloader-id=SelahOS', '--removable', '--recheck'])
 
+        _grub_install()
+        if not _bootloader_installed():
+            log.write(f"WARNING: grub-install produced no {boot_mode.upper()} boot files on the "
+                       "first attempt -- reinstalling grub/efibootmgr and retrying once.\n")
+            log.flush()
+            chroot(['pacman', '-S', '--noconfirm', '--needed', 'grub', 'efibootmgr'])
+            _grub_install()
+
         self.bootloader_ok = _bootloader_installed()
         if not self.bootloader_ok:
-            log.write("FAIL: grub-install still produced no EFI boot files after a retry "
-                       "-- this system will not boot until repaired. /mnt is left mounted "
+            log.write(f"FAIL: grub-install still produced no {boot_mode.upper()} boot files after "
+                       "a retry -- this system will not boot until repaired. /mnt is left mounted "
                        "so the Done screen's Repair Now button (selah-doctor --fix) can "
                        "act on it before reboot.\n")
             log.flush()
@@ -2026,8 +2085,9 @@ class DoneScreen(QWidget):
 
                 out_text = self.preflight_output.strip() or '(no output)'
                 if not self.bootloader_ok:
-                    out_text = ('Bootloader was not verified as installed (no GRUB EFI '
-                                'boot files found) -- this system will not boot.\n\n') + out_text
+                    out_text = ('Bootloader was not verified as installed (no GRUB boot '
+                                'files found for this machine\'s boot mode) -- this system '
+                                'will not boot.\n\n') + out_text
                 self.out_box = QPlainTextEdit(out_text)
                 self.out_box.setReadOnly(True)
                 self.out_box.setFixedHeight(140)

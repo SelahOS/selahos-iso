@@ -291,6 +291,27 @@ grep -qs "def _do_restart" "$_SETUP" \
     && [ "${_umounts:-0}" -eq "${_precleanups:-0}" ] \
     && ok "/mnt stays mounted until the Done screen's restart action" \
     || bad "installer still unmounts /mnt right after install — Repair Now would have nothing to act on"
+# B-03 (2026-09-20): BIOS boot path. The installer used to be UEFI-only and
+# reported success on a BIOS-booted install whose disk had no MBR boot code
+# (hung at "Booting from Hard Disk..."). Guard every piece of the fix.
+grep -qs "/sys/firmware/efi" "$_SETUP" \
+    && ok "installer detects the firmware mode it booted in (UEFI vs BIOS)" \
+    || bad "installer does not detect UEFI vs BIOS — BIOS installs will be unbootable (B-03)"
+grep -qs "typecode={bios_num}:ef02" "$_SETUP" \
+    && ok "installer creates a BIOS Boot Partition (ef02) on BIOS installs" \
+    || bad "installer never creates a BIOS Boot Partition — GRUB cannot embed on a GPT disk in BIOS mode (B-03)"
+grep -qs "target=i386-pc" "$_SETUP" \
+    && ok "installer runs grub-install for i386-pc on BIOS installs" \
+    || bad "installer never installs GRUB for BIOS (i386-pc) — BIOS installs will be unbootable (B-03)"
+grep -qs "_bios_bootloader_installed" "$_SETUP" \
+    && ok "installer verifies BIOS boot code on disk, not just EFI files" \
+    || bad "installer only verifies EFI files — a BIOS install would still be reported as successful (B-03)"
+grep -qs "target=i386-pc" "$SFS/usr/local/bin/selah-doctor" \
+    && ok "selah-doctor can check and repair BIOS boot code" \
+    || bad "selah-doctor is EFI-only — cannot repair a BIOS install (B-03)"
+[ -f "$SFS/usr/lib/grub/i386-pc/boot.img" ] \
+    && ok "GRUB i386-pc modules present in the ISO" \
+    || bad "GRUB i386-pc modules missing from the ISO — the installer could not build BIOS boot code (B-03)"
 [ -f "$SFS/etc/polkit-1/rules.d/49-selahos-liveuser-nopasswd.rules" ] \
     && ok "polkit rule present — pkexec-gated apps (KDE Partition Manager) work for liveuser" \
     || bad "no polkit passwordless rule for liveuser — KDE Partition Manager and other pkexec apps will fail auth"
