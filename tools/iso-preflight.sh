@@ -3,7 +3,7 @@
 # iso-preflight.sh — verify a built SelahOS ISO before flashing
 #
 # Usage: sudo bash iso-preflight.sh [path-to-iso]
-#        (defaults to newest ISO in ~/selahos-iso-output)
+#        (defaults to newest ISO in the invoking user's ~/selahos-iso-output)
 #
 # Checks, inside the ISO's airootfs squashfs:
 #   1. every /usr/local/bin/selah* is executable   (SELAH-40)
@@ -19,7 +19,8 @@
 # ============================================================
 set -uo pipefail
 
-ISO="${1:-$(ls -t /home/dbnoble/selahos-iso-output/*.iso 2>/dev/null | head -1)}"
+_home="$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)"
+ISO="${1:-$(ls -t "${_home:-$HOME}"/selahos-iso-output/*.iso 2>/dev/null | head -1)}"
 [ -f "$ISO" ] || { echo "FAIL: no ISO found"; exit 1; }
 echo "Pre-flight: $ISO"
 
@@ -279,8 +280,15 @@ grep -qs "_bootloader_installed" "$SFS/usr/local/bin/selah-setup" \
 grep -qs "selah-doctor" "$SFS/usr/local/bin/selah-setup" \
     && ok "installer's Done screen can invoke selah-doctor to repair before reboot" \
     || bad "installer has no repair-before-reboot path wired to selah-doctor"
-grep -qs "def _do_restart" "$SFS/usr/local/bin/selah-setup" \
-    && ! grep -qs "sh(\['umount', '-R', '/mnt'\])" "$SFS/usr/local/bin/selah-setup" \
+# The one legitimate `sh(['umount', '-R', '/mnt'])` is the PRE-install stale-state
+# cleanup (2026-09-12, e88a6e0), which always sits right after the gpg-agent
+# pkill. Any other occurrence would be a post-install unmount. (This check used
+# to reject the literal anywhere, which false-failed once that cleanup landed.)
+_SETUP="$SFS/usr/local/bin/selah-setup"
+_umounts=$(grep -c "sh(\['umount', '-R', '/mnt'\])" "$_SETUP" 2>/dev/null)
+_precleanups=$(grep -B1 "sh(\['umount', '-R', '/mnt'\])" "$_SETUP" 2>/dev/null | grep -c "pkill.*gpg-agent.*--homedir /mnt")
+grep -qs "def _do_restart" "$_SETUP" \
+    && [ "${_umounts:-0}" -eq "${_precleanups:-0}" ] \
     && ok "/mnt stays mounted until the Done screen's restart action" \
     || bad "installer still unmounts /mnt right after install — Repair Now would have nothing to act on"
 [ -f "$SFS/etc/polkit-1/rules.d/49-selahos-liveuser-nopasswd.rules" ] \

@@ -30,7 +30,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILE_DIR="$(cd "$SCRIPT_DIR/../selahos-iso-v3" && pwd)"
 PKGLIST_DIR="$PROFILE_DIR/airootfs/usr/local/share/selahos-install-packages"
 OUT_DIR="$PROFILE_DIR/airootfs/usr/local/share/selahos-offline-repo"
-BUILD_PACMAN_CONF="$PROFILE_DIR/pacman.conf"
+# rebuild-iso.sh overrides this with a copy whose [selah-local] Server path is
+# correct for the machine doing the build (the committed one is absolute).
+BUILD_PACMAN_CONF="${BUILD_PACMAN_CONF:-$PROFILE_DIR/pacman.conf}"
 SCRATCH_DB="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH_DB"' EXIT
 

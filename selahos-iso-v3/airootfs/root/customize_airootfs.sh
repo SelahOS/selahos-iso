@@ -230,6 +230,24 @@ fi
 # is copied into airootfs/root/ at profile-source time instead so pacman
 # can install it with zero repo/network dependency for the resolve step —
 # only the dkms hook's own kernel-source download needs network.
+#
+# CORRECTED AGAIN 2026-09-20: the 08-16 note above is now out of date. With
+# current arch-install-scripts, arch-chroot DOES bind-mount the build
+# machine's /etc/resolv.conf over ours (the build log shows "rm: cannot
+# remove '/etc/resolv.conf': Device or resource busy"). A write here then
+# lands on the HOST's real file and clobbers the build machine's DNS config
+# until something restores it. DNS already works through the bind mount, so
+# only write our own resolver when there is none, and only remove one we wrote.
+_wrote_resolv=0
+_dns_up() {
+    if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then
+        printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+        _wrote_resolv=1
+    else
+        _wrote_resolv=0
+    fi
+}
+_dns_down() { [ "$_wrote_resolv" = 1 ] && rm -f /etc/resolv.conf; return 0; }
 PKG="$(ls /root/snd-hda-macbookpro-dkms-git-*.pkg.tar.zst 2>/dev/null | head -1)"
 if [ -n "$PKG" ]; then
     # pacman's CheckSpace option statfs's the mount point for "/" to verify
@@ -242,10 +260,10 @@ if [ -n "$PKG" ]; then
     # Disable it for just this one internal install, then restore it so
     # the shipped pacman.conf is unchanged.
     sed -i 's/^CheckSpace/#CheckSpace/' /etc/pacman.conf
-    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+    _dns_up
     pacman -U --noconfirm --needed "$PKG" || \
         echo "WARNING: snd-hda-macbookpro-dkms-git install/dkms build failed — CS8409 audio (MacBook Pro 14,1) will not work on this ISO"
-    rm -f /etc/resolv.conf
+    _dns_down
     sed -i 's/^#CheckSpace/CheckSpace/' /etc/pacman.conf
     rm -f "$PKG"
 else
@@ -264,10 +282,10 @@ fi
 PKG="$(ls /root/snd-hda-macbook12-dkms-git-*.pkg.tar.zst 2>/dev/null | head -1)"
 if [ -n "$PKG" ]; then
     sed -i 's/^CheckSpace/#CheckSpace/' /etc/pacman.conf
-    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+    _dns_up
     pacman -U --noconfirm --needed "$PKG" || \
         echo "WARNING: snd-hda-macbook12-dkms-git install/dkms build failed — CS4208 audio (MacBook 10,1 / 12-inch MacBook) will not work on this ISO"
-    rm -f /etc/resolv.conf
+    _dns_down
     sed -i 's/^#CheckSpace/CheckSpace/' /etc/pacman.conf
     rm -f "$PKG"
 else
