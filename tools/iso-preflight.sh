@@ -434,6 +434,47 @@ grep -qs "chaotic-mirrorlist" "$SFS/usr/local/bin/selah-setup" \
     && ok "installer copies chaotic-mirrorlist to installed systems (pacman won't be broken out of the box)" \
     || bad "installer does not copy chaotic-mirrorlist — pacman will be totally broken on every install"
 
+# ── 2.0.1.1 release-candidate guards (2026-09-21) ─────────────────────────
+# Each block guards something that was found broken or missing this week, so a
+# regression fails the gate instead of reaching a tester.
+
+# Version strings must agree. EXPECT_VERSION is the ONE line to bump per release.
+EXPECT_VERSION="2.0.1.1"
+case "$(basename "$ISO")" in
+    *"-${EXPECT_VERSION}-beta-"*) ok "ISO filename carries version ${EXPECT_VERSION}" ;;
+    *) bad "ISO filename does not carry version ${EXPECT_VERSION} (profiledef.sh iso_version)" ;;
+esac
+[ "$(grep -c "v${EXPECT_VERSION}-beta" "$_SETUP")" -ge 2 ] \
+    && ok "installer shows v${EXPECT_VERSION}-beta (welcome label + installed os-release)" \
+    || bad "installer version strings are not v${EXPECT_VERSION}-beta"
+stale=$(grep -rlE 'v2\.0\.1-beta|SelahOS Beta 2\.0\.1 ' "$SFS/usr/local/bin" 2>/dev/null | sed "s|$SFS||" | tr '\n' ' ')
+[ -z "$stale" ] && ok "no shipped tool still says the previous version" \
+    || bad "stale version string in: $stale"
+
+# B-45: the protected SelahBridge inputs are gitignored (public repo), so a build
+# made from a fresh checkout silently lacks them. The 09-20 test ISO did.
+for t in selahbridge-install selahbridge-winapp selahbridge-detect selahbridge-sandbox; do
+    [ -x "$SFS/usr/local/bin/$t" ] && ok "SelahBridge tool present + executable: $t" \
+        || bad "SelahBridge tool MISSING or not executable: $t (gitignored build input — see rebuild-iso.sh warning)"
+done
+[ -s "$SFS/etc/selahbridgepro/.keydata" ] && ok "SelahBridgePro .keydata present" \
+    || bad "etc/selahbridgepro/.keydata missing — a release ISO must not be built without it"
+
+# B-44 drive picker, B-46 hostname, B-04 welcome check
+grep -qs "_NOT_INSTALL_TARGETS" "$_SETUP" && ! grep -qs "setCurrentRow(0)" "$_SETUP" \
+    && ok "drive picker hides floppy/zram/loop and never preselects the first row (B-44)" \
+    || bad "drive picker regressed: unusable devices offered or first row preselected (B-44)"
+grep -qs "hostname_error(host)" "$_SETUP" \
+    && ok "installer validates the hostname (B-46)" || bad "installer does not validate the hostname (B-46)"
+grep -qs "system_check(get_boot_mode()" "$_SETUP" \
+    && ok "welcome screen shows the system check (B-04)" || bad "welcome screen system check missing (B-04)"
+
+# B-47: rescue must delegate to selah-doctor (both firmware modes) and not carry its own EFI-only grub-install
+grep -qs "selah-doctor --target" "$SFS/usr/local/bin/selah-rescue" \
+    && ! grep -vs '^[[:space:]]*#' "$SFS/usr/local/bin/selah-rescue" | grep -q "grub-install" \
+    && ok "selah-rescue delegates the bootloader repair to selah-doctor (B-47)" \
+    || bad "selah-rescue still runs its own grub-install or does not call selah-doctor (B-47)"
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "PRE-FLIGHT PASSED — safe to flash"
