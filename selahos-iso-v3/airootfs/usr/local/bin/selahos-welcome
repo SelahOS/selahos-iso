@@ -21,7 +21,7 @@ sleep 4
 
 # Show the welcome dialog
 CHOICE=$(kdialog \
-    --title "Welcome to SelahOS v2.0.1-beta" \
+    --title "Welcome to SelahOS v2.0.1.1-beta" \
     --radiolist "What would you like to do?" \
     "try"     "Try SelahOS — explore the desktop"  on \
     "install" "Install SelahOS to this computer"   off \

@@ -43,7 +43,7 @@ if command -v kdialog >/dev/null 2>&1; then
     else
         kdialog \
             --title "Welcome to SelahOS" \
-            --msgbox "Welcome to SelahOS v2.0.1-beta.\n\nVisit https://selahos.io for documentation."
+            --msgbox "Welcome to SelahOS v2.0.1.1-beta.\n\nVisit https://selahos.io for documentation."
     fi
 
     # Confirm acknowledgment

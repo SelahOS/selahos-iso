@@ -448,7 +448,7 @@ class WelcomeScreen(QWidget):
 
         layout.addSpacing(8)
 
-        name = QLabel('SelahOS™ v2.0.1-beta')
+        name = QLabel('SelahOS™ v2.0.1.1-beta')
         name.setFont(QFont('Inter', 28, QFont.Weight.Light))
         name.setStyleSheet(f"color: {C['white']}; background: transparent; letter-spacing: 2px;")
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1620,7 +1620,7 @@ class InstallThread(QThread):
 
         # Write SelahOS os-release
         with open('/mnt/etc/os-release', 'w') as f:
-            f.write('NAME="SelahOS"\nPRETTY_NAME="SelahOS v2.0.1-beta"\n'
+            f.write('NAME="SelahOS"\nPRETTY_NAME="SelahOS v2.0.1.1-beta"\n'
                     'ID=selahos\nID_LIKE=arch\nBUILD_ID=rolling\n'
                     'HOME_URL="https://selahos.io"\n'
                     'VENDOR_NAME="Selah Technologies LLC"\n')

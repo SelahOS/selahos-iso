@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
-# SelahOS v2.0.1-beta archiso profile
+# SelahOS v2.0.1.1-beta archiso profile
 # Copyright (C) 2026 Selah Technologies LLC
 
 iso_name="selahos"
 iso_label="SELAHOS_$(date +%Y%m)"
 iso_publisher="Selah Technologies LLC <https://selahos.io>"
-iso_application="SelahOS Beta 2.0.1 — Live and Install Medium"
-iso_version="2.0.1-beta-$(date +%Y.%m.%d)"
+iso_application="SelahOS Beta 2.0.1.1 — Live and Install Medium"
+iso_version="2.0.1.1-beta-$(date +%Y.%m.%d)"
 install_dir="arch"
 buildmodes=('iso')
 bootmodes=(
