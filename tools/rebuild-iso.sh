@@ -51,9 +51,22 @@ for c in mkarchiso mksquashfs xorriso mkfs.fat mcopy grub-mkstandalone repo-add 
   command -v "$c" >/dev/null || die "missing tool: $c (pacman -S archiso ... )"
 done
 [[ -f "$PROFILE/profiledef.sh" ]] || die "no profile at $PROFILE"
-if [[ ! -f "$PROFILE/airootfs/etc/selahbridgepro/.keydata" ]]; then
-  echo "   NOTE: airootfs/etc/selahbridgepro/.keydata is absent (gitignored secret)."
-  echo "         Fine for a test ISO; a RELEASE ISO needs it copied in first."
+# Build inputs that are gitignored ON PURPOSE (SelahBridge is the protected
+# product and this repo is public) but that every real ISO needs. A fresh
+# checkout silently lacks them: the 2026-09-20 test ISO shipped without them
+# (selahpro then logs "selahbridge-install not found") while the released
+# 2.0.1 ISO had them. They can be recovered from any released ISO's
+# airootfs.sfs. NEVER commit these.
+_missing=()
+for _f in etc/selahbridgepro/.keydata usr/local/bin/selahbridge-install \
+          usr/local/bin/selahbridge-winapp usr/local/bin/selahbridge-detect \
+          usr/local/bin/selahbridge-sandbox; do
+  [[ -e "$PROFILE/airootfs/$_f" ]] || _missing+=("$_f")
+done
+if [[ ${#_missing[@]} -gt 0 ]]; then
+  echo "   WARNING: gitignored build inputs missing from airootfs (this ISO will lack them):"
+  printf '            %s\n' "${_missing[@]}"
+  echo "            Fine for a throwaway test ISO. A RELEASE ISO must not be built like this."
 fi
 if git -C "$REPO_ROOT" status --porcelain 2>/dev/null | grep -qv '^??'; then
   echo "   NOTE: uncommitted changes in $REPO_ROOT will be built into the ISO."
