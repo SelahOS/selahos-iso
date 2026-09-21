@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SelahOS Print Center
+GenericName=Printers
+Comment=Find, add and manage printers — no drivers needed for most network printers
+Exec=selahos-print-center
+Icon=printer
+Terminal=false
+StartupNotify=true
+Categories=System;Settings;HardwareSettings;Qt;
+Keywords=printer;print;printing;cups;scanner;toner;ink;airprint;brother;hp;epson;canon;

@@ -424,3 +424,14 @@ bibletime
 rtkit
 ksystemlog
 discover
+
+# === Printing (Print Center) ===
+# Mirror of airootfs/usr/local/share/selahos-install-packages/print.txt --
+# keep the two in step. ghostscript and nss-mdns are listed further up.
+cups
+cups-filters
+cups-browsed
+avahi
+print-manager
+gutenprint
+ipp-usb

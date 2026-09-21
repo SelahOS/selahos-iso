@@ -1,0 +1,36 @@
+# Printing package set for selah-setup (installer): CUPS + network printer
+# discovery + the KDE printer settings, so SelahOS can find a printer on the
+# network and every app's Print dialog can use it. Single source of truth,
+# shared with tools/build-offline-repo.sh (same contract as base.txt).
+#
+# 2026-09-21 (Print Center): modern network printers (AirPrint / IPP
+# Everywhere) need no vendor driver -- CUPS builds the queue from the
+# printer's own IPP attributes. Set up + configured by `selah-print`
+# (see airootfs/usr/local/bin/selah-print).
+cups
+cups-filters
+cups-browsed
+
+# gs renders PDF/PS pages to the raster the printer wants (gstoraster).
+# Was live-ISO-only before (packages.x86_64) -- same "live-only gap" class
+# as the items in base.txt.
+ghostscript
+
+# mDNS/DNS-SD: how printers announce themselves. nss-mdns lets .local
+# printer names resolve (selah-print configure patches nsswitch.conf).
+avahi
+nss-mdns
+
+# KDE "Printers" settings page + tray applet with job notifications.
+print-manager
+
+# Drivers for older/non-driverless printers (Epson, Canon, many others).
+gutenprint
+
+# USB printers that speak IPP-over-USB then work driverless too.
+ipp-usb
+
+# NOT here: brlaser (open driver for older Brother mono lasers) lives only
+# in chaotic-aur, which the installer's pacstrap config deliberately strips
+# (see selah-setup _pacstrap_pacman_conf). Add it via packaging/ + local-repo
+# if older Brother models turn up -- the HL-L3230CDW-class needs no driver.

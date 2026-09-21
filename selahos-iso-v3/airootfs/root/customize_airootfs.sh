@@ -76,6 +76,11 @@ systemctl enable bolt    2>/dev/null || true
 systemctl enable acpid   2>/dev/null || true
 systemctl enable dhcpcd  2>/dev/null || true
 
+# Printing: nss-mdns in nsswitch.conf, cups-browsed policy (Driverless -- the
+# package default LocalOnly ignores LAN printers), enable cups/avahi/cups-browsed.
+# Not fatal: a printing hiccup must never fail the whole ISO build.
+python3 /usr/local/bin/selah-print configure || echo "WARNING: selah-print configure failed"
+
 # ── Step 5: Keyring (pre-initialized) ────────────────────────
 pacman-key --init
 pacman-key --populate archlinux

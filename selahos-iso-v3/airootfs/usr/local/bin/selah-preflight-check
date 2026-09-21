@@ -308,6 +308,24 @@ else
     bad "flatpak not installed — Discover has no app backend at all"
 fi
 
+# ── 10. Printing / Print Center (2026-09-21) ───────────────────────────
+# Delegates to `selah-print status` so there is one definition of "printing
+# is set up": CUPS + cups-browsed + avahi + nss-mdns + ghostscript present,
+# mDNS in nsswitch.conf, cups-browsed on Driverless (its default, LocalOnly,
+# silently ignores LAN printers), and the three services enabled.
+if [ -f /usr/local/bin/selah-print ]; then
+    while IFS= read -r _line; do
+        case "$_line" in
+            "  OK "*)   ok   "${_line:7}" ;;
+            "  FAIL "*) bad  "${_line:7}" ;;
+            "  WARN "*) warn "${_line:7}" ;;
+        esac
+    done < <(python3 /usr/local/bin/selah-print status 2>&1)
+else
+    bad "selah-print missing — Print Center backend was not installed"
+fi
+[ -x /usr/local/bin/selahos-print-center ] || bad "selahos-print-center missing or not executable"
+
 echo
 if [ "$fail" -eq 1 ]; then
     echo "PRE-FLIGHT FAILED — do not consider this system ready"

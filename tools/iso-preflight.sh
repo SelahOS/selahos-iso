@@ -114,6 +114,42 @@ grep -qs "^HandleLidSwitch=suspend" "$SFS/etc/systemd/logind.conf" \
     && ok "logind.conf: plain lid-close-to-suspend still set" \
     || bad "logind.conf HandleLidSwitch not set to suspend — lid-close-to-suspend would break"
 
+# 6b. Printing / Print Center (2026-09-21): CUPS + network-printer discovery.
+# A modern network printer needs NO vendor driver, but only if all of this is
+# present: cups + gstoraster (renders pages), avahi + nss-mdns (finds printers,
+# resolves .local), cups-browsed on Driverless (its LocalOnly default ignores
+# LAN printers), and the services enabled. Also that installs can get them
+# offline -- the installer's print.txt must be bundled in the offline repo.
+for f in selah-print selahos-print-center; do
+    [ -x "$SFS/usr/local/bin/$f" ] \
+        && ok "$f present + executable" || bad "$f missing or not executable (profiledef.sh file_permissions?)"
+done
+[ -f "$SFS/usr/share/applications/selahos-print-center.desktop" ] \
+    && ok "Print Center menu entry present" || bad "selahos-print-center.desktop missing"
+for b in usr/bin/cupsd usr/bin/cups-browsed usr/lib/cups/filter/gstoraster usr/bin/avahi-daemon; do
+    [ -e "$SFS/$b" ] && ok "print stack: /$b" || bad "print stack missing: /$b (packages.x86_64 print block)"
+done
+grep -qs "^hosts:.*mdns_minimal" "$SFS/etc/nsswitch.conf" \
+    && ok "nsswitch.conf: mdns_minimal (printer .local names resolve)" \
+    || bad "nsswitch.conf has no mdns_minimal -- selah-print configure did not run at build"
+grep -qs "^CreateIPPPrinterQueues[[:space:]]*Driverless" "$SFS/etc/cups/cups-browsed.conf" \
+    && ok "cups-browsed: CreateIPPPrinterQueues Driverless" \
+    || bad "cups-browsed not on Driverless -- LAN printers would be ignored (package default is LocalOnly)"
+grep -qs "^BrowseRemoteProtocols[[:space:]]*dnssd$" "$SFS/etc/cups/cups-browsed.conf" \
+    && ok "cups-browsed: BrowseRemoteProtocols dnssd only (no UDP/631 listener)" \
+    || bad "cups-browsed BrowseRemoteProtocols is not 'dnssd' only"
+for u in cups cups-browsed avahi-daemon; do
+    [ -L "$SFS/etc/systemd/system/multi-user.target.wants/$u.service" ] \
+        && ok "$u.service enabled" || bad "$u.service not enabled in the live image"
+done
+for pkg in cups ghostscript avahi nss-mdns print-manager; do
+    grep -qsx "$pkg" "$PKGLISTS/print.txt" \
+        && ok "installer print.txt lists $pkg" || bad "installer print.txt missing $pkg"
+done
+find "$SFS/usr/local/share/selahos-offline-repo" -name "cups-[0-9]*.pkg.tar.*" 2>/dev/null | grep -q . \
+    && ok "offline repo bundles cups (installer can set up printing without network)" \
+    || bad "offline repo has no cups -- rerun tools/build-offline-repo.sh (print list was added after it last ran)"
+
 # 7. bake-fixes handoff (2026-07-27): re-verify SELAH-36 didn't regress,
 # and that the new fixes actually landed in this build
 grep -qs "^GRUB_CMDLINE_LINUX_DEFAULT=" "$SFS/etc/default/grub" && \

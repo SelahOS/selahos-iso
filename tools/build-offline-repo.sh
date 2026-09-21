@@ -36,13 +36,22 @@ BUILD_PACMAN_CONF="${BUILD_PACMAN_CONF:-$PROFILE_DIR/pacman.conf}"
 SCRATCH_DB="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH_DB"' EXIT
 
-echo "==> Collecting package list (base + base-apple-extra + kde + audio + wine)..."
+# Every list in the directory, not a hardcoded set: this loop used to name five
+# lists, and when print.txt (Print Center) was added on 2026-09-21 it was left
+# out, so offline installs would have had no CUPS. A new list now bundles
+# itself. (Lists the installer never loads are harmless extras.)
+echo "==> Collecting package list (every list in $PKGLIST_DIR)..."
 PACKAGES=()
-for f in base base-apple-extra kde audio wine; do
+shopt -s nullglob
+_lists=("$PKGLIST_DIR"/*.txt)
+shopt -u nullglob
+[ "${#_lists[@]}" -gt 0 ] || { echo "ERROR: no package lists in $PKGLIST_DIR" >&2; exit 1; }
+for _f in "${_lists[@]}"; do
+  echo "    + $(basename "$_f")"
   while IFS= read -r line; do
     pkg="$(echo "${line%%#*}" | xargs)"
     [ -n "$pkg" ] && PACKAGES+=("$pkg")
-  done < "$PKGLIST_DIR/$f.txt"
+  done < "$_f"
 done
 echo "    ${#PACKAGES[@]} top-level packages requested (both is_apple branches included —"
 echo "    hardware isn't known until install time, so the bundle covers either path)"

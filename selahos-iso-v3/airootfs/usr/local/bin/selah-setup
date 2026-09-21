@@ -1529,6 +1529,11 @@ class InstallThread(QThread):
         self._step(6)
         pacstrap(load_pkglist('wine'))
 
+        # Printing: CUPS + network-printer discovery + Print Center. Best
+        # effort by design -- a printing problem must never fail an install;
+        # the Print Center's "Repair printing" fixes it after first boot.
+        self._install_print_stack(pacstrap, sh, log)
+
         # Step 7: fstab
         self._step(7)
         with open('/mnt/etc/fstab', 'a') as f:
@@ -1821,6 +1826,46 @@ class InstallThread(QThread):
                 _os.makedirs(dst, exist_ok=True)
                 sh(['cp', src, dst])
         chroot(['systemctl', 'enable', 'selah-wifi-driver'])
+
+    def _install_print_stack(self, pacstrap, sh, log):
+        """Install CUPS/avahi/print-manager and the SelahOS Print Center, then
+        run `selah-print configure --root /mnt` (nss-mdns in nsswitch.conf,
+        cups-browsed Driverless policy, enable cups/avahi/cups-browsed).
+
+        Non-fatal on purpose: pacstrap() raises RuntimeError after its retries,
+        which for the core install is right, but a print-package failure
+        (e.g. a mirror outage on a machine that has no offline bundle for this
+        list yet) should leave a working desktop plus a log line, not abort.
+        """
+        import os as _os
+        try:
+            pacstrap(load_pkglist('print'))
+        except (RuntimeError, OSError) as e:
+            log.write(f"WARNING: print packages did not install: {e}\n"
+                       "Printing is not set up on this system; open "
+                       "SelahOS Print Center and use Repair printing "
+                       "once online.\n")
+            log.flush()
+        for src, dst in [
+            ('/usr/local/bin/selah-print', '/mnt/usr/local/bin/'),
+            ('/usr/local/bin/selahos-print-center', '/mnt/usr/local/bin/'),
+            # selah-print --install-missing / status read this list
+            ('/usr/local/share/selahos-install-packages/print.txt',
+             '/mnt/usr/local/share/selahos-install-packages/'),
+            ('/usr/share/applications/selahos-print-center.desktop',
+             '/mnt/usr/share/applications/'),
+        ]:
+            if _os.path.exists(src):
+                _os.makedirs(dst, exist_ok=True)
+                sh(['cp', src, dst])
+        # mkarchiso strips modes not in profiledef.sh (SELAH-40); be explicit
+        sh(['chmod', '755', '/mnt/usr/local/bin/selah-print',
+            '/mnt/usr/local/bin/selahos-print-center'])
+        r = sh(['python3', '/usr/local/bin/selah-print', 'configure', '--root', '/mnt'])
+        if r.returncode != 0:
+            log.write("WARNING: selah-print configure --root /mnt failed; "
+                       "printing may need Repair printing after first boot.\n")
+            log.flush()
 
     def _carry_over_live_settings(self, chroot, sh, username, log):
         """Beta tester report 2026-09-19: after install the keyboard was back
