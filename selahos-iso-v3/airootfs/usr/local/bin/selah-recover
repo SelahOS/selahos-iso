@@ -19,6 +19,22 @@ CYAN='\033[0;36m'
 DIM='\033[2m'
 NC='\033[0m'
 
+# B-47 (2026-09-21): everything below reads the log of the retired Beta 1.0
+# installer (/tmp/selahos-install.log) and assumes ITS layout (ESP = partition
+# 1, root = partition 2). The current installer (selah-setup) logs to
+# /tmp/selah-setup.log, and on a BIOS machine puts a BIOS Boot Partition
+# first, so those assumptions do not hold for it. With no legacy log given or
+# found, hand over to selah-rescue (boot repair for a current install) instead
+# of dead-ending on "no install log".
+if [ -z "${1:-}" ] && [ ! -f "$LOG" ] && command -v selah-rescue >/dev/null 2>&1; then
+    echo ""
+    echo -e "${GOLD}  SelahOS Recovery${NC}"
+    echo -e "${DIM}  No Beta 1.0 install log here, so this is a current install.${NC}"
+    echo -e "${DIM}  Starting selah-rescue (boot repair for an installed system)...${NC}"
+    echo ""
+    exec selah-rescue
+fi
+
 echo ""
 echo -e "${GOLD}  SelahOS Recovery Tool${NC}"
 echo -e "${DIM}  Analyzing installation log...${NC}"

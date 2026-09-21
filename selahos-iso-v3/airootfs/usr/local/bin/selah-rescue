@@ -12,7 +12,9 @@
 #   1. Detects your installed SelahOS partition
 #   2. Mounts it
 #   3. chroots in
-#   4. Reinstalls bootloader with --removable flag (Mac-safe)
+#   4. Checks and repairs the bootloader for this machine's boot mode
+#      (UEFI or legacy BIOS) using selah-doctor -- EFI installs use the
+#      --removable fallback, so a Mac NVRAM reset can't hide them
 #   5. Regenerates initramfs
 #
 # Copyright (C) 2026 Selah Technologies LLC
@@ -84,70 +86,70 @@ fi
 
 echo -e "${TEAL}  ✓ SelahOS installation detected${RESET}"
 
-# Find EFI partition
+# Find the EFI partition. B-47 (2026-09-21): look on the SAME disk as the root
+# partition you chose first -- the old "first vfat anywhere" could pick an
+# unrelated partition (e.g. a Ventoy USB) -- and only fall back to that.
 echo ""
 echo -e "${PARCH}→ Looking for EFI partition...${RESET}"
-EFI_PART=$(lsblk -ln -o NAME,FSTYPE | awk '$2=="vfat" {print $1; exit}')
+ROOT_DISK=$(lsblk -no PKNAME "/dev/$ROOT_PART" 2>/dev/null | head -1)
+EFI_PART=""
+if [ -n "$ROOT_DISK" ]; then
+    EFI_PART=$(lsblk -ln -o NAME,FSTYPE,PKNAME | awk -v d="$ROOT_DISK" '$2=="vfat" && $3==d {print $1; exit}')
+fi
+[ -n "$EFI_PART" ] || EFI_PART=$(lsblk -ln -o NAME,FSTYPE | awk '$2=="vfat" {print $1; exit}')
 
 if [ -z "$EFI_PART" ]; then
-    echo -e "${DANGER}✗ No EFI partition found.${RESET}"
-    umount /mnt/selahos-rescue
+    if [ -d /sys/firmware/efi ]; then
+        echo -e "${DANGER}✗ No EFI partition found.${RESET}"
+        umount /mnt/selahos-rescue
+        exit 1
+    fi
+    echo -e "${PARCH}  No EFI partition found — fine on a legacy-BIOS machine, continuing.${RESET}"
+else
+    echo -e "${TEAL}  ✓ EFI partition: /dev/$EFI_PART${RESET}"
+    # Current installs (selah-setup) keep the ESP at /boot/efi; the retired
+    # installer mounted it at /boot. Use whichever this system expects.
+    if [ -d /mnt/selahos-rescue/boot/efi ]; then
+        ESP_MNT=/mnt/selahos-rescue/boot/efi
+    else
+        ESP_MNT=/mnt/selahos-rescue/boot
+    fi
+    mkdir -p "$ESP_MNT"
+    mount "/dev/$EFI_PART" "$ESP_MNT"
+fi
+
+# Bootloader. B-47 (2026-09-21): this used to run its own EFI-only grub-install
+# (with the old ESP-at-/boot layout), which did nothing for a BIOS boot and
+# never checked the result. selah-doctor already knows both firmware modes and
+# the current layout, and verifies the real artifact (EFI files, or MBR boot
+# code + core.img), so delegate to it. It runs GRUB's install through
+# arch-chroot, which sets up /dev /proc /sys /run itself.
+echo ""
+echo -e "${PARCH}→ Checking and repairing the bootloader (selah-doctor)...${RESET}"
+if ! command -v selah-doctor >/dev/null 2>&1; then
+    echo -e "${DANGER}✗ selah-doctor is missing from this USB — cannot repair the bootloader.${RESET}"
+    umount -R /mnt/selahos-rescue 2>/dev/null || true
     exit 1
 fi
-
-echo -e "${TEAL}  ✓ EFI partition: /dev/$EFI_PART${RESET}"
-
-mkdir -p /mnt/selahos-rescue/boot
-mount "/dev/$EFI_PART" /mnt/selahos-rescue/boot
-
-# Bind mount system dirs
-for dir in dev proc sys run; do
-    mount --bind "/$dir" "/mnt/selahos-rescue/$dir"
-done
-
-# Detect Apple hardware
-IS_APPLE=0
-if [ -f /sys/class/dmi/id/sys_vendor ] && grep -qi "apple" /sys/class/dmi/id/sys_vendor; then
-    IS_APPLE=1
-    echo -e "${TEAL}  ✓ Apple hardware — using --removable flag${RESET}"
-fi
-
-# Reinstall bootloader
-echo ""
-echo -e "${PARCH}→ Reinstalling GRUB bootloader...${RESET}"
-
-if [ "$IS_APPLE" -eq 1 ]; then
-    chroot /mnt/selahos-rescue grub-install \
-        --target=x86_64-efi \
-        --efi-directory=/boot \
-        --bootloader-id=SelahOS \
-        --removable \
-        --recheck
-else
-    chroot /mnt/selahos-rescue grub-install \
-        --target=x86_64-efi \
-        --efi-directory=/boot \
-        --bootloader-id=SelahOS \
-        --recheck
-fi
-
-echo -e "${PARCH}→ Regenerating GRUB config...${RESET}"
-chroot /mnt/selahos-rescue grub-mkconfig -o /boot/grub/grub.cfg
+DOCTOR_RC=0
+selah-doctor --target /mnt/selahos-rescue --fix || DOCTOR_RC=$?
 
 echo -e "${PARCH}→ Regenerating initramfs...${RESET}"
-chroot /mnt/selahos-rescue mkinitcpio -P
+arch-chroot /mnt/selahos-rescue mkinitcpio -P || true
 
-# Cleanup
+# Cleanup (-R also takes down the ESP mounted under /boot/efi or /boot)
 echo ""
 echo -e "${PARCH}→ Cleaning up...${RESET}"
-for dir in run sys proc dev; do
-    umount "/mnt/selahos-rescue/$dir" 2>/dev/null || true
-done
-umount /mnt/selahos-rescue/boot 2>/dev/null || true
-umount /mnt/selahos-rescue 2>/dev/null || true
+umount -R /mnt/selahos-rescue 2>/dev/null || true
 
 echo ""
 echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+if [ "$DOCTOR_RC" -eq 2 ]; then
+    echo -e "${DANGER}  ✗ Some problems could not be repaired — see the selah-doctor output above.${RESET}"
+    echo -e "${PARCH}  Do not rely on this system booting; ask for help at beta@selahos.io.${RESET}"
+    echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    exit 1
+fi
 echo -e "${TEAL}  ✓ Recovery complete${RESET}"
 echo -e "${PARCH}  Remove the USB stick and reboot.${RESET}"
 echo -e "${GOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
