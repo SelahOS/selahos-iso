@@ -139,7 +139,11 @@ fi
 
 # ---- 3. verify --------------------------------------------------------------------
 say; say "3/3  Checking the result"
-python3 "$BIN/selah-print" status --root "${DEST:-/}" | sed 's/^/  /'
+STATUS_OUT="$(python3 "$BIN/selah-print" status --root "${DEST:-/}")"
+printf '%s\n' "$STATUS_OUT" | sed 's/^/  /'
+# A FAIL in the final check is a real problem even when every step above said OK.
+# (2026-09-21: the first real run printed "Done." right under a FAIL line.)
+FAILED=$((FAILED + $(printf '%s\n' "$STATUS_OUT" | grep -c '^[[:space:]]*FAIL')))
 
 if [ -z "$DEST" ]; then
     case " $(id -nG "$TARGET_USER" 2>/dev/null) " in

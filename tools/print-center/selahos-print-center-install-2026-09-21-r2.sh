@@ -1,3 +1,187 @@
+#!/usr/bin/env bash
+# ============================================================
+# selahos-print-center-install-2026-09-21-r2
+#
+# Adds the SelahOS Print Center to a SelahOS system you have ALREADY
+# installed (Beta 2.0.1 or later) -- no reinstall needed.
+#
+#   bash selahos-print-center-install-2026-09-21-r2.sh            install / repair
+#   bash selahos-print-center-install-2026-09-21-r2.sh --check    report only, changes nothing
+#   bash selahos-print-center-install-2026-09-21-r2.sh --upgrade  full system update first (see below)
+#   bash selahos-print-center-install-2026-09-21-r2.sh --extract DIR   just unpack the files to read them
+#
+# Run it as your normal user; it asks for your password (sudo) once.
+# Safe to run twice.
+#
+# What it does:
+#   1. Installs the printing packages: cups, cups-filters, cups-browsed, ghostscript, avahi, nss-mdns, print-manager, gutenprint, ipp-usb
+#      (using a temporary copy of pacman.conf without [selahos-offline] and
+#      [chaotic-aur], which break package installs on installed systems;
+#      your real /etc/pacman.conf is never touched).
+#   2. Installs two programs and a menu entry:
+#        /usr/local/bin/selah-print               (the backend, also usable in a terminal)
+#        /usr/local/bin/selahos-print-center      (the window)
+#        /usr/share/applications/selahos-print-center.desktop
+#   3. Sets up network printer discovery: printer .local names resolve
+#      (mdns_minimal in /etc/nsswitch.conf), cups-browsed auto-adds AirPrint /
+#      IPP Everywhere printers, and cups + avahi + cups-browsed are enabled.
+#      Every system file it changes is first copied to /var/backups/selah-print/.
+#
+# Most printers made since about 2015 (AirPrint / "Mopria" / IPP Everywhere)
+# need NO vendor driver. Older ones may need one; the Print Center tells you.
+#
+# --upgrade: Arch does not support installing new packages against an
+# out-of-date package database. If step 1 says your database is out of date,
+# re-run with --upgrade. It runs a full `pacman -Syu` first -- that updates
+# everything on the system (it may rebuild DKMS drivers and want a reboot).
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+set -uo pipefail
+
+VERSION="2026-09-21-r2"
+DEST="${SELAH_PRINT_DESTDIR:-}"       # test hook: install under this root, no sudo/pacman/systemd
+
+say()  { printf '%s\n' "$*"; }
+ok()   { say "  [ok]      $*"; }
+warn() { say "  [warning] $*"; }
+bad()  { say "  [FAILED]  $*"; FAILED=$((FAILED+1)); }
+FAILED=0
+
+extract_payload() {
+    local d="$1"
+    mkdir -p "$d"
+    payload_selah_print               > "$d/selah-print"
+    payload_selahos_print_center      > "$d/selahos-print-center"
+    payload_desktop_entry             > "$d/selahos-print-center.desktop"
+    payload_print_txt                 > "$d/print.txt"
+}
+
+main() {
+CHECK=0; UPGRADE=0; EXTRACT_DIR=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check)    CHECK=1 ;;
+        --upgrade)  UPGRADE=1 ;;
+        --extract)  EXTRACT_DIR="${2:-}"; [ -n "$EXTRACT_DIR" ] || { echo "--extract needs a folder"; exit 1; }; shift ;;
+        -h|--help)  awk 'NR>=3 && /^# ====/ {exit} NR>=3 {sub(/^# ?/,""); print}' "$0"; exit 0 ;;
+        *) echo "Unknown option: $1  (try --help)"; exit 1 ;;
+    esac
+    shift
+done
+
+
+if [ -n "$EXTRACT_DIR" ]; then
+    extract_payload "$EXTRACT_DIR"
+    say "Unpacked to $EXTRACT_DIR:"; ls -1 "$EXTRACT_DIR"
+    exit 0
+fi
+
+TARGET_USER="${SUDO_USER:-${USER:-$(id -un)}}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"; TARGET_HOME="${TARGET_HOME:-$HOME}"
+BIN="$DEST/usr/local/bin"; APPS="$DEST/usr/share/applications"; LISTS="$DEST/usr/local/share/selahos-install-packages"
+
+# ---- --check: report only ----------------------------------------------
+if [ "$CHECK" -eq 1 ]; then
+    say "SelahOS Print Center installer $VERSION — check only (nothing will be changed)"; say
+    for f in "$BIN/selah-print" "$BIN/selahos-print-center" "$APPS/selahos-print-center.desktop"; do
+        [ -e "$f" ] && ok "present: ${f#"$DEST"}" || say "  [missing] ${f#"$DEST"}"
+    done
+    if [ -f "$BIN/selah-print" ]; then
+        say; say "Printing setup status:"
+        python3 "$BIN/selah-print" status --root "${DEST:-/}" | sed 's/^/  /'
+    else
+        say; say "Not installed yet. Run without --check to install."
+    fi
+    exit 0
+fi
+
+# ---- preflight -----------------------------------------------------------
+say "SelahOS Print Center installer $VERSION"; say
+if [ -z "$DEST" ]; then
+    command -v pacman >/dev/null || { say "This needs a SelahOS / Arch-based system (pacman not found)."; exit 1; }
+    command -v python3 >/dev/null || { say "python3 is required."; exit 1; }
+fi
+SUDO=""
+if [ -z "$DEST" ] && [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null || { say "sudo is required (or run this as root)."; exit 1; }
+    SUDO="sudo"
+    say "You'll be asked for your password once."
+    sudo -v || { say "Could not get administrator rights."; exit 1; }
+fi
+
+LOG="$TARGET_HOME/selahos-print-center-install.log"
+{
+say "Log: $LOG"; say
+
+# ---- 1. files ----------------------------------------------------------------
+say "1/3  Installing the Print Center files"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+extract_payload "$TMP"
+if python3 -m py_compile "$TMP/selah-print" "$TMP/selahos-print-center" 2>/dev/null; then
+    ok "files unpacked and verified"
+else
+    bad "unpacked files are damaged — download the script again"; exit 1
+fi
+$SUDO install -Dm755 "$TMP/selah-print"                       "$BIN/selah-print"                                && ok "${BIN#"$DEST"}/selah-print"               || bad "selah-print"
+$SUDO install -Dm755 "$TMP/selahos-print-center"              "$BIN/selahos-print-center"                       && ok "${BIN#"$DEST"}/selahos-print-center"      || bad "selahos-print-center"
+$SUDO install -Dm644 "$TMP/selahos-print-center.desktop"      "$APPS/selahos-print-center.desktop"              && ok "menu entry"                                || bad "menu entry"
+$SUDO install -Dm644 "$TMP/print.txt"                         "$LISTS/print.txt"                                && ok "package list"                              || bad "package list"
+
+# ---- 2. packages + network discovery + services -------------------------------
+say; say "2/3  Installing printing packages and setting up network printer discovery"
+if [ -n "$DEST" ]; then
+    python3 "$BIN/selah-print" configure --root "$DEST" || FAILED=$((FAILED+1))
+else
+    UPG=(); [ "$UPGRADE" -eq 1 ] && UPG=(--upgrade)
+    $SUDO python3 /usr/local/bin/selah-print configure --install-missing --now "${UPG[@]}" || FAILED=$((FAILED+1))
+fi
+
+# ---- 3. verify --------------------------------------------------------------------
+say; say "3/3  Checking the result"
+STATUS_OUT="$(python3 "$BIN/selah-print" status --root "${DEST:-/}")"
+printf '%s\n' "$STATUS_OUT" | sed 's/^/  /'
+# A FAIL in the final check is a real problem even when every step above said OK.
+# (2026-09-21: the first real run printed "Done." right under a FAIL line.)
+FAILED=$((FAILED + $(printf '%s\n' "$STATUS_OUT" | grep -c '^[[:space:]]*FAIL')))
+
+if [ -z "$DEST" ]; then
+    case " $(id -nG "$TARGET_USER" 2>/dev/null) " in
+        *" wheel "*|*" sys "*) ok "$TARGET_USER can manage printers (wheel/sys group)" ;;
+        *) warn "$TARGET_USER is not in the wheel or sys group, so adding printers will be refused." ;;
+    esac
+    # refresh the KDE menu so the new entry shows without logging out
+    for k in kbuildsycoca6 kbuildsycoca5; do
+        if command -v "$k" >/dev/null; then
+            if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != root ]; then sudo -u "$TARGET_USER" "$k" --noincremental >/dev/null 2>&1
+            else "$k" --noincremental >/dev/null 2>&1; fi
+            break
+        fi
+    done
+    say; say "Looking for printers on your network..."
+    if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != root ]; then sudo -u "$TARGET_USER" python3 /usr/local/bin/selah-print discover
+    else python3 /usr/local/bin/selah-print discover; fi
+fi
+
+say
+if [ "$FAILED" -eq 0 ]; then
+    say "Done. Open the Print Center from the application menu (search \"Print Center\"),"
+    say "or run:  selahos-print-center"
+    say "Printers you add there show up in every app's Print dialog."
+else
+    say "Finished with $FAILED problem(s) — see [FAILED]/FAIL lines above and the log: $LOG"
+    say "If it mentions an out-of-date package database, run this script again with --upgrade."
+fi
+} 2>&1 | tee -a "$LOG"
+exit "${PIPESTATUS[0]}"
+}
+
+# ============================ payload ============================
+# The files below are the exact program sources this script installs.
+# Read them here, or unpack them without installing:  --extract DIR
+
+payload_selah_print() {
+cat <<'__SELAH_PAYLOAD_PAYLOAD_SELAH_PRINT__'
 #!/usr/bin/env python3
 # ============================================================
 # selah-print — SelahOS printer discovery & setup backend
@@ -1122,3 +1306,664 @@ if __name__ == '__main__':
     if isinstance(result, dict) and result.get('ok') is False:
         sys.exit(2)
     sys.exit(0)
+__SELAH_PAYLOAD_PAYLOAD_SELAH_PRINT__
+}
+
+payload_selahos_print_center() {
+cat <<'__SELAH_PAYLOAD_PAYLOAD_SELAHOS_PRINT_CENTER__'
+#!/usr/bin/env python3
+# ============================================================
+# SelahOS Print Center
+# KDE Application Menu → Settings → SelahOS Print Center
+#
+# Finds printers on the network, sets them up (no vendor driver for any
+# AirPrint / IPP Everywhere printer), and manages them: default printer,
+# test page, toner levels, two-sided/color/paper defaults, print jobs.
+# Once a printer is set up here it shows in the Print dialog of every app
+# (they all talk to CUPS). All the real work is done by `selah-print`;
+# this window only runs it in the background and shows the result.
+#
+# Runs as the normal user -- CUPS lets the wheel/sys groups manage
+# printers over its local socket, so no password prompt for day-to-day use.
+# Only "Repair printing" (system config) asks for admin rights.
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtWidgets import (
+    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar,
+    QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+)
+
+COLORS = {
+    'bg': '#0B0F1A', 'bg2': '#111827', 'bg3': '#1A2030', 'gold': '#D6A85A',
+    'parch': '#EDE4D4', 'muted': '#9A8D7B', 'teal': '#8EC3B8', 'red': '#B97A6F',
+    'border': '#2A3042', 'green': '#6A9A7A',
+}
+
+STYLESHEET = f"""
+QMainWindow, QWidget {{
+    background-color: {COLORS['bg']}; color: {COLORS['parch']};
+    font-family: 'Noto Sans', sans-serif; font-size: 14px;
+}}
+QLabel {{ background: transparent; }}
+QPushButton {{
+    background-color: {COLORS['gold']}; color: {COLORS['bg']}; border: none;
+    border-radius: 4px; padding: 9px 20px; font-size: 13px; font-weight: bold;
+}}
+QPushButton:hover {{ background-color: #E6C27A; }}
+QPushButton:disabled {{ background-color: {COLORS['border']}; color: {COLORS['muted']}; }}
+QPushButton#quiet {{
+    background: transparent; color: {COLORS['teal']}; border: 1px solid {COLORS['border']};
+}}
+QPushButton#quiet:hover {{ border-color: {COLORS['teal']}; }}
+QPushButton#danger {{
+    background: transparent; color: {COLORS['red']}; border: 1px solid {COLORS['red']};
+}}
+QPushButton#danger:hover {{ background: {COLORS['red']}; color: {COLORS['bg']}; }}
+QPushButton#link {{
+    background: transparent; color: {COLORS['muted']}; padding: 4px 8px; font-weight: normal;
+}}
+QPushButton#link:hover {{ color: {COLORS['gold']}; }}
+QListWidget {{
+    background: {COLORS['bg2']}; border: 1px solid {COLORS['border']};
+    border-radius: 4px; outline: none;
+}}
+QListWidget::item {{ padding: 12px 10px; border-bottom: 1px solid {COLORS['border']}; }}
+QListWidget::item:selected {{ background: {COLORS['bg3']}; color: {COLORS['gold']}; }}
+QLineEdit, QComboBox {{
+    background: {COLORS['bg2']}; border: 1px solid {COLORS['border']};
+    border-radius: 4px; padding: 8px 10px; color: {COLORS['parch']};
+}}
+QComboBox QAbstractItemView {{ background: {COLORS['bg2']}; selection-background-color: {COLORS['bg3']}; }}
+QProgressBar {{
+    background: {COLORS['bg3']}; border: none; border-radius: 4px; height: 10px; text-align: center;
+}}
+QScrollArea {{ border: none; }}
+"""
+
+SELAH_PRINT = shutil.which('selah-print') or '/usr/local/bin/selah-print'
+
+DUPLEX_LABELS = {'None': 'Off (one side)', 'DuplexNoTumble': 'Both sides — long edge',
+                 'DuplexTumble': 'Both sides — short edge'}
+COLOR_LABELS = {'RGB': 'Color', 'CMYK': 'Color', 'Gray': 'Grayscale', 'KGray': 'Grayscale'}
+MARKER_NAMES = {'bk': 'Black', 'k': 'Black', 'c': 'Cyan', 'm': 'Magenta', 'y': 'Yellow'}
+MARKER_FALLBACK = {'bk': '#C9C9C9', 'k': '#C9C9C9', 'c': '#00C8FF', 'm': '#FF3DBE', 'y': '#FFE600'}
+
+
+class Worker(QThread):
+    """Runs `selah-print <args> --json` (or any command) off the UI thread."""
+    done = pyqtSignal(object, object)          # (result-dict, tag)
+
+    def __init__(self, args, tag=None, prefix=None, parent=None):
+        super().__init__(parent)
+        self.args, self.tag, self.prefix = args, tag, prefix or []
+
+    def run(self):
+        cmd = self.prefix + [SELAH_PRINT] + self.args + ['--json']
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            try:
+                res = json.loads(p.stdout)
+            except ValueError:
+                res = dict(ok=False, error=(p.stderr or p.stdout or 'No response').strip()[-300:])
+        except (OSError, subprocess.TimeoutExpired) as e:
+            res = dict(ok=False, error=str(e))
+        self.done.emit(res, self.tag)
+
+
+def label(text, color=None, size=None, bold=False, wrap=True):
+    l = QLabel(text)
+    l.setWordWrap(wrap)
+    css = ''
+    if color:
+        css += f'color: {color};'
+    if size:
+        css += f'font-size: {size}px;'
+    if bold:
+        css += 'font-weight: bold;'
+    if css:
+        l.setStyleSheet(css)
+    return l
+
+
+def card():
+    f = QFrame()
+    f.setStyleSheet(f"QFrame#card {{ background: {COLORS['bg2']}; border: 1px solid {COLORS['border']}; border-radius: 6px; }}")
+    f.setObjectName('card')
+    return f
+
+
+def clear_layout(layout):
+    while layout.count():
+        item = layout.takeAt(0)
+        if item.widget():
+            item.widget().deleteLater()
+        elif item.layout():
+            clear_layout(item.layout())
+
+
+class SupplyBar(QWidget):
+    def __init__(self, marker):
+        super().__init__()
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 2)
+        key = marker['name'].lower()
+        name = MARKER_NAMES.get(key, marker['name'])
+        color = marker.get('color') or MARKER_FALLBACK.get(key, COLORS['teal'])
+        if color.upper() == '#000000':
+            color = '#C9C9C9'                 # pure black is invisible on the dark UI
+        lvl = marker.get('level')
+        n = label(name, wrap=False)
+        n.setFixedWidth(80)
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setTextVisible(False)
+        bar.setValue(lvl if lvl is not None else 0)
+        bar.setStyleSheet(f"QProgressBar::chunk {{ background: {color}; border-radius: 4px; }}")
+        low = lvl is not None and lvl <= 10
+        pct = label('unknown' if lvl is None else f'{lvl}%' + ('  low' if low else ''),
+                    color=COLORS['red'] if low else COLORS['muted'], size=12, wrap=False)
+        pct.setFixedWidth(80)
+        lay.addWidget(n)
+        lay.addWidget(bar, 1)
+        lay.addWidget(pct)
+
+
+class PrinterDetail(QWidget):
+    """Right-hand panel for the selected printer."""
+    changed = pyqtSignal()                    # ask main window to refresh
+
+    def __init__(self, run_cmd):
+        super().__init__()
+        self.run_cmd = run_cmd                # run_cmd(args, tag, callback)
+        self.printer = None
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(0, 0, 0, 0)
+
+    def show_printer(self, p, options=None, jobs=None):
+        clear_layout(self.lay)
+        self.printer = p
+        if not p:
+            return
+        title = label(p.get('description') or p['name'], COLORS['gold'], 22, True)
+        self.lay.addWidget(title)
+        sub = label(f"{p.get('model') or 'Printer'}  ·  {p.get('host') or p.get('uri') or ''}",
+                    COLORS['muted'], 12)
+        self.lay.addWidget(sub)
+
+        text, color = self.status_of(p)
+        chip = label(('● ' + text) + ('   ·   Default printer' if p['default'] else ''), color, 14, True)
+        self.lay.addWidget(chip)
+        self.lay.addSpacing(8)
+
+        if p.get('markers'):
+            box = card()
+            bl = QVBoxLayout(box)
+            bl.addWidget(label('Supplies', COLORS['teal'], 12, True))
+            for m in p['markers']:
+                bl.addWidget(SupplyBar(m))
+            self.lay.addWidget(box)
+
+        row = QHBoxLayout()
+        b = QPushButton('Print test page')
+        b.clicked.connect(self.test_page)
+        row.addWidget(b)
+        b2 = QPushButton('Make default')
+        b2.setObjectName('quiet')
+        b2.setEnabled(not p['default'])
+        b2.clicked.connect(lambda: self.simple(['default', p['name']]))
+        row.addWidget(b2)
+        row.addStretch(1)
+        b3 = QPushButton('Remove')
+        b3.setObjectName('danger')
+        b3.clicked.connect(self.remove)
+        row.addWidget(b3)
+        self.lay.addLayout(row)
+
+        if options:
+            box = card()
+            bl = QVBoxLayout(box)
+            bl.addWidget(label('Defaults for this printer', COLORS['teal'], 12, True))
+            for o in options:
+                if o['key'] not in ('Duplex', 'ColorModel', 'PageSize') or len(o['choices']) < 2:
+                    continue
+                r = QHBoxLayout()
+                lbl = {'Duplex': 'Two-sided printing', 'ColorModel': 'Color', 'PageSize': 'Paper size'}[o['key']]
+                r.addWidget(label(lbl, wrap=False), 1)
+                cb = QComboBox()
+                seen = set()
+                for c in o['choices']:
+                    text = (DUPLEX_LABELS if o['key'] == 'Duplex' else COLOR_LABELS if o['key'] == 'ColorModel' else {}).get(c, c)
+                    if (o['key'] == 'ColorModel' and text in seen):
+                        continue
+                    seen.add(text)
+                    cb.addItem(text, c)
+                idx = cb.findData(o['default'])
+                if idx >= 0:
+                    cb.setCurrentIndex(idx)
+                cb.activated.connect(lambda _i, cb=cb, key=o['key']: self.set_option(key, cb.currentData()))
+                cb.setMinimumWidth(240)
+                r.addWidget(cb)
+                bl.addLayout(r)
+            self.lay.addWidget(box)
+
+        if jobs is not None:
+            box = card()
+            bl = QVBoxLayout(box)
+            head = QHBoxLayout()
+            head.addWidget(label(f'Print queue ({len(jobs)})', COLORS['teal'], 12, True), 1)
+            if jobs:
+                c = QPushButton('Cancel all')
+                c.setObjectName('link')
+                c.clicked.connect(lambda: self.simple(['cancel-all', p['name']]))
+                head.addWidget(c)
+            bl.addLayout(head)
+            if not jobs:
+                bl.addWidget(label('Nothing waiting to print.', COLORS['muted'], 13))
+            for j in jobs[:6]:
+                bl.addWidget(label(f"{j['id']}   {j['user']}   {j['size'] // 1024} KB", COLORS['parch'], 12))
+            self.lay.addWidget(box)
+        self.lay.addStretch(1)
+
+    @staticmethod
+    def status_of(p):
+        low = [m['name'] for m in p.get('markers', []) if m.get('level') is not None and m['level'] <= 10]
+        if p.get('reachable') is False:
+            return "Can't reach the printer — is it turned on and on this network?", COLORS['red']
+        if p['state'] == 'stopped':
+            return 'Paused', COLORS['gold']
+        if p['state'] == 'printing':
+            return 'Printing…', COLORS['gold']
+        if low:
+            return 'Ready — toner low (' + ', '.join(low) + ')', COLORS['gold']
+        return 'Ready', COLORS['green']
+
+    def simple(self, args):
+        self.run_cmd(args, 'action', lambda r: self.changed.emit())
+
+    def set_option(self, key, val):
+        self.run_cmd(['options', self.printer['name'], '--set', f'{key}={val}'], 'action',
+                     lambda r: None if r.get('ok') else QMessageBox.warning(self, 'Print Center', r.get('error', 'Failed')))
+
+    def test_page(self):
+        p = self.printer
+        ans = QMessageBox.question(
+            self, 'Print test page',
+            f"Send a test page to {p.get('description') or p['name']}?\n\n"
+            "It is a full-color page, so it uses some toner or ink.")
+        if ans == QMessageBox.StandardButton.Yes:
+            self.run_cmd(['test-page', p['name']], 'action',
+                         lambda r: (QMessageBox.information(self, 'Print Center', 'Test page sent.')
+                                    if r.get('ok') else QMessageBox.warning(self, 'Print Center', r.get('error', 'Failed')),
+                                    self.changed.emit()))
+
+    def remove(self):
+        p = self.printer
+        if QMessageBox.question(self, 'Remove printer',
+                                f"Remove {p.get('description') or p['name']} from this computer?\n"
+                                "(The printer itself is not affected; you can add it again any time.)"
+                                ) == QMessageBox.StandardButton.Yes:
+            self.simple(['remove', p['name']])
+
+
+class AddPage(QWidget):
+    added = pyqtSignal()
+    back = pyqtSignal()
+
+    def __init__(self, run_cmd):
+        super().__init__()
+        self.run_cmd = run_cmd
+        lay = QVBoxLayout(self)
+        top = QHBoxLayout()
+        bk = QPushButton('← Back')
+        bk.setObjectName('quiet')
+        bk.clicked.connect(self.back.emit)
+        top.addWidget(bk)
+        top.addStretch(1)
+        lay.addLayout(top)
+        lay.addWidget(label('Add a printer', COLORS['gold'], 22, True))
+        lay.addWidget(label('SelahOS looks for printers on your network. Most printers made since about 2015 '
+                            'work with no driver at all.', COLORS['muted'], 13))
+        row = QHBoxLayout()
+        self.scan_btn = QPushButton('Scan network again')
+        self.scan_btn.clicked.connect(self.scan)
+        row.addWidget(self.scan_btn)
+        self.scan_status = label('', COLORS['muted'], 13)
+        row.addWidget(self.scan_status, 1)
+        lay.addLayout(row)
+        self.results = QVBoxLayout()
+        holder = QWidget()
+        holder.setLayout(self.results)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setWidget(holder)
+        lay.addWidget(sc, 1)
+        lay.addWidget(label('Can\'t see it? Enter its address', COLORS['teal'], 12, True))
+        man = QHBoxLayout()
+        self.addr = QLineEdit()
+        self.addr.setPlaceholderText('IP address or name, e.g. 192.168.1.50 or printer.local')
+        self.addr.returnPressed.connect(self.add_manual)
+        man.addWidget(self.addr, 1)
+        b = QPushButton('Add')
+        b.clicked.connect(self.add_manual)
+        man.addWidget(b)
+        lay.addLayout(man)
+
+    def scan(self):
+        self.scan_btn.setEnabled(False)
+        self.scan_status.setText('Looking for printers…')
+        clear_layout(self.results)
+        self.run_cmd(['discover', '--timeout', '5'], 'scan', self.scan_done)
+
+    def scan_done(self, r):
+        self.scan_btn.setEnabled(True)
+        clear_layout(self.results)
+        found = r.get('printers', []) if r.get('ok') else []
+        if not r.get('ok'):
+            self.scan_status.setText(r.get('error', 'Scan failed.'))
+            return
+        self.scan_status.setText(f'Found {len(found)} printer(s).' if found else
+                                 'No printers found. Check that the printer is on and connected to the same network.')
+        for p in found:
+            box = card()
+            hl = QHBoxLayout(box)
+            info = QVBoxLayout()
+            info.addWidget(label(p['model'] or p['name'], COLORS['parch'], 15, True))
+            kind = 'No driver needed (AirPrint / IPP Everywhere)' if p['driver'] == 'driverless' else 'Will look for a driver'
+            feats = ', '.join(x for x in ('color' if p['color'] else 'black & white',
+                                          'two-sided' if p['duplex'] else '') if x)
+            info.addWidget(label(f"{p['ip']}  ·  {feats}  ·  {kind}", COLORS['muted'], 12))
+            hl.addLayout(info, 1)
+            if p['already_added']:
+                hl.addWidget(label('✓ Added', COLORS['green'], 13, True, wrap=False))
+            else:
+                b = QPushButton('Add')
+                b.clicked.connect(lambda _c, ip=p['ip'], b=b: self.add(ip, b))
+                hl.addWidget(b)
+            self.results.addWidget(box)
+        self.results.addStretch(1)
+
+    def add(self, target, btn=None):
+        if btn:
+            btn.setEnabled(False)
+            btn.setText('Setting up…')
+        self.run_cmd(['add', target], 'add', lambda r: self.add_done(r, btn))
+
+    def add_manual(self):
+        t = self.addr.text().strip()
+        if t:
+            self.add(t)
+
+    def add_done(self, r, btn):
+        if r.get('ok'):
+            self.addr.clear()
+            self.added.emit()
+            return
+        if btn:
+            btn.setEnabled(True)
+            btn.setText('Add')
+        msg = r.get('hint') or r.get('error', 'Could not add the printer.')
+        QMessageBox.warning(self, 'Print Center', msg)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('SelahOS Print Center')
+        self.resize(940, 640)
+        self.workers = set()
+        self.printers = []
+        self.selected = None
+
+        root = QWidget()
+        self.setCentralWidget(root)
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(20, 16, 20, 10)
+
+        head = QHBoxLayout()
+        head.addWidget(label('Print Center', COLORS['gold'], 26, True, wrap=False))
+        head.addStretch(1)
+        adv = QPushButton('KDE printer settings')
+        adv.setObjectName('link')
+        adv.clicked.connect(self.open_kde)
+        head.addWidget(adv)
+        rep = QPushButton('Repair printing')
+        rep.setObjectName('link')
+        rep.clicked.connect(self.repair)
+        head.addWidget(rep)
+        outer.addLayout(head)
+
+        self.stack = QStackedWidget()
+        outer.addWidget(self.stack, 1)
+
+        # page 0: printer list + detail
+        main = QWidget()
+        ml = QHBoxLayout(main)
+        ml.setContentsMargins(0, 8, 0, 0)
+        left = QVBoxLayout()
+        self.listw = QListWidget()
+        self.listw.setFixedWidth(270)
+        self.listw.currentRowChanged.connect(self.on_select)
+        left.addWidget(self.listw, 1)
+        add = QPushButton('+  Add printer')
+        add.clicked.connect(self.open_add)
+        left.addWidget(add)
+        ml.addLayout(left)
+        self.detail = PrinterDetail(self.run_cmd)
+        self.detail.changed.connect(self.refresh)
+        self.empty = QWidget()
+        el = QVBoxLayout(self.empty)
+        el.addStretch(1)
+        el.addWidget(label('No printers yet', COLORS['gold'], 22, True), 0, Qt.AlignmentFlag.AlignHCenter)
+        self.empty_text = label('Click “Add printer” — SelahOS will look for printers on your network.',
+                                COLORS['muted'], 14)
+        self.empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        el.addWidget(self.empty_text)
+        el.addStretch(1)
+        self.right = QStackedWidget()
+        self.right.addWidget(self.detail)
+        self.right.addWidget(self.empty)
+        ml.addWidget(self.right, 1)
+        self.stack.addWidget(main)
+
+        # page 1: add
+        self.add_page = AddPage(self.run_cmd)
+        self.add_page.back.connect(lambda: self.stack.setCurrentIndex(0))
+        self.add_page.added.connect(self.after_add)
+        self.stack.addWidget(self.add_page)
+
+        self.status = label('', COLORS['muted'], 12)
+        outer.addWidget(self.status)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.refresh)
+        self.timer.start(10000)
+        self.first = True
+        self.refresh()
+
+    # -- plumbing ----------------------------------------------------
+    def run_cmd(self, args, tag, callback, prefix=None):
+        w = Worker(args, tag, prefix, self)
+        self.workers.add(w)
+        w.done.connect(lambda res, _t, w=w: (self.workers.discard(w), callback(res)))
+        w.start()
+
+    # -- list --------------------------------------------------------
+    def refresh(self):
+        if self.stack.currentIndex() != 0 or any(w.tag == 'list' and w.isRunning() for w in self.workers):
+            return
+        self.run_cmd(['list'], 'list', self.on_list)
+
+    def on_list(self, r):
+        if not r.get('ok'):
+            self.printers = []
+            self.status.setText('⚠ ' + r.get('error', 'Cannot reach the print service.'))
+            self.status.setStyleSheet(f"color: {COLORS['red']}; font-size: 12px;")
+            self.right.setCurrentWidget(self.empty)
+            self.empty_text.setText('The print service is not running.\nUse “Repair printing” at the top right.')
+            return
+        self.status.setText('Print service running.  Printers you add here appear in every app’s Print dialog.')
+        self.status.setStyleSheet(f"color: {COLORS['muted']}; font-size: 12px;")
+        self.printers = r['printers']
+        keep = self.selected
+        self.listw.blockSignals(True)
+        self.listw.clear()
+        for p in self.printers:
+            text, color = PrinterDetail.status_of(p)
+            short = text.split(' — ')[0] + ('  ·  toner low' if 'toner low' in text else '')
+            it = QListWidgetItem(f"{p.get('description') or p['name']}\n{short}"
+                                 + ('  ·  default' if p['default'] else ''))
+            it.setData(Qt.ItemDataRole.UserRole, p['name'])
+            self.listw.addItem(it)
+        self.listw.blockSignals(False)
+        if not self.printers:
+            self.right.setCurrentWidget(self.empty)
+            self.empty_text.setText('Click “Add printer” — SelahOS will look for printers on your network.')
+            if self.first:
+                self.first = False
+                self.open_add()
+            return
+        self.first = False
+        idx = next((i for i, p in enumerate(self.printers) if p['name'] == keep), 0)
+        self.listw.setCurrentRow(idx)
+        self.on_select(idx)
+
+    def on_select(self, row):
+        if row < 0 or row >= len(self.printers):
+            return
+        p = self.printers[row]
+        self.selected = p['name']
+        self.right.setCurrentWidget(self.detail)
+        self.detail.show_printer(p)              # show immediately, fill options/jobs when they arrive
+        name = p['name']
+        self.run_cmd(['options', name], 'opts', lambda o, name=name, p=p: self.fill(name, p, o, None))
+
+    def fill(self, name, p, opts, jobs):
+        if self.selected != name:
+            return
+        options = opts.get('options') if opts.get('ok') else None
+        self.run_cmd(['jobs', name], 'jobs', lambda j, name=name: self._final(name, p, options, j))
+
+    def _final(self, name, p, options, j):
+        if self.selected == name:
+            self.detail.show_printer(p, options, j.get('jobs', []) if j.get('ok') else None)
+
+    # -- actions -----------------------------------------------------
+    def open_add(self):
+        self.stack.setCurrentIndex(1)
+        self.add_page.scan()
+
+    def after_add(self):
+        self.stack.setCurrentIndex(0)
+        self.selected = None
+        self.refresh()
+
+    def open_kde(self):
+        for cmd in (['kcmshell6', 'kcm_printer_manager'], ['systemsettings', 'kcm_printer_manager']):
+            if shutil.which(cmd[0]):
+                subprocess.Popen(cmd)
+                return
+        QMessageBox.information(self, 'Print Center', 'KDE printer settings are not installed.')
+
+    def repair(self):
+        if QMessageBox.question(
+                self, 'Repair printing',
+                'This re-applies the SelahOS printing setup (network printer discovery, print service) '
+                'and installs anything missing. It needs your administrator password.'
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.status.setText('Repairing… (waiting for the administrator password)')
+
+        def done(r):
+            bad = [s for s in r.get('steps', []) if not s['ok']]
+            if r.get('ok'):
+                QMessageBox.information(self, 'Print Center', 'Printing setup repaired.')
+            else:
+                QMessageBox.warning(self, 'Print Center', r.get('error') or
+                                    'Some steps failed:\n' + '\n'.join(f"{s['step']}: {s['detail']}" for s in bad))
+            self.refresh()
+
+        self.run_cmd(['configure', '--now', '--install-missing'], 'repair', done, prefix=['pkexec'])
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyleSheet(STYLESHEET)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()
+__SELAH_PAYLOAD_PAYLOAD_SELAHOS_PRINT_CENTER__
+}
+
+payload_desktop_entry() {
+cat <<'__SELAH_PAYLOAD_PAYLOAD_DESKTOP_ENTRY__'
+[Desktop Entry]
+Type=Application
+Name=SelahOS Print Center
+GenericName=Printers
+Comment=Find, add and manage printers — no drivers needed for most network printers
+Exec=selahos-print-center
+Icon=printer
+Terminal=false
+StartupNotify=true
+Categories=System;Settings;HardwareSettings;Qt;
+Keywords=printer;print;printing;cups;scanner;toner;ink;airprint;brother;hp;epson;canon;
+__SELAH_PAYLOAD_PAYLOAD_DESKTOP_ENTRY__
+}
+
+payload_print_txt() {
+cat <<'__SELAH_PAYLOAD_PAYLOAD_PRINT_TXT__'
+# Printing package set for selah-setup (installer): CUPS + network printer
+# discovery + the KDE printer settings, so SelahOS can find a printer on the
+# network and every app's Print dialog can use it. Single source of truth,
+# shared with tools/build-offline-repo.sh (same contract as base.txt).
+#
+# 2026-09-21 (Print Center): modern network printers (AirPrint / IPP
+# Everywhere) need no vendor driver -- CUPS builds the queue from the
+# printer's own IPP attributes. Set up + configured by `selah-print`
+# (see airootfs/usr/local/bin/selah-print).
+cups
+cups-filters
+cups-browsed
+
+# gs renders PDF/PS pages to the raster the printer wants (gstoraster).
+# Was live-ISO-only before (packages.x86_64) -- same "live-only gap" class
+# as the items in base.txt.
+ghostscript
+
+# mDNS/DNS-SD: how printers announce themselves. nss-mdns lets .local
+# printer names resolve (selah-print configure patches nsswitch.conf).
+avahi
+nss-mdns
+
+# KDE "Printers" settings page + tray applet with job notifications.
+print-manager
+
+# Drivers for older/non-driverless printers (Epson, Canon, many others).
+gutenprint
+
+# USB printers that speak IPP-over-USB then work driverless too.
+ipp-usb
+
+# NOT here: brlaser (open driver for older Brother mono lasers) lives only
+# in chaotic-aur, which the installer's pacstrap config deliberately strips
+# (see selah-setup _pacstrap_pacman_conf). Add it via packaging/ + local-repo
+# if older Brother models turn up -- the HL-L3230CDW-class needs no driver.
+__SELAH_PAYLOAD_PAYLOAD_PRINT_TXT__
+}
+
+
+main "$@"

@@ -3,7 +3,7 @@
 
 The installer embeds selah-print, selahos-print-center, the .desktop entry and
 print.txt verbatim (quoted heredocs), so the download can never drift from what
-the ISO ships. Usage: build-installer.py [VERSION]   (default: today, YYYY-MM-DD)
+the ISO ships. Usage: build-installer.py [VERSION]   (default: today, YYYY-MM-DD; add -r2, -r3... for a re-issue that must not share a filename with an earlier one)
 """
 import datetime
 import os
@@ -21,8 +21,8 @@ PAYLOADS = [
 ]
 
 version = sys.argv[1] if len(sys.argv) > 1 else datetime.date.today().isoformat()
-if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', version):
-    sys.exit('VERSION must look like 2026-09-21')
+if not re.fullmatch(r'\d{4}-\d{2}-\d{2}(-r\d+)?', version):
+    sys.exit('VERSION must look like 2026-09-21, or 2026-09-21-r2 for a corrected re-issue')
 
 blocks = []
 for func, rel in PAYLOADS:
