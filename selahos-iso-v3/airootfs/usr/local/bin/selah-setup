@@ -190,40 +190,114 @@ def detect_live_usb():
     return None
 
 
+# Devices that are never an install target but that lsblk still reports as
+# plain disks (zram) or as tiny ones (a QEMU floppy is "4K"): loop, optical,
+# zram swap, floppy, ramdisks, nbd.
+_NOT_INSTALL_TARGETS = ('/dev/loop', '/dev/sr', '/dev/zram', '/dev/fd', '/dev/ram', '/dev/nbd')
+_MIN_LISTED_BYTES = 1 << 30      # anything under 1 GiB is not shown at all
+
+
+def _fmt_size(nbytes):
+    if nbytes >= 1 << 40:
+        return f'{nbytes / (1 << 40):.1f}T'
+    return f'{nbytes / (1 << 30):.0f}G'
+
+
 def get_disks():
-    """Return list of dicts for all block devices suitable for installation."""
+    """Return list of dicts for all block devices suitable for installation.
+
+    B-44 (2026-09-21): this used to parse lsblk's human-readable sizes and only
+    understood the G and M units, so a floppy ("4K") looked like a normal,
+    non-small drive and was even preselected, and zram0 (TYPE=disk) was listed
+    too. Sizes now come in exact bytes from lsblk's KEY="value" output, and
+    devices that can never be an install target are hidden rather than offered.
+    Real but too-small drives stay visible, greyed out with a reason.
+    """
     live = detect_live_usb()
-    result = run(['lsblk', '-dpno', 'NAME,SIZE,MODEL,TYPE,TRAN'])
+    result = run(['lsblk', '-dpnb', '-P', '-o', 'NAME,SIZE,MODEL,TYPE,TRAN,RO'])
     disks = []
     for line in result.stdout.strip().splitlines():
-        parts = line.split(None, 4)
-        if len(parts) < 2:
+        f = dict(re.findall(r'(\w+)="([^"]*)"', line))
+        name = f.get('NAME', '')
+        if not name or f.get('TYPE') != 'disk' or f.get('RO') == '1':
             continue
-        name, size = parts[0], parts[1]
-        model = parts[2] if len(parts) > 2 else ''
-        tran  = parts[4].strip() if len(parts) > 4 else ''
-        if name.startswith('/dev/loop') or name.startswith('/dev/sr'):
+        if name.startswith(_NOT_INSTALL_TARGETS):
             continue
-        # Skip small devices (< 8 GiB)
-        if 'M' in size and not size.endswith('G'):
-            continue
-        is_live = (live and name == live)
-        is_small = False
         try:
-            num = float(re.sub(r'[^0-9.]', '', size))
-            unit = re.sub(r'[0-9.]', '', size)
-            if unit in ('G', 'GB') and num < MIN_INSTALL_GB:
-                is_small = True
-            if unit in ('M', 'MB'):
-                is_small = True
-        except Exception:
-            pass
-        disk_type = 'NVMe SSD' if 'nvme' in name else ('USB Drive' if tran == 'usb' else 'SSD/HDD')
+            nbytes = int(f.get('SIZE', '0'))
+        except ValueError:
+            continue
+        if nbytes < _MIN_LISTED_BYTES:
+            continue
+        tran = f.get('TRAN', '').strip()
         disks.append({
-            'name': name, 'size': size, 'model': model.strip(),
-            'type': disk_type, 'is_live': is_live, 'is_small': is_small,
+            'name': name, 'size': _fmt_size(nbytes), 'model': f.get('MODEL', '').strip(),
+            'type': 'NVMe SSD' if 'nvme' in name else ('USB Drive' if tran == 'usb' else 'SSD/HDD'),
+            'is_live': bool(live and name == live),
+            'is_small': nbytes < MIN_INSTALL_GB * (1 << 30),
         })
     return disks
+
+
+def hostname_error(host):
+    """B-46: '' if `host` is a valid hostname, else a message for the user.
+
+    The installer used to accept anything non-empty, e.g. 'SelahOS_VM2'; an
+    underscore is not a legal hostname character and breaks DHCP/mDNS names.
+    """
+    if len(host) > 63:
+        return 'Hostname must be 63 characters or fewer.'
+    if not re.fullmatch(r'[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?', host):
+        return ('Hostname may only use letters, numbers and hyphens, '
+                'and cannot start or end with a hyphen.')
+    return ''
+
+
+# ── Welcome-screen system check (B-04) ────────────────────────
+MIN_RAM_GIB = 3.5     # a "4 GB" machine reports about 3.8 GiB of MemTotal
+
+
+def get_boot_mode():
+    return 'UEFI' if os.path.isdir('/sys/firmware/efi') else 'BIOS'
+
+
+def get_ram_gib():
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    return int(line.split()[1]) / (1024 * 1024)
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
+def get_network_state():
+    """'online', 'offline' or 'unknown'. Never raises, never blocks for long."""
+    try:
+        state = run(['nmcli', '-t', '-f', 'STATE', 'general'], timeout=3).stdout.strip().lower()
+        if state.startswith('connected'):
+            return 'online'
+        if state:
+            return 'offline'
+    except Exception:
+        pass
+    return 'unknown'
+
+
+def system_check(boot_mode, ram_gib, net):
+    """(facts_line, [warning, ...]) for the welcome screen. Pure, so it is testable."""
+    net_txt = {'online': 'connected', 'offline': 'not connected',
+               'unknown': 'unknown'}.get(net, 'unknown')
+    facts = f'Firmware: {boot_mode}   ·   Memory: {ram_gib:.1f} GB   ·   Network: {net_txt}'
+    warns = []
+    if ram_gib and ram_gib < MIN_RAM_GIB:
+        warns.append('Less than 4 GB of memory: the installer may run out of memory.')
+    if boot_mode == 'BIOS':
+        warns.append('Legacy BIOS boot: the drive will get a BIOS Boot Partition.')
+    if net == 'offline':
+        warns.append('No network: fine, SelahOS installs from the packages on this USB.')
+    return facts, warns
 
 
 def get_free_space_gb(disk):
@@ -406,6 +480,24 @@ class WelcomeScreen(QWidget):
         btn.clicked.connect(self.proceed)
         layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
+        # B-04: what this machine looks like to the installer, and anything
+        # worth knowing before starting. Informational only; never blocks.
+        layout.addSpacing(20)
+        facts, warns = system_check(get_boot_mode(), get_ram_gib(), get_network_state())
+        check = QLabel(facts)
+        check.setFont(QFont('Inter', 11))
+        check.setStyleSheet(f"color: {C['text2']}; background: transparent;")
+        check.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        check.setWordWrap(True)
+        layout.addWidget(check)
+        for w in warns:
+            wl = QLabel('⚠  ' + w)
+            wl.setFont(QFont('Inter', 10))
+            wl.setStyleSheet(f"color: {C['gold']}; background: transparent;")
+            wl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            wl.setWordWrap(True)
+            layout.addWidget(wl)
+
         layout.addStretch()
 
         verse = muted_label(
@@ -545,8 +637,15 @@ class DriveScreen(QWidget):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 item.setForeground(QColor(C['muted']))
             self.disk_list.addItem(item)
-        if self.disk_list.count():
-            self.disk_list.setCurrentRow(0)
+        # B-44: erasing a disk is not something to preselect for the user. The
+        # first row used to be selected unconditionally (on the 09-20 test VM
+        # that was a 4K floppy, with Continue already enabled). Only preselect
+        # when there is exactly ONE possible target; otherwise make them choose.
+        usable = [i for i, d in enumerate(self.disks) if not d['is_live'] and not d['is_small']]
+        if len(usable) == 1:
+            self.disk_list.setCurrentRow(usable[0])
+        if not usable:
+            self.disk_warn.setText(f'No installable drive found (at least {MIN_INSTALL_GB} GB needed).')
 
     def _selected_disk(self):
         items = self.disk_list.selectedItems()
@@ -764,6 +863,10 @@ class UserScreen(QWidget):
             return
         if not host:
             self.error_label.setText('Hostname is required.')
+            return
+        host_err = hostname_error(host)
+        if host_err:
+            self.error_label.setText(host_err)
             return
 
         self.error_label.setText('')
