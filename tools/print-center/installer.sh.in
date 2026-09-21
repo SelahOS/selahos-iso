@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# ============================================================
+# selahos-print-center-install-@@VERSION@@
+#
+# Adds the SelahOS Print Center to a SelahOS system you have ALREADY
+# installed (Beta 2.0.1 or later) -- no reinstall needed.
+#
+#   bash selahos-print-center-install-@@VERSION@@.sh            install / repair
+#   bash selahos-print-center-install-@@VERSION@@.sh --check    report only, changes nothing
+#   bash selahos-print-center-install-@@VERSION@@.sh --upgrade  full system update first (see below)
+#   bash selahos-print-center-install-@@VERSION@@.sh --extract DIR   just unpack the files to read them
+#
+# Run it as your normal user; it asks for your password (sudo) once.
+# Safe to run twice.
+#
+# What it does:
+#   1. Installs the printing packages: @@PACKAGES_TEXT@@
+#      (using a temporary copy of pacman.conf without [selahos-offline] and
+#      [chaotic-aur], which break package installs on installed systems;
+#      your real /etc/pacman.conf is never touched).
+#   2. Installs two programs and a menu entry:
+#        /usr/local/bin/selah-print               (the backend, also usable in a terminal)
+#        /usr/local/bin/selahos-print-center      (the window)
+#        /usr/share/applications/selahos-print-center.desktop
+#   3. Sets up network printer discovery: printer .local names resolve
+#      (mdns_minimal in /etc/nsswitch.conf), cups-browsed auto-adds AirPrint /
+#      IPP Everywhere printers, and cups + avahi + cups-browsed are enabled.
+#      Every system file it changes is first copied to /var/backups/selah-print/.
+#
+# Most printers made since about 2015 (AirPrint / "Mopria" / IPP Everywhere)
+# need NO vendor driver. Older ones may need one; the Print Center tells you.
+#
+# --upgrade: Arch does not support installing new packages against an
+# out-of-date package database. If step 1 says your database is out of date,
+# re-run with --upgrade. It runs a full `pacman -Syu` first -- that updates
+# everything on the system (it may rebuild DKMS drivers and want a reboot).
+#
+# Copyright (C) 2026 Selah Technologies LLC
+# ============================================================
+set -uo pipefail
+
+VERSION="@@VERSION@@"
+DEST="${SELAH_PRINT_DESTDIR:-}"       # test hook: install under this root, no sudo/pacman/systemd
+
+say()  { printf '%s\n' "$*"; }
+ok()   { say "  [ok]      $*"; }
+warn() { say "  [warning] $*"; }
+bad()  { say "  [FAILED]  $*"; FAILED=$((FAILED+1)); }
+FAILED=0
+
+extract_payload() {
+    local d="$1"
+    mkdir -p "$d"
+    payload_selah_print               > "$d/selah-print"
+    payload_selahos_print_center      > "$d/selahos-print-center"
+    payload_desktop_entry             > "$d/selahos-print-center.desktop"
+    payload_print_txt                 > "$d/print.txt"
+}
+
+main() {
+CHECK=0; UPGRADE=0; EXTRACT_DIR=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check)    CHECK=1 ;;
+        --upgrade)  UPGRADE=1 ;;
+        --extract)  EXTRACT_DIR="${2:-}"; [ -n "$EXTRACT_DIR" ] || { echo "--extract needs a folder"; exit 1; }; shift ;;
+        -h|--help)  awk 'NR>=3 && /^# ====/ {exit} NR>=3 {sub(/^# ?/,""); print}' "$0"; exit 0 ;;
+        *) echo "Unknown option: $1  (try --help)"; exit 1 ;;
+    esac
+    shift
+done
+
+
+if [ -n "$EXTRACT_DIR" ]; then
+    extract_payload "$EXTRACT_DIR"
+    say "Unpacked to $EXTRACT_DIR:"; ls -1 "$EXTRACT_DIR"
+    exit 0
+fi
+
+TARGET_USER="${SUDO_USER:-${USER:-$(id -un)}}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"; TARGET_HOME="${TARGET_HOME:-$HOME}"
+BIN="$DEST/usr/local/bin"; APPS="$DEST/usr/share/applications"; LISTS="$DEST/usr/local/share/selahos-install-packages"
+
+# ---- --check: report only ----------------------------------------------
+if [ "$CHECK" -eq 1 ]; then
+    say "SelahOS Print Center installer $VERSION — check only (nothing will be changed)"; say
+    for f in "$BIN/selah-print" "$BIN/selahos-print-center" "$APPS/selahos-print-center.desktop"; do
+        [ -e "$f" ] && ok "present: ${f#"$DEST"}" || say "  [missing] ${f#"$DEST"}"
+    done
+    if [ -f "$BIN/selah-print" ]; then
+        say; say "Printing setup status:"
+        python3 "$BIN/selah-print" status --root "${DEST:-/}" | sed 's/^/  /'
+    else
+        say; say "Not installed yet. Run without --check to install."
+    fi
+    exit 0
+fi
+
+# ---- preflight -----------------------------------------------------------
+say "SelahOS Print Center installer $VERSION"; say
+if [ -z "$DEST" ]; then
+    command -v pacman >/dev/null || { say "This needs a SelahOS / Arch-based system (pacman not found)."; exit 1; }
+    command -v python3 >/dev/null || { say "python3 is required."; exit 1; }
+fi
+SUDO=""
+if [ -z "$DEST" ] && [ "$(id -u)" -ne 0 ]; then
+    command -v sudo >/dev/null || { say "sudo is required (or run this as root)."; exit 1; }
+    SUDO="sudo"
+    say "You'll be asked for your password once."
+    sudo -v || { say "Could not get administrator rights."; exit 1; }
+fi
+
+LOG="$TARGET_HOME/selahos-print-center-install.log"
+{
+say "Log: $LOG"; say
+
+# ---- 1. files ----------------------------------------------------------------
+say "1/3  Installing the Print Center files"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+extract_payload "$TMP"
+if python3 -m py_compile "$TMP/selah-print" "$TMP/selahos-print-center" 2>/dev/null; then
+    ok "files unpacked and verified"
+else
+    bad "unpacked files are damaged — download the script again"; exit 1
+fi
+$SUDO install -Dm755 "$TMP/selah-print"                       "$BIN/selah-print"                                && ok "${BIN#"$DEST"}/selah-print"               || bad "selah-print"
+$SUDO install -Dm755 "$TMP/selahos-print-center"              "$BIN/selahos-print-center"                       && ok "${BIN#"$DEST"}/selahos-print-center"      || bad "selahos-print-center"
+$SUDO install -Dm644 "$TMP/selahos-print-center.desktop"      "$APPS/selahos-print-center.desktop"              && ok "menu entry"                                || bad "menu entry"
+$SUDO install -Dm644 "$TMP/print.txt"                         "$LISTS/print.txt"                                && ok "package list"                              || bad "package list"
+
+# ---- 2. packages + network discovery + services -------------------------------
+say; say "2/3  Installing printing packages and setting up network printer discovery"
+if [ -n "$DEST" ]; then
+    python3 "$BIN/selah-print" configure --root "$DEST" || FAILED=$((FAILED+1))
+else
+    UPG=(); [ "$UPGRADE" -eq 1 ] && UPG=(--upgrade)
+    $SUDO python3 /usr/local/bin/selah-print configure --install-missing --now "${UPG[@]}" || FAILED=$((FAILED+1))
+fi
+
+# ---- 3. verify --------------------------------------------------------------------
+say; say "3/3  Checking the result"
+python3 "$BIN/selah-print" status --root "${DEST:-/}" | sed 's/^/  /'
+
+if [ -z "$DEST" ]; then
+    case " $(id -nG "$TARGET_USER" 2>/dev/null) " in
+        *" wheel "*|*" sys "*) ok "$TARGET_USER can manage printers (wheel/sys group)" ;;
+        *) warn "$TARGET_USER is not in the wheel or sys group, so adding printers will be refused." ;;
+    esac
+    # refresh the KDE menu so the new entry shows without logging out
+    for k in kbuildsycoca6 kbuildsycoca5; do
+        if command -v "$k" >/dev/null; then
+            if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != root ]; then sudo -u "$TARGET_USER" "$k" --noincremental >/dev/null 2>&1
+            else "$k" --noincremental >/dev/null 2>&1; fi
+            break
+        fi
+    done
+    say; say "Looking for printers on your network..."
+    if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != root ]; then sudo -u "$TARGET_USER" python3 /usr/local/bin/selah-print discover
+    else python3 /usr/local/bin/selah-print discover; fi
+fi
+
+say
+if [ "$FAILED" -eq 0 ]; then
+    say "Done. Open the Print Center from the application menu (search \"Print Center\"),"
+    say "or run:  selahos-print-center"
+    say "Printers you add there show up in every app's Print dialog."
+else
+    say "Finished with $FAILED problem(s) — see [FAILED]/FAIL lines above and the log: $LOG"
+    say "If it mentions an out-of-date package database, run this script again with --upgrade."
+fi
+} 2>&1 | tee -a "$LOG"
+exit "${PIPESTATUS[0]}"
+}
+
+# ============================ payload ============================
+# The files below are the exact program sources this script installs.
+# Read them here, or unpack them without installing:  --extract DIR
+
+@@PAYLOAD@@
+
+main "$@"
